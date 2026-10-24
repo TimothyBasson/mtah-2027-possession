@@ -28,8 +28,8 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
   homography. A ring off a player, or a player with no ring, is the tracking being wrong there.
   A dashed ring has no speed, so its position is probably held or interpolated.
 - **Label box on the video:** true possession, your estimate, and whether the tracking has the ball.
-- **Top-down pitch:** the same frame from above, as in viz/replay. The shaded area is the part of the
-  pitch the camera can see.
+- **Under the video, side by side:** the same frame as a top-down pitch (as in viz/replay; the
+  shaded area is the part of the pitch the camera can see), the read-outs, and the legend.
 - **Two strips under the video**, both click-to-seek:
   - *Whole match*: possession for the entire video, for finding your way around.
   - *Two minutes around the playhead*: the same at a scale where single possessions are visible.
