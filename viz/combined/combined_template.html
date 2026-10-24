@@ -25,7 +25,8 @@ video{width:100%;height:auto;display:block}
 .hud .dot{width:11px;height:11px;border-radius:50%;flex:none}
 .hud b{font-weight:600}
 canvas.full{width:100%;height:auto;display:block;border-radius:8px}
-#strip{margin-top:10px;cursor:pointer;border-radius:4px}
+.striplabel{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:10px}
+canvas.strip{width:100%;height:auto;display:block;cursor:pointer;border-radius:4px;margin-top:2px}
 .keys{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-top:6px}
 .keys span.k{display:inline-block;width:14px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:4px}
 .controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px}
@@ -58,7 +59,10 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
         <div class="row" id="hudBall"><span class="k">Ball</span><b>–</b></div>
       </div>
     </div>
-    <canvas id="strip" class="full" width="1200" height="40" aria-label="Possession timeline; click to seek"></canvas>
+    <div class="striplabel"><span>Whole match</span><span id="wholeRange"></span></div>
+    <canvas id="whole" class="strip" width="1200" height="30" aria-label="Possession over the whole match; click to seek"></canvas>
+    <div class="striplabel"><span>Two minutes around the playhead</span><span id="zoomRange"></span></div>
+    <canvas id="zoom" class="strip" width="1200" height="40" aria-label="Possession around the playhead; click to seek"></canvas>
     <div class="keys" id="keys"></div>
     <div class="controls">
       <button id="play">Play</button>
@@ -73,10 +77,10 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
   <div class="card">
     <canvas id="pitch" class="full" width="1050" height="680"></canvas>
     <div class="stats">
-      <div class="stat"><div class="l">Video time</div><div class="v" id="vtime">–</div></div>
+      <div class="stat"><div class="l" id="lvtime">Video time</div><div class="v" id="vtime">–</div></div>
       <div class="stat"><div class="l">Game clock</div><div class="v" id="gtime">–</div></div>
-      <div class="stat"><div class="l" id="lhome">Home slots</div><div class="v" id="nhome">0</div></div>
-      <div class="stat"><div class="l" id="laway">Away slots</div><div class="v" id="naway">0</div></div>
+      <div class="stat"><div class="l" id="lhome">Home slots</div><div class="v" id="nhome">–</div></div>
+      <div class="stat"><div class="l" id="laway">Away slots</div><div class="v" id="naway">–</div></div>
       <div class="stat wide"><div class="l">True possession</div><div class="v" id="truth">–</div></div>
       <div class="stat wide" id="predbox"><div class="l" id="predlabel">Your estimate</div><div class="v"><span id="pred">–</span><span class="agree" id="agree"></span></div></div>
     </div>
@@ -86,7 +90,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
 </main>
 <script>
 const D = __COMBINED_DATA__;
-const N = D.slots.length, FPS = D.clock.fps;
+const NF = D.n_frames, FPS = D.clock.fps, CH = D.chunk, NCH = Math.ceil(NF / CH), ZOOM = 60 * FPS;
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const side = s => D.teams[s];
@@ -94,15 +98,16 @@ const name = { H: D.names.H, A: D.names.A };
 const LABEL = l => ({ H: [name.H, '--home'], A: [name.A, '--away'], D: ['Dead ball', '--dead'] }[l] || ['–', '--muted']);
 // Fixed, bright colours for drawing on the video, which is the same in light and dark mode.
 const ON_VIDEO = { H: '#4EA3F5', A: '#FF8A50', ball: '#FFE04A' };
+const HAS_TRUTH = !!D.truth && /[HAD]/.test(D.truth);
 
 function mmss(sec, decimals) {
   const q = Math.pow(10, decimals); sec = Math.floor(sec * q + 1e-6) / q;
   const m = Math.floor(sec / 60), s = sec - m * 60;
   return m + ':' + s.toFixed(decimals).padStart(decimals ? 3 + decimals : 2, '0');
 }
-function videoTime(v) {
+function videoTime(v, decimals = 1) {
   const s = v / FPS;
-  return s >= 3600 ? Math.floor(s / 3600) + ':' + mmss(s % 3600, 1).padStart(6, '0') : mmss(s, 1);
+  return s >= 3600 ? Math.floor(s / 3600) + ':' + mmss(s % 3600, decimals).padStart(decimals ? 4 + decimals : 5, '0') : mmss(s, decimals);
 }
 function gameClock(v) {
   const k = D.clock.kickoff, e = D.clock.end;
@@ -115,15 +120,14 @@ function gameClock(v) {
 }
 
 $('title').textContent = name.H + ' vs ' + name.A + ' — match viewer';
-$('sub').textContent = 'Tactical video ' + videoTime(D.first) + ' – ' + videoTime(D.last) +
-  ' (frames ' + D.first.toLocaleString() + '–' + D.last.toLocaleString() + '). Rings on the video are where the tracking puts each slot; ' +
-  'a ring off a player, or a player with no ring, is the tracking being wrong. ← → step one frame, space plays.' +
-  (D.pred ? ' Estimate from ' + D.pred_name + '.' : '');
+$('sub').textContent = 'The whole tactical video. Rings on the video are where the tracking puts each slot; ' +
+  'a ring off a player, or a player with no ring, is the tracking being wrong. ← → step one frame, shift for a second, space plays.' +
+  (D.pred ? ' Estimate from ' + D.pred_name + '.' : '') + (HAS_TRUTH ? ' Ground truth only covers video 7:27.4 – 12:27.4.' : '');
 $('lhome').textContent = name.H + ' slots';
 $('laway').textContent = name.A + ' slots';
 if (!D.pred) { $('predbox').style.display = 'none'; $('hudPred').style.display = 'none'; }
 else $('predlabel').textContent = 'Your estimate (' + D.pred_name + ')';
-if (!D.truth) $('hudTruth').style.display = 'none';
+if (!HAS_TRUTH) $('hudTruth').style.display = 'none';
 $('legend').innerHTML = [
   ['background:var(--home)', name.H + ' slot (number = slot ID, not a player)'],
   ['background:var(--away)', name.A + ' slot'],
@@ -132,14 +136,45 @@ $('legend').innerHTML = [
 ].map(([st, t]) => '<div><span class="sw" style="' + st + '"></span>' + t + '</div>').join('');
 $('keys').innerHTML = [['--home', name.H], ['--away', name.A], ['--dead', 'Dead ball'], ['--none', 'No label']]
   .map(([c, t]) => '<span><span class="k" style="background:var(' + c + ')"></span>' + t + '</span>').join('') +
-  '<span>Top row: truth' + (D.pred ? ' · bottom row: your estimate' : '') + ' · click to jump</span>';
+  '<span>' + (HAS_TRUTH ? 'Truth on top where it exists · ' : '') + (D.pred ? 'your estimate below · ' : '') + 'click to jump</span>';
+$('wholeRange').textContent = '0:00 – ' + videoTime(NF - 1, 0);
+
+// ---- tracking, loaded a minute at a time --------------------------------------------------
+// Chunks are scripts rather than fetched JSON so the page also works opened straight from disk.
+const chunks = new Map(), pending = new Set();
+let cur = -1;
+window.MATCH_CHUNK = (k, c) => {
+  chunks.set(k, c); pending.delete(k);
+  for (const old of chunks.keys()) if (Math.abs(old - Math.floor(cur / CH)) > 3) chunks.delete(old);
+  if (Math.floor(cur / CH) === k) render(cur);
+};
+function want(k) {
+  if (k < 0 || k >= NCH || chunks.has(k) || pending.has(k)) return;
+  pending.add(k);
+  const s = document.createElement('script');
+  s.src = D.chunks + '/chunk_' + String(k).padStart(4, '0') + '.js';
+  s.onload = () => s.remove();
+  s.onerror = () => {
+    pending.delete(k); s.remove();
+    showErr("Couldn't load tracking chunk " + s.src + '. Regenerate the page with make_combined.py, which writes the chunks.');
+  };
+  document.head.appendChild(s);
+}
+function frameData(v) {
+  const k = Math.floor(v / CH), j = v - k * CH;
+  want(k);
+  if (j > CH - 10 * FPS) want(k + 1);                        // load the next minute before we need it
+  if (j < 5 * FPS) want(k - 1);
+  const c = chunks.get(k);
+  return c ? { slots: c.slots[j], ball: c.ball[j], H: c.H[j] } : null;
+}
 
 // ---- video on the clock -------------------------------------------------------------------
 const video = $('video');
 video.src = D.video;
-const timeOf = i => (D.first + i + 0.5) / FPS;              // middle of the frame, never on an edge
-const indexOf = t => Math.floor(t * FPS + 1e-3) - D.first;
-function seekIndex(i) { video.currentTime = timeOf(Math.max(0, Math.min(N - 1, i))); }
+const timeOf = v => (v + 0.5) / FPS;                         // middle of the frame, never on an edge
+const frameOf = t => Math.max(0, Math.min(NF - 1, Math.floor(t * FPS + 1e-3)));
+function seekFrame(v) { video.currentTime = timeOf(Math.max(0, Math.min(NF - 1, v))); }
 
 // ---- drawing on the video -----------------------------------------------------------------
 const ov = $('over'), oc = ov.getContext('2d');
@@ -147,10 +182,10 @@ function project(h, x, y) {
   const d = h[6] * x + h[7] * y + h[8];
   return [(h[0] * x + h[1] * y + h[2]) / d, (h[3] * x + h[4] * y + h[5]) / d];
 }
-function drawVideo(i) {
+function drawVideo(f) {
   oc.clearRect(0, 0, ov.width, ov.height);
-  const h = D.H[i];
-  if (!$('showTrack').checked || !h) return;
+  if (!f || !f.H || !$('showTrack').checked) return;
+  const h = f.H;
   oc.font = '600 22px -apple-system,sans-serif'; oc.textAlign = 'center';
   const ring = (x, y, colour, dashed, rx) => {
     const [u, v] = project(h, x, y), r = Math.max(6, Math.abs(project(h, x + 0.008, y)[0] - u)) * (rx || 1);
@@ -161,20 +196,19 @@ function drawVideo(i) {
     oc.setLineDash([]);
     return [u, v, r];
   };
-  for (const [s, x, y, est] of D.slots[i]) {
+  for (const [s, x, y, est] of f.slots) {
     const [u, v, r] = ring(x / 1000, y / 1000, ON_VIDEO[side(s)], est);
     if ($('showIds').checked) {
       oc.lineWidth = 4; oc.strokeStyle = 'rgba(0,0,0,.7)'; oc.strokeText(s, u, v + r * 0.45 + 22);
       oc.fillStyle = ON_VIDEO[side(s)]; oc.fillText(s, u, v + r * 0.45 + 22);
     }
   }
-  const b = D.ball[i];
-  if (b) ring(b[0] / 1000, b[1] / 1000, ON_VIDEO.ball, false, 0.6);
+  if (f.ball) ring(f.ball[0] / 1000, f.ball[1] / 1000, ON_VIDEO.ball, false, 0.6);
 }
 
 // ---- top-down pitch ---------------------------------------------------------------------
 const pc = $('pitch'), cx = pc.getContext('2d'), W = pc.width, PH = pc.height;
-function drawPitch(i) {
+function drawPitch(f) {
   cx.fillStyle = css('--grass'); cx.fillRect(0, 0, W, PH);
   cx.strokeStyle = css('--line'); cx.lineWidth = 2;
   const sx = m => m / 105 * W, sy = m => m / 68 * PH;
@@ -185,21 +219,24 @@ function drawPitch(i) {
     const box = (w, h) => cx.strokeRect(right ? W - sx(w) : 0, (PH - sy(h)) / 2, sx(w), sy(h));
     box(16.5, 40.32); box(5.5, 18.32);
   }
+  if (!f) {
+    cx.fillStyle = css('--muted'); cx.font = '600 28px -apple-system,sans-serif'; cx.textAlign = 'center';
+    cx.fillText('Loading tracking…', W / 2, PH / 2 - 60); return;
+  }
   // Shade the part of the pitch the camera can see: cells whose centre projects inside the frame.
   // A grid test rather than the frame's corners, because the top of the frame is above the horizon.
-  const h = D.H[i];
-  if (h) {
+  if (f.H) {
     const GX = 42, GY = 27;
     cx.fillStyle = css('--text'); cx.globalAlpha = 0.07;
     for (let gx = 0; gx < GX; gx++) for (let gy = 0; gy < GY; gy++) {
-      const [u, v] = project(h, (gx + 0.5) / GX, (gy + 0.5) / GY);
+      const [u, v] = project(f.H, (gx + 0.5) / GX, (gy + 0.5) / GY);
       if (u >= 0 && u <= 1920 && v >= 0 && v <= 1080) cx.fillRect(gx / GX * W, gy / GY * PH, W / GX + 0.5, PH / GY + 0.5);
     }
     cx.globalAlpha = 1;
   }
   const C = { H: css('--home'), A: css('--away') }, CL = { H: css('--homel'), A: css('--awayl') };
   cx.font = '600 12px -apple-system,sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
-  for (const [s, x, y, est] of D.slots[i]) {
+  for (const [s, x, y, est] of f.slots) {
     const u = x / 1000 * W, v = y / 1000 * PH, team = side(s);
     cx.beginPath(); cx.arc(u, v, 13, 0, Math.PI * 2);
     if (est) { cx.fillStyle = css('--grass'); cx.fill(); cx.strokeStyle = C[team]; cx.lineWidth = 2.5; cx.stroke(); }
@@ -207,30 +244,47 @@ function drawPitch(i) {
     cx.fillStyle = est ? C[team] : CL[team]; cx.fillText(s, u, v + 0.5);
   }
   cx.textBaseline = 'alphabetic';
-  const b = D.ball[i];
-  if (b) {
+  if (f.ball) {
     cx.fillStyle = css('--ball'); cx.strokeStyle = css('--grass'); cx.lineWidth = 2;
-    cx.beginPath(); cx.arc(b[0] / 1000 * W, b[1] / 1000 * PH, 6, 0, Math.PI * 2); cx.fill(); cx.stroke();
+    cx.beginPath(); cx.arc(f.ball[0] / 1000 * W, f.ball[1] / 1000 * PH, 6, 0, Math.PI * 2); cx.fill(); cx.stroke();
   }
 }
 
-// ---- possession strip -------------------------------------------------------------------
-const strip = $('strip'), sc = strip.getContext('2d');
-const rows = [D.truth, D.pred].filter(Boolean);
-const stripBase = document.createElement('canvas');
-function paintStripBase() {
-  const SW = strip.width, SH = strip.height, rh = (SH - (rows.length - 1) * 4) / rows.length;
-  stripBase.width = SW; stripBase.height = SH;
-  const bc = stripBase.getContext('2d'), colour = l => css({ H: '--home', A: '--away', D: '--dead' }[l] || '--none');
+// ---- possession strips ------------------------------------------------------------------
+// Draw labels[a..b) across a canvas: truth on top where the range has any, the estimate below.
+function paintLabels(ctx, SW, SH, a, b) {
+  const colour = l => css({ H: '--home', A: '--away', D: '--dead' }[l] || '--none');
+  const truthHere = HAS_TRUTH && /[HAD]/.test(D.truth.slice(Math.max(0, a), Math.min(NF, b)));
+  const rows = [truthHere && D.truth, D.pred].filter(Boolean);
+  if (!rows.length) rows.push(D.truth || '');
+  const rh = (SH - (rows.length - 1) * 4) / rows.length;
   rows.forEach((labels, r) => {
-    for (let x = 0; x < SW; x++) { bc.fillStyle = colour(labels[Math.floor(x / SW * N)]); bc.fillRect(x, r * (rh + 4), 1, rh); }
+    for (let x = 0; x < SW; x++) {
+      const v = Math.floor(a + (x + 0.5) / SW * (b - a));
+      ctx.fillStyle = colour(v >= 0 && v < NF ? labels[v] : 'X'); ctx.fillRect(x, r * (rh + 4), 1, rh);
+    }
   });
 }
-function drawStrip(i) {
-  sc.clearRect(0, 0, strip.width, strip.height); sc.drawImage(stripBase, 0, 0);
-  sc.fillStyle = css('--text'); sc.fillRect(i / Math.max(1, N - 1) * strip.width - 1, 0, 2, strip.height);
+const whole = $('whole'), wc = whole.getContext('2d'), wholeBase = document.createElement('canvas');
+wholeBase.width = whole.width; wholeBase.height = whole.height;
+paintLabels(wholeBase.getContext('2d'), whole.width, whole.height, 0, NF);
+function drawWhole(v) {
+  wc.clearRect(0, 0, whole.width, whole.height); wc.drawImage(wholeBase, 0, 0);
+  wc.fillStyle = css('--text'); wc.fillRect(v / (NF - 1) * whole.width - 1, 0, 2, whole.height);
 }
-strip.onclick = e => { const r = strip.getBoundingClientRect(); seekIndex(Math.round((e.clientX - r.left) / r.width * (N - 1))); };
+const zoom = $('zoom'), zc = zoom.getContext('2d');
+let zoomFrom = -1;
+function drawZoom(v) {
+  const a = v - ZOOM, b = v + ZOOM;
+  zc.clearRect(0, 0, zoom.width, zoom.height);
+  paintLabels(zc, zoom.width, zoom.height, a, b);
+  zc.fillStyle = css('--text'); zc.fillRect(zoom.width / 2 - 1, 0, 2, zoom.height);
+  zoomFrom = a;
+  $('zoomRange').textContent = videoTime(Math.max(0, a), 0) + ' – ' + videoTime(Math.min(NF - 1, b), 0);
+}
+const clickFrac = (e, el) => { const r = el.getBoundingClientRect(); return (e.clientX - r.left) / r.width; };
+whole.onclick = e => seekFrame(Math.round(clickFrac(e, whole) * (NF - 1)));
+zoom.onclick = e => seekFrame(Math.round(zoomFrom + clickFrac(e, zoom) * 2 * ZOOM));
 
 // ---- read-outs --------------------------------------------------------------------------
 function hudRow(id, label, none) {
@@ -238,20 +292,21 @@ function hudRow(id, label, none) {
   const row = $(id); row.querySelector('b').textContent = text;
   row.querySelector('.dot').style.background = label === 'X' ? 'transparent' : css(colour);
 }
-function readouts(i) {
-  const v = D.first + i;
-  let nh = 0, na = 0; for (const [s] of D.slots[i]) side(s) === 'H' ? nh++ : na++;
-  $('nhome').textContent = nh; $('naway').textContent = na;
-  $('vtime').textContent = videoTime(v) + ' · f' + v;
+function readouts(v, f) {
+  let nh = 0, na = 0;
+  if (f) for (const [s] of f.slots) side(s) === 'H' ? nh++ : na++;
+  $('nhome').textContent = f ? nh : '–'; $('naway').textContent = f ? na : '–';
+  $('vtime').textContent = videoTime(v);
+  $('lvtime').textContent = 'Video time · frame ' + v;
   $('gtime').textContent = gameClock(v);
-  $('hudBall').querySelector('b').textContent = D.ball[i] ? 'tracked' : 'missing from tracking';
-  const t = D.truth ? D.truth[i] : 'X';
+  $('hudBall').querySelector('b').textContent = !f ? 'loading…' : f.ball ? 'tracked' : 'missing from tracking';
+  const t = D.truth ? D.truth[v] : 'X';
   const tl = LABEL(t);
   $('truth').textContent = t === 'X' ? 'No ground truth here' : tl[0];
   $('truth').style.color = t === 'X' ? css('--muted') : css(tl[1]);
-  if (D.truth) hudRow('hudTruth', t, 'No ground truth');
+  if (HAS_TRUTH) hudRow('hudTruth', t, 'No ground truth');
   if (D.pred) {
-    const p = D.pred[i], pl = LABEL(p);
+    const p = D.pred[v], pl = LABEL(p);
     $('pred').textContent = p === 'X' ? 'No answer (X)' : pl[0];
     $('pred').style.color = p === 'X' ? css('--muted') : css(pl[1]);
     hudRow('hudPred', p, 'No answer (X)');
@@ -263,16 +318,14 @@ function readouts(i) {
 }
 
 // ---- one clock: the video ---------------------------------------------------------------
-let shown = -1;
+function render(v) {
+  const f = frameData(v);
+  drawVideo(f); drawPitch(f); readouts(v, f); drawWhole(v); drawZoom(v);
+}
 function update(mediaTime, force) {
-  let i = indexOf(mediaTime);
-  if (i < 0 || i > N - 1) {                                  // keep playback inside the clip
-    if (!video.seeking) { if (i > N - 1) video.pause(); seekIndex(i < 0 ? 0 : N - 1); }
-    return;
-  }
-  if (i === shown && !force) return;
-  shown = i;
-  drawVideo(i); drawPitch(i); drawStrip(i); readouts(i);
+  const v = frameOf(mediaTime);
+  if (v === cur && !force) return;
+  cur = v; render(v);
 }
 if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
   const onFrame = (now, meta) => { update(meta.mediaTime); video.requestVideoFrameCallback(onFrame); };
@@ -281,30 +334,32 @@ if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
   const loop = () => { update(video.currentTime); requestAnimationFrame(loop); };
   requestAnimationFrame(loop);
 }
+function showErr(msg) { const e = $('err'); e.hidden = false; e.textContent = msg; }
+const startFrame = (() => { const m = /^#f(\d+)$/.exec(location.hash); return m ? Math.min(NF - 1, +m[1]) : 11185; })();
 video.addEventListener('seeked', () => update(video.currentTime, true));
-video.addEventListener('loadedmetadata', () => seekIndex(0));
+video.addEventListener('loadedmetadata', () => seekFrame(startFrame));
 video.addEventListener('play', () => $('play').textContent = 'Pause');
 video.addEventListener('pause', () => $('play').textContent = 'Play');
-video.addEventListener('error', () => {
-  const e = $('err'); e.hidden = false;
-  e.textContent = "Couldn't load the video at " + D.video + ' (relative to this page). ' +
-    'Keep the page where make_combined.py wrote it, or regenerate it with --out. The tracking views still work: use the strip and the frame buttons.';
-});
+video.addEventListener('error', () => showErr("Couldn't load the video at " + D.video + ' (relative to this page). ' +
+  'Keep the page where make_combined.py wrote it, or regenerate it with --out. The tracking views still work: use the strips and the frame buttons.'));
 
-const step = d => { video.pause(); seekIndex((shown < 0 ? 0 : shown) + d); if (video.error) update(timeOf((shown < 0 ? 0 : shown) + d), true); };
+const step = d => {
+  video.pause();
+  const v = Math.max(0, Math.min(NF - 1, (cur < 0 ? startFrame : cur) + d));
+  seekFrame(v); if (video.error) update(timeOf(v), true);
+};
 $('play').onclick = () => video.paused ? video.play() : video.pause();
 $('back').onclick = () => step(-1);
 $('fwd').onclick = () => step(1);
 $('speed').onchange = () => video.playbackRate = parseFloat($('speed').value);
-$('showTrack').onchange = $('showIds').onchange = () => update(timeOf(shown), true);
+$('showTrack').onchange = $('showIds').onchange = () => render(cur);
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Space') { e.preventDefault(); $('play').click(); }
   else if (e.code === 'ArrowLeft') { e.preventDefault(); step(e.shiftKey ? -25 : -1); }
   else if (e.code === 'ArrowRight') { e.preventDefault(); step(e.shiftKey ? 25 : 1); }
 });
-paintStripBase();
-update(timeOf(0), true);
+update(timeOf(startFrame), true);
 </script>
 </body>
 </html>
