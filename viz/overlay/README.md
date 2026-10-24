@@ -4,10 +4,10 @@ Plays the tactical video with a small label box over it, showing the possession 
 gives for the frame on screen and the true possession where the ground truth covers it. Nothing is
 re-encoded: the page plays `data/tactical/BAR-ATH_tactical.mp4` straight from disk.
 
-Needs the match data in `data/` (see [DATA.md](../DATA.md)). Standard library only, no `pip install`.
+Needs the match data in `data/` (see [DATA.md](../../DATA.md)). Standard library only, no `pip install`.
 
 ```bash
-python overlay/make_overlay.py --pred evaluation/results/baseline_smooth50.csv --open
+python viz/overlay/make_overlay.py --pred evaluation/results/baseline_smooth50.csv --open
 ```
 
 | option | |
