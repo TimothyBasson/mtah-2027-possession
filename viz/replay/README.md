@@ -4,11 +4,11 @@ Turns any stretch of the match into an animated, top-down replay of the tracking
 HTML page you open in a browser. Use it to watch the tracking alongside the tactical video and to
 see where a submission agrees or disagrees with the truth.
 
-Needs the match data in `data/` (see [DATA.md](../DATA.md)). Standard library only, no `pip install`.
+Needs the match data in `data/` (see [DATA.md](../../DATA.md)). Standard library only, no `pip install`.
 
 ```bash
-python replay/make_replay.py --start 7:33.4 --duration 40 --open
-python replay/make_replay.py --start 7:33.4 --pred evaluation/results/baseline_smooth50.csv --open
+python viz/replay/make_replay.py --start 7:33.4 --duration 40 --open
+python viz/replay/make_replay.py --start 7:33.4 --pred evaluation/results/baseline_smooth50.csv --open
 ```
 
 | option | |
@@ -24,7 +24,7 @@ python replay/make_replay.py --start 7:33.4 --pred evaluation/results/baseline_s
 ## What the page shows
 
 - **Pitch:** every tracking slot as a circle, numbered with its slot ID, in team colours, with the
-  ball as a small dot. Slot IDs are tracks, not players: see [DATA.md](../DATA.md).
+  ball as a small dot. Slot IDs are tracks, not players: see [DATA.md](../../DATA.md).
   - **Hollow circle:** the slot has a position but no speed. Those positions are usually held or
     interpolated rather than observed. Watch the far keeper.
   - **Green ring / dashed red ring:** a slot just appeared / was just lost.

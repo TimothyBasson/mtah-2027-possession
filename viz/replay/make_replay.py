@@ -1,8 +1,8 @@
 """Build an animated replay of the tracking for any stretch of the match, as one HTML page.
 
-    python replay/make_replay.py --start 7:33.4 --duration 40
-    python replay/make_replay.py --start 7:33.4 --pred evaluation/results/baseline_smooth50.csv
-    python replay/make_replay.py --start 1:20:05 --duration 60 --open
+    python viz/replay/make_replay.py --start 7:33.4 --duration 40
+    python viz/replay/make_replay.py --start 7:33.4 --pred evaluation/results/baseline_smooth50.csv
+    python viz/replay/make_replay.py --start 1:20:05 --duration 60 --open
 
 The page draws every tracked slot on a top-down pitch, with the ball, and plays it back. Alongside
 it shows the tactical video time (seek your video player there to watch along), the game clock,
@@ -45,7 +45,7 @@ import webbrowser
 import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
 from games import (GAME, GAMES, DATA_DIR, anchor_video_frame,  # noqa: E402
                    half_video_blocks, require, source_frames)

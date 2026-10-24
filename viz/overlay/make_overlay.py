@@ -1,7 +1,7 @@
 """Play the tactical video with your estimated possession and the ground truth drawn over it.
 
-    python overlay/make_overlay.py --pred evaluation/results/baseline_smooth50.csv --open
-    python overlay/make_overlay.py --open                      # ground truth only
+    python viz/overlay/make_overlay.py --pred evaluation/results/baseline_smooth50.csv --open
+    python viz/overlay/make_overlay.py --open                      # ground truth only
 
 Writes one HTML page that plays data/tactical/BAR-ATH_tactical.mp4 straight from disk -- nothing is
 re-encoded -- and shows, for whatever frame is on screen, the label in your submission and the
@@ -22,7 +22,7 @@ import webbrowser
 import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
 from games import GAME, GAMES, DATA_DIR, require, source_frames  # noqa: E402
 
