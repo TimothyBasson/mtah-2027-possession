@@ -40,6 +40,7 @@ OUT_DIR = os.path.join(DATA_DIR, "viz")
 DEFAULT_START = "7:27.4"         # start of the public ground truth
 DEFAULT_DURATION = 60.0
 MAX_DURATION = 10 * 60           # every frame is kept, ~4 MB of page at the cap
+SERVE_URL = "http://localhost:8765"   # where .claude/launch.json's "viz" config serves data/
 
 
 def read_homography(path, first, last):
@@ -134,5 +135,8 @@ if __name__ == '__main__':
     print("wrote {}".format(out))
     print("video frames {}..{}  ({} frames)".format(payload["first"], payload["last"],
                                                      len(payload["slots"])))
+    if os.path.dirname(os.path.abspath(out)) == os.path.abspath(OUT_DIR):
+        print("served (the 'viz' preview in .claude/launch.json): {}/viz/{}".format(
+            SERVE_URL, os.path.basename(out)))
     if args.open:
         webbrowser.open("file://" + os.path.abspath(out))

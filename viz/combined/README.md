@@ -37,15 +37,20 @@ playback inside the clip.
 
 ## Opening it
 
-Pages open straight from disk in a normal browser. The page finds the video by a path relative to
-itself, so keep it where it was written or regenerate it with `--out`. If your viewer blocks local
-files, serve `data/` with a server that supports range requests (for seeking the video):
+**From disk:** `--open`, or double-click the page. It finds the video by a path relative to itself,
+so keep it where it was written or regenerate it with `--out`.
+
+**On localhost**, for the Claude app's built-in browser or any viewer that blocks local files:
+`.claude/launch.json` has a `viz` config that serves `data/` at `http://localhost:8765`, with the
+range requests the video needs for seeking. In the Claude app, ask Claude to start the `viz`
+preview. Anywhere else, run the same command yourself (needs Node):
 
 ```bash
-npx http-server data -p 8765
+npx --yes http-server@14.1.1 data -p 8765 -c-1
 ```
 
-then open `http://localhost:8765/viz/<page>.html`.
+The generator prints the page's URL, `http://localhost:8765/viz/<page>.html`. The overlay and replay
+pages are written to the same folder, so they open from the same server.
 
 ## The output contains match data
 
