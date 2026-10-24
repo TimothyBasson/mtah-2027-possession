@@ -68,7 +68,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
       <button id="play">Play</button>
       <button id="back" title="Previous frame (←)">◀ frame</button>
       <button id="fwd" title="Next frame (→)">frame ▶</button>
-      <select id="speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+      <select id="speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option><option value="6">6×</option></select>
       <label class="tg"><input type="checkbox" id="showTrack" checked> Tracking on video</label>
       <label class="tg"><input type="checkbox" id="showIds" checked> Slot numbers</label>
     </div>
@@ -163,7 +163,7 @@ function want(k) {
 function frameData(v) {
   const k = Math.floor(v / CH), j = v - k * CH;
   want(k);
-  if (j > CH - 10 * FPS) want(k + 1);                        // load the next minute before we need it
+  if (j > CH - 30 * FPS) want(k + 1);                        // load the next minute early: 5 s ahead even at 6×
   if (j < 5 * FPS) want(k - 1);
   const c = chunks.get(k);
   return c ? { slots: c.slots[j], ball: c.ball[j], H: c.H[j] } : null;
