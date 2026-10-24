@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracking replay</title>
+<style>
+:root{--bg:#f7f6f2;--card:#fff;--text:#1f1e1c;--muted:#6b6a65;--border:rgba(0,0,0,.12);--grass:#e7f0e1;--line:#9fb894;--home:#185FA5;--homel:#E6F1FB;--away:#D85A30;--awayl:#FAECE7;--dead:#888780;--none:#d3d1c7;--ball:#1f1e1c;--new:#1D9E75;--lost:#A32D2D;--ok:#3B6D11;--bad:#A32D2D}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b1a;--card:#252524;--text:#ecebe6;--muted:#a3a29c;--border:rgba(255,255,255,.14);--grass:#1f2a1c;--line:#4d6645;--home:#85B7EB;--homel:#0C447C;--away:#F0997B;--awayl:#712B13;--dead:#888780;--none:#444441;--ball:#f4f3ee;--new:#5DCAA5;--lost:#F09595;--ok:#97C459;--bad:#F09595}}
+:root[data-theme="dark"]{--bg:#1b1b1a;--card:#252524;--text:#ecebe6;--muted:#a3a29c;--border:rgba(255,255,255,.14);--grass:#1f2a1c;--line:#4d6645;--home:#85B7EB;--homel:#0C447C;--away:#F0997B;--awayl:#712B13;--dead:#888780;--none:#444441;--ball:#f4f3ee;--new:#5DCAA5;--lost:#F09595;--ok:#97C459;--bad:#F09595}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1180px;margin:0 auto;padding:24px 16px}
+h1{font-size:20px;font-weight:600;margin:0 0 4px}
+p.sub{margin:0 0 18px;color:var(--muted);font-size:14px}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px}
+@media (max-width:900px){.wrap{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;min-width:0}
+canvas{width:100%;height:auto;display:block;border-radius:8px}
+#strip{margin-top:10px;cursor:pointer;border-radius:4px}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:12px}
+button,select{font:inherit;font-size:14px;color:var(--text);background:transparent;border:1px solid var(--border);border-radius:8px;padding:6px 12px;cursor:pointer}
+button:hover{background:var(--bg)}
+input[type=range]{flex:1;min-width:140px;accent-color:var(--home)}
+label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4px}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.stat{background:var(--bg);border-radius:8px;padding:8px 10px;min-width:0}
+.stat .l{font-size:12px;color:var(--muted)}
+.stat .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat.wide{grid-column:1/-1}
+.agree{font-size:12px;font-weight:600;margin-left:6px}
+.legend{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted);margin-bottom:12px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:-1px;margin-right:6px}
+h2{font-size:14px;font-weight:600;margin:4px 0 6px}
+#log{list-style:none;margin:0;padding:0;font-size:13px;max-height:300px;overflow:auto}
+#log li{padding:5px 0;border-top:1px solid var(--border)}
+#log .t{color:var(--muted);font-variant-numeric:tabular-nums;margin-right:6px}
+.tag{font-size:11px;padding:1px 6px;border-radius:6px;margin-right:4px}
+.tag.new{color:var(--new);border:1px solid var(--new)}
+.tag.lost{color:var(--lost);border:1px solid var(--lost)}
+.keys{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-top:6px}
+.keys span.k{display:inline-block;width:14px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:4px}
+</style>
+</head>
+<body>
+<main>
+<h1 id="title">Tracking replay</h1>
+<p class="sub" id="sub"></p>
+<div class="wrap">
+  <div class="card">
+    <canvas id="pitch" width="1050" height="680"></canvas>
+    <canvas id="strip" width="1050" height="40" aria-label="Possession timeline; click to seek"></canvas>
+    <div class="keys" id="keys"></div>
+    <div class="controls">
+      <button id="play">Pause</button>
+      <button id="restart">Restart</button>
+      <select id="speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+      <input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="Timeline">
+      <label class="tg"><input type="checkbox" id="trails" checked> Trails</label>
+    </div>
+  </div>
+  <div class="card">
+    <div class="stats">
+      <div class="stat"><div class="l">Video time</div><div class="v" id="vtime">–</div></div>
+      <div class="stat"><div class="l">Game clock</div><div class="v" id="gtime">–</div></div>
+      <div class="stat"><div class="l" id="lhome">Home slots</div><div class="v" id="nhome">0</div></div>
+      <div class="stat"><div class="l" id="laway">Away slots</div><div class="v" id="naway">0</div></div>
+      <div class="stat wide"><div class="l">Ball</div><div class="v" id="ball">–</div></div>
+      <div class="stat wide"><div class="l">True possession</div><div class="v" id="truth">–</div></div>
+      <div class="stat wide" id="predbox"><div class="l" id="predlabel">Your estimate</div><div class="v"><span id="pred">–</span><span class="agree" id="agree"></span></div></div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <h2>Slot events</h2>
+    <ul id="log"></ul>
+  </div>
+</div>
+</main>
+<script>
+const D = __REPLAY_DATA__;
+const F = D.frames, N = F.length, STEP = D.step, FPS = D.clock.fps, DT = STEP / FPS;
+const HAS_PRED = D.pred_name !== null;
+const side = s => D.teams[s];
+const name = { H: D.names.H, A: D.names.A };
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const $ = id => document.getElementById(id);
+
+function mmss(sec, decimals) {
+  const q = Math.pow(10, decimals); sec = Math.floor(sec * q + 1e-6) / q;
+  const m = Math.floor(sec / 60), s = sec - m * 60;
+  return m + ':' + s.toFixed(decimals).padStart(decimals ? 3 + decimals : 2, '0');
+}
+function videoTime(v) {
+  const s = v / FPS;
+  return s >= 3600 ? Math.floor(s / 3600) + ':' + mmss(s % 3600, 1).padStart(6, '0') : mmss(s, 1);
+}
+function gameClock(v) {
+  const k = D.clock.kickoff, e = D.clock.end;
+  const fmt = (el, base) => {
+    const t = base + el, cap = base + 45 * 60;
+    return t <= cap ? mmss(t, 0) : (cap / 60) + '+' + mmss(t - cap, 0);
+  };
+  if (v < k[0]) return 'Pre-match';
+  if (v <= e[0]) return fmt((v - k[0]) / FPS, 0);
+  if (v < k[1]) return 'Half-time';
+  if (v <= e[1]) return fmt((v - k[1]) / FPS, 45 * 60);
+  return 'Full time';
+}
+const LABEL = l => ({ H: [name.H, '--home'], A: [name.A, '--away'], D: ['Dead ball', '--dead'] }[l] || ['–', '--muted']);
+
+$('title').textContent = name.H + ' vs ' + name.A + ' — tracking replay';
+$('sub').textContent = 'Tactical video ' + videoTime(D.first) + ' – ' + videoTime(D.last) +
+  ' (video frames ' + D.first.toLocaleString() + '–' + D.last.toLocaleString() + '). ' +
+  'Seek your video player to the video time to watch along. Each circle is a tracking slot, not a player.' +
+  (HAS_PRED ? ' Estimate from ' + D.pred_name + '.' : '');
+$('lhome').textContent = name.H + ' slots';
+$('laway').textContent = name.A + ' slots';
+if (!HAS_PRED) $('predbox').style.display = 'none';
+else $('predlabel').textContent = 'Your estimate (' + D.pred_name + ')';
+$('legend').innerHTML = [
+  ['background:var(--home)', name.H + ' slot (number = slot ID)'],
+  ['background:var(--away)', name.A + ' slot'],
+  ['border:2px solid var(--muted)', 'Hollow: no speed reported, position probably estimated'],
+  ['border:2px solid var(--new)', 'Slot just appeared'],
+  ['border:2px dashed var(--lost)', 'Slot just lost (last position)'],
+  ['border-top:2px dashed var(--muted);border-radius:0;height:0;width:16px', 'Lost slot → nearby new slot: probably the same player'],
+].map(([st, t]) => '<div><span class="sw" style="' + st + '"></span>' + t + '</div>').join('');
+$('keys').innerHTML = [['--home', name.H], ['--away', name.A], ['--dead', 'Dead ball'], ['--none', 'No label']]
+  .map(([c, t]) => '<span><span class="k" style="background:var(' + c + ')"></span>' + t + '</span>').join('') +
+  '<span>Top row: truth' + (HAS_PRED ? ' · bottom row: your estimate' : '') + ' · click to jump</span>';
+
+const cv = $('pitch'), cx = cv.getContext('2d'), W = cv.width, H = cv.height;
+const px = x => x / 1000 * W, py = y => y / 1000 * H;
+const pos = F.map(fr => { const m = new Map(); fr[1].forEach(([s, x, y, n]) => m.set(s, [x, y, n])); return m; });
+
+const events = [];
+for (let i = 1; i < N; i++) {
+  for (const [s, p] of pos[i]) if (!pos[i - 1].has(s)) events.push({ i, s, kind: 'new', p });
+  for (const [s, p] of pos[i - 1]) if (!pos[i].has(s)) events.push({ i, s, kind: 'lost', p });
+}
+const links = [];
+for (const lost of events.filter(e => e.kind === 'lost')) {
+  let best = null;
+  for (const nw of events) {
+    if (nw.kind !== 'new' || side(nw.s) !== side(lost.s)) continue;
+    const gap = nw.i - lost.i;
+    if (gap < 0 || gap * DT > 2.5) continue;
+    const d = Math.hypot((nw.p[0] - lost.p[0]) * 0.105, (nw.p[1] - lost.p[1]) * 0.068);
+    if (d < 6 && (!best || d < best.d)) best = { nw, d };
+  }
+  if (best) { links.push({ lost, nw: best.nw }); best.nw.from = lost; }
+}
+
+const log = $('log');
+let shownUpTo = -1;
+function renderLog(a) {
+  if (a < shownUpTo) { log.innerHTML = ''; shownUpTo = -1; }
+  for (const e of events) {
+    if (e.i <= shownUpTo || e.i > a) continue;
+    const who = 'Slot ' + e.s + ' (' + name[side(e.s)] + ')';
+    let msg = e.kind === 'new' ? '<span class="tag new">new</span>' + who + ' appeared'
+                               : '<span class="tag lost">lost</span>' + who + ' disappeared';
+    if (e.kind === 'new' && e.from) msg += e.from.s === e.s ? ' — same slot came back' : ' — likely the same player as slot ' + e.from.s;
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="t">' + videoTime(F[e.i][0]) + '</span>' + msg;
+    log.prepend(li);
+  }
+  shownUpTo = Math.max(shownUpTo, a);
+}
+
+function drawPitch() {
+  cx.fillStyle = css('--grass'); cx.fillRect(0, 0, W, H);
+  cx.strokeStyle = css('--line'); cx.lineWidth = 2;
+  const sx = m => m / 105 * W, sy = m => m / 68 * H;
+  cx.strokeRect(2, 2, W - 4, H - 4);
+  cx.beginPath(); cx.moveTo(W / 2, 0); cx.lineTo(W / 2, H); cx.stroke();
+  cx.beginPath(); cx.arc(W / 2, H / 2, sx(9.15), 0, Math.PI * 2); cx.stroke();
+  for (const right of [false, true]) {
+    const box = (w, h) => cx.strokeRect(right ? W - sx(w) : 0, (H - sy(h)) / 2, sx(w), sy(h));
+    box(16.5, 40.32); box(5.5, 18.32);
+    cx.beginPath(); cx.arc(right ? W - sx(11) : sx(11), H / 2, 3, 0, Math.PI * 2); cx.fillStyle = css('--line'); cx.fill();
+  }
+}
+
+function lerp(i) {
+  const a = Math.floor(i), b = Math.min(a + 1, N - 1), t = i - a, out = new Map();
+  for (const [s, p] of pos[a]) {
+    const q = pos[b].get(s);
+    out.set(s, q ? [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2]] : p);
+  }
+  const p = F[a][2], q = F[b][2];
+  const ball = !p ? null : q ? [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t] : p;
+  return [out, ball];
+}
+
+const strip = $('strip'), sc = strip.getContext('2d');
+function drawStrip(a) {
+  const SW = strip.width, SH = strip.height, rows = HAS_PRED ? 2 : 1, rh = (SH - (rows - 1) * 4) / rows;
+  sc.clearRect(0, 0, SW, SH);
+  const colour = l => css({ H: '--home', A: '--away', D: '--dead' }[l] || '--none');
+  for (let r = 0; r < rows; r++) {
+    const col = r === 0 ? 3 : 4, y = r * (rh + 4);
+    for (let i = 0; i < N; i++) {
+      sc.fillStyle = colour(F[i][col]);
+      sc.fillRect(Math.floor(i / N * SW), y, Math.ceil(SW / N) + 1, rh);
+    }
+  }
+  sc.fillStyle = css('--text'); sc.fillRect(a / Math.max(1, N - 1) * SW - 1, 0, 2, SH);
+}
+strip.onclick = e => { const r = strip.getBoundingClientRect(); t = (e.clientX - r.left) / r.width * (N - 1); };
+
+function draw(i) {
+  const a = Math.floor(i), HOLD = 2.0 / DT;
+  const C = { H: css('--home'), A: css('--away') }, CL = { H: css('--homel'), A: css('--awayl') };
+  drawPitch();
+  if ($('trails').checked) {
+    const trails = new Map();
+    for (let k = Math.max(0, a - 12); k <= a; k++) for (const [s, p] of pos[k]) { if (!trails.has(s)) trails.set(s, []); trails.get(s).push(p); }
+    cx.globalAlpha = 0.35; cx.lineWidth = 3;
+    for (const [s, pts] of trails) {
+      if (!pos[a].has(s) || pts.length < 2) continue;
+      cx.strokeStyle = C[side(s)]; cx.beginPath();
+      pts.forEach((p, k) => k ? cx.lineTo(px(p[0]), py(p[1])) : cx.moveTo(px(p[0]), py(p[1]))); cx.stroke();
+    }
+    cx.globalAlpha = 1;
+  }
+  cx.setLineDash([6, 6]); cx.strokeStyle = css('--muted'); cx.lineWidth = 2;
+  for (const L of links) {
+    if (a < L.lost.i || a > L.nw.i + HOLD) continue;
+    const np = pos[a].get(L.nw.s) || L.nw.p;
+    cx.beginPath(); cx.moveTo(px(L.lost.p[0]), py(L.lost.p[1])); cx.lineTo(px(np[0]), py(np[1])); cx.stroke();
+  }
+  cx.setLineDash([]);
+  cx.font = '600 13px -apple-system,sans-serif'; cx.textAlign = 'center';
+  for (const e of events) {
+    if (e.kind !== 'lost' || a < e.i || a > e.i + HOLD) continue;
+    cx.globalAlpha = Math.max(0.15, 1 - (a - e.i) / HOLD);
+    cx.setLineDash([4, 4]); cx.strokeStyle = css('--lost'); cx.lineWidth = 2;
+    cx.beginPath(); cx.arc(px(e.p[0]), py(e.p[1]), 15, 0, Math.PI * 2); cx.stroke(); cx.setLineDash([]);
+    cx.fillStyle = css('--lost'); cx.fillText(e.s, px(e.p[0]), py(e.p[1]) - 20);
+  }
+  cx.globalAlpha = 1;
+  const [P, ball] = lerp(i);
+  cx.font = '600 12px -apple-system,sans-serif'; cx.textBaseline = 'middle';
+  for (const [s, p] of P) {
+    const x = px(p[0]), y = py(p[1]), team = side(s);
+    if (events.some(e => e.kind === 'new' && e.s === s && a >= e.i && a <= e.i + HOLD)) {
+      cx.strokeStyle = css('--new'); cx.lineWidth = 3; cx.beginPath(); cx.arc(x, y, 19, 0, Math.PI * 2); cx.stroke();
+    }
+    cx.beginPath(); cx.arc(x, y, 13, 0, Math.PI * 2);
+    if (p[2]) { cx.fillStyle = css('--grass'); cx.fill(); cx.strokeStyle = C[team]; cx.lineWidth = 2.5; cx.stroke(); }
+    else { cx.fillStyle = C[team]; cx.fill(); }
+    cx.fillStyle = p[2] ? C[team] : CL[team];
+    cx.fillText(s, x, y + 0.5);
+  }
+  cx.textBaseline = 'alphabetic';
+  if (ball) {
+    cx.fillStyle = css('--ball'); cx.strokeStyle = css('--grass'); cx.lineWidth = 2;
+    cx.beginPath(); cx.arc(px(ball[0]), py(ball[1]), 6, 0, Math.PI * 2); cx.fill(); cx.stroke();
+  }
+
+  const fr = F[a], v = D.first + i * STEP;
+  let nh = 0, na = 0; for (const s of pos[a].keys()) side(s) === 'H' ? nh++ : na++;
+  $('nhome').textContent = nh; $('naway').textContent = na;
+  $('vtime').textContent = videoTime(v);
+  $('gtime').textContent = gameClock(v);
+  $('ball').textContent = fr[2] ? 'Visible' : 'Missing from tracking';
+  $('ball').style.color = fr[2] ? '' : css('--lost');
+  const tl = LABEL(fr[3]);
+  $('truth').textContent = fr[3] === 'X' ? 'No ground truth here' : tl[0];
+  $('truth').style.color = fr[3] === 'X' ? css('--muted') : css(tl[1]);
+  if (HAS_PRED) {
+    const pl = LABEL(fr[4]);
+    $('pred').textContent = fr[4] === 'X' ? 'No answer (X)' : pl[0];
+    $('pred').style.color = fr[4] === 'X' ? css('--muted') : css(pl[1]);
+    const ag = $('agree');
+    if (fr[3] === 'X' || fr[4] === 'X') { ag.textContent = ''; }
+    else if (fr[3] === fr[4]) { ag.textContent = '✓ matches'; ag.style.color = css('--ok'); }
+    else { ag.textContent = '✗ differs'; ag.style.color = css('--bad'); }
+  }
+  drawStrip(i);
+  renderLog(a);
+}
+
+let t = 0, playing = true, last = null;
+const scrub = $('scrub'), playBtn = $('play');
+function tick(ts) {
+  if (last !== null && playing) {
+    t += (ts - last) / 1000 / DT * parseFloat($('speed').value);
+    if (t >= N - 1) { t = N - 1; playing = false; playBtn.textContent = 'Play'; }
+  }
+  scrub.value = Math.round(t / Math.max(1, N - 1) * 1000);
+  last = ts; draw(t); requestAnimationFrame(tick);
+}
+playBtn.onclick = () => { if (t >= N - 1) t = 0; playing = !playing; playBtn.textContent = playing ? 'Pause' : 'Play'; };
+$('restart').onclick = () => { t = 0; playing = true; playBtn.textContent = 'Pause'; };
+scrub.oninput = () => { t = scrub.value / 1000 * (N - 1); };
+document.addEventListener('keydown', e => { if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); playBtn.click(); } });
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
