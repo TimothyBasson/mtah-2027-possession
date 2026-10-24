@@ -1,0 +1,24 @@
+# uv environment for this repo. Mirrors requirements.txt (scorer) and requirements-starter.txt
+# (notebooks); uv.lock pins every version so submissions regenerate identically.
+#
+#   uv sync                       # scorer + starter + notebooks
+#   uv run python evaluation/run_evaluation.py
+[project]
+name = "mtah-2027-possession"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "numpy",
+    "pandas",
+]
+
+[dependency-groups]
+starter = [
+    "kloppy==3.18.0",
+    "matplotlib",
+    "notebook",
+]
+
+[tool.uv]
+package = false
+default-groups = ["starter"]
