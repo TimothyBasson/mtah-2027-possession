@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Possession overlay</title>
+<style>
+:root{--bg:#f7f6f2;--text:#1f1e1c;--muted:#6b6a65;--home:#378ADD;--away:#D85A30;--dead:#888780;--none:#5F5E5A}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b1a;--text:#ecebe6;--muted:#a3a29c}}
+:root[data-theme="dark"]{--bg:#1b1b1a;--text:#ecebe6;--muted:#a3a29c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1400px;margin:0 auto;padding:16px}
+.stage{position:relative;background:#000;border-radius:8px;overflow:hidden}
+video{width:100%;height:auto;display:block}
+.hud{position:absolute;bottom:64px;left:12px;background:rgba(0,0,0,.72);color:#fff;border-radius:8px;padding:8px 12px;font-size:15px;line-height:1.6;pointer-events:none;min-width:250px}
+.row{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.row .k{color:#cfcdc6;width:70px;font-size:13px}
+.dot{width:12px;height:12px;border-radius:50%;flex:none}
+.v{font-weight:600}
+.err{margin-top:12px;color:#A32D2D;font-size:14px}
+p.note{color:var(--muted);font-size:13px;margin:0}
+.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 2px 0}
+button{font:inherit;font-size:14px;color:var(--text);background:transparent;border:1px solid var(--muted);border-radius:8px;padding:5px 12px;cursor:pointer;flex:none}
+video::-webkit-media-controls-fullscreen-button{display:none}
+.stage:fullscreen{display:flex;align-items:center;border-radius:0}
+.stage:fullscreen video{height:100%;object-fit:contain}
+</style>
+</head>
+<body>
+<main>
+  <div class="stage">
+    <video id="video" controls controlslist="nofullscreen" preload="auto"></video>
+    <div class="hud" aria-live="off">
+      <div class="row" id="rowTruth"><span class="k">Truth</span><span class="dot" id="dotTruth"></span><span class="v" id="truth">–</span></div>
+      <div class="row" id="rowPred"><span class="k">Estimate</span><span class="dot" id="dotPred"></span><span class="v" id="pred">–</span></div>
+    </div>
+  </div>
+  <div class="bar"><p class="note" id="note"></p><button id="fs">Full screen</button></div>
+  <div class="err" id="err" hidden></div>
+</main>
+<script>
+const D = __OVERLAY_DATA__;
+const $ = id => document.getElementById(id);
+const video = $('video');
+video.src = D.video;
+
+const SHOW = {
+  H: [D.names.H, '--home'], A: [D.names.A, '--away'], D: ['Dead ball', '--dead'],
+};
+function labelAt(runs, frame) {
+  let lo = 0, hi = runs.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (runs[mid][0] <= frame) lo = mid; else hi = mid - 1; }
+  return runs[lo][1];
+}
+function paint(which, label, none) {
+  const [text, colour] = SHOW[label] || [none, '--none'];
+  $(which).textContent = text;
+  $('dot' + which[0].toUpperCase() + which.slice(1)).style.background = getComputedStyle(document.documentElement).getPropertyValue(colour);
+}
+
+if (!D.truth) $('rowTruth').style.display = 'none';
+if (!D.pred) $('rowPred').style.display = 'none';
+$('note').textContent = (D.pred ? 'Estimate: ' + D.pred_name + '. ' : '') +
+  'Ground truth covers video 7:27.4 – 12:27.4 only. Video: ' + D.video;
+
+let lastFrame = -1;
+function update(mediaTime) {
+  const frame = Math.min(D.n_frames - 1, Math.max(0, Math.floor(mediaTime * D.fps + 1e-3)));
+  if (frame === lastFrame) return;
+  lastFrame = frame;
+  if (D.truth) paint('truth', labelAt(D.truth, frame), 'No ground truth');
+  if (D.pred) paint('pred', labelAt(D.pred, frame), 'No answer (X)');
+}
+
+if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+  const onFrame = (now, meta) => { update(meta.mediaTime); video.requestVideoFrameCallback(onFrame); };
+  video.requestVideoFrameCallback(onFrame);
+  video.addEventListener('seeked', () => update(video.currentTime));
+} else {
+  const loop = () => { update(video.currentTime); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+}
+video.addEventListener('loadedmetadata', () => update(video.currentTime));
+video.addEventListener('error', () => {
+  const e = $('err'); e.hidden = false;
+  e.textContent = "Couldn't load the video at " + D.video + ' (relative to this page). ' +
+    'Keep the page where make_overlay.py wrote it, or regenerate it with --out.';
+});
+$('fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector('.stage').requestFullscreen();
+document.addEventListener('fullscreenchange', () => { $('fs').textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen'; });
+update(0);
+</script>
+</body>
+</html>
