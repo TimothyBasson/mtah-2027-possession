@@ -10,37 +10,55 @@
 :root[data-theme="dark"]{--bg:#1b1b1a;--card:#252524;--text:#ecebe6;--muted:#a3a29c;--border:rgba(255,255,255,.14);--grass:#1f2a1c;--line:#4d6645;--home:#85B7EB;--homel:#0C447C;--away:#F0997B;--awayl:#712B13;--dead:#888780;--none:#444441;--ball:#f4f3ee;--ok:#97C459;--bad:#F09595}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-main{padding:16px}
-h1{font-size:20px;font-weight:600;margin:0 0 4px}
-p.sub{margin:0 0 14px;color:var(--muted);font-size:14px}
-.wrap{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;min-width:0}
-/* Full width, but never so tall that the strips and controls fall off the screen. Capping the width
-   rather than the height keeps the drawing canvas exactly over the picture. */
-.stage{position:relative;background:#000;border-radius:8px;overflow:hidden;max-width:calc((100vh - 250px) * 16 / 9);min-width:min(100%,640px);margin:0 auto}
-.panel{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
-@media (max-width:900px){.panel{grid-template-columns:minmax(0,1fr)}}
+/* The page fits the window without scrolling: the panel takes a height that scales with the screen,
+   the strips and controls their natural height, and the video whatever is left. The video box is a
+   size container, so the stage can be the largest 16:9 rectangle that fits it in both directions --
+   sizing the stage rather than letterboxing the video keeps the drawing canvas exactly over the
+   picture. Narrow screens fall back to a normal scrolling column. */
+main{padding:10px 16px;height:100vh;display:flex;flex-direction:column;gap:8px}
+h1{font-size:18px;font-weight:600;margin:0}
+p.sub{margin:0;color:var(--muted);font-size:13px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wrap{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px;min-width:0}
+/* The video box starts at the full-width video's height (54px = page and card padding and borders)
+   and only shrinks when the window is too short, so a tall window leaves no gap under the video. */
+.top{flex:0 1 auto;min-height:0;display:flex;flex-direction:column}
+.videobox{flex:0 1 auto;height:calc((100vw - 54px) * 9 / 16);min-height:120px;container-type:size;display:flex;justify-content:center}
+.stage{position:relative;background:#000;border-radius:8px;overflow:hidden;width:min(100cqw,calc(100cqh * 16 / 9));align-self:flex-start;container-type:inline-size}
+.panel{flex:none;height:clamp(136px,20vh,260px);display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:14px}
+.panel>*{min-height:0;overflow:hidden}
+#pitch{height:100%;width:auto;max-width:100%;aspect-ratio:1050/680}
+@media (max-width:900px),(max-height:480px){
+  main{height:auto;min-height:0}
+  p.sub{white-space:normal}
+  .videobox{flex:none;height:auto;container-type:normal}
+  .stage{width:100%}
+  .panel{height:auto;grid-template-columns:minmax(0,1fr)}
+  #pitch{width:100%;max-width:560px;height:auto}
+}
 video{width:100%;height:auto;display:block}
 #over{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-.hud{position:absolute;bottom:56px;left:10px;background:rgba(0,0,0,.72);color:#fff;border-radius:8px;padding:6px 12px;font-size:14px;line-height:1.6;pointer-events:none}
-.hud .row{display:flex;align-items:center;gap:8px;white-space:nowrap}
-.hud .k{color:#cfcdc6;width:62px;font-size:12px}
-.hud .dot{width:11px;height:11px;border-radius:50%;flex:none}
+/* Scales with the video (the stage is an inline-size container), so it never swamps a small one. */
+.hud{position:absolute;bottom:56px;left:10px;background:rgba(0,0,0,.72);color:#fff;border-radius:8px;padding:.4em .9em;font-size:clamp(10px,1.4cqw,14px);line-height:1.6;pointer-events:none}
+.hud .row{display:flex;align-items:center;gap:.6em;white-space:nowrap}
+.hud .k{color:#cfcdc6;width:4.6em;font-size:.86em}
+.hud .dot{width:.8em;height:.8em;border-radius:50%;flex:none}
 .hud b{font-weight:600}
 canvas.full{width:100%;height:auto;display:block;border-radius:8px}
-.striplabel{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:10px}
-canvas.strip{width:100%;height:auto;display:block;cursor:pointer;border-radius:4px;margin-top:2px}
-.keys{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-top:6px}
+.striplabel{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:6px}
+canvas.strip{width:100%;display:block;cursor:pointer;border-radius:4px;margin-top:2px}
+#whole{height:16px}
+#zoom{height:28px}
+.keys{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-left:auto}
 .keys span.k{display:inline-block;width:14px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:4px}
-.controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px}
 button,select{font:inherit;font-size:14px;color:var(--text);background:transparent;border:1px solid var(--border);border-radius:8px;padding:5px 12px;cursor:pointer}
 button:hover{background:var(--bg)}
 label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4px}
-.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.stat{background:var(--bg);border-radius:8px;padding:7px 10px;min-width:0}
-.stat .l{font-size:12px;color:var(--muted)}
-.stat .v{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.stat.wide{grid-column:1/-1}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;align-content:start}
+.stat{background:var(--bg);border-radius:8px;padding:4px 10px;min-width:0}
+.stat .l{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat .v{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .agree{font-size:12px;font-weight:600;margin-left:6px}
 .legend{display:flex;flex-direction:column;gap:5px;font-size:13px;color:var(--muted)}
 .sw{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:-1px;margin-right:6px}
@@ -52,8 +70,8 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
 <h1 id="title">Match viewer</h1>
 <p class="sub" id="sub"></p>
 <div class="wrap">
-  <div class="card">
-    <div class="stage">
+  <div class="card top">
+    <div class="videobox"><div class="stage">
       <video id="video" controls controlslist="nofullscreen" preload="auto" muted></video>
       <canvas id="over" width="1920" height="1080"></canvas>
       <div class="hud" id="hud">
@@ -61,12 +79,11 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
         <div class="row" id="hudPred"><span class="k">Estimate</span><span class="dot"></span><b>–</b></div>
         <div class="row" id="hudBall"><span class="k">Ball</span><b>–</b></div>
       </div>
-    </div>
+    </div></div>
     <div class="striplabel"><span>Whole match</span><span id="wholeRange"></span></div>
     <canvas id="whole" class="strip" width="1200" height="30" aria-label="Possession over the whole match; click to seek"></canvas>
     <div class="striplabel"><span>Two minutes around the playhead</span><span id="zoomRange"></span></div>
     <canvas id="zoom" class="strip" width="1200" height="40" aria-label="Possession around the playhead; click to seek"></canvas>
-    <div class="keys" id="keys"></div>
     <div class="controls">
       <button id="play">Play</button>
       <button id="back" title="Previous frame (←)">◀ frame</button>
@@ -74,18 +91,19 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
       <select id="speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option><option value="6">6×</option></select>
       <label class="tg"><input type="checkbox" id="showTrack" checked> Tracking on video</label>
       <label class="tg"><input type="checkbox" id="showIds" checked> Slot numbers</label>
+      <div class="keys" id="keys"></div>
     </div>
     <div class="err" id="err" hidden></div>
   </div>
   <div class="card panel">
-    <canvas id="pitch" class="full" width="1050" height="680"></canvas>
+    <canvas id="pitch" width="1050" height="680" style="display:block;border-radius:8px"></canvas>
     <div class="stats">
       <div class="stat"><div class="l" id="lvtime">Video time</div><div class="v" id="vtime">–</div></div>
       <div class="stat"><div class="l">Game clock</div><div class="v" id="gtime">–</div></div>
+      <div class="stat"><div class="l">True possession</div><div class="v" id="truth">–</div></div>
       <div class="stat"><div class="l" id="lhome">Home slots</div><div class="v" id="nhome">–</div></div>
       <div class="stat"><div class="l" id="laway">Away slots</div><div class="v" id="naway">–</div></div>
-      <div class="stat wide"><div class="l">True possession</div><div class="v" id="truth">–</div></div>
-      <div class="stat wide" id="predbox"><div class="l" id="predlabel">Your estimate</div><div class="v"><span id="pred">–</span><span class="agree" id="agree"></span></div></div>
+      <div class="stat" id="predbox"><div class="l" id="predlabel">Your estimate</div><div class="v"><span id="pred">–</span><span class="agree" id="agree"></span></div></div>
     </div>
     <div class="legend" id="legend"></div>
   </div>
@@ -123,7 +141,7 @@ function gameClock(v) {
 }
 
 $('title').textContent = name.H + ' vs ' + name.A + ' — match viewer';
-$('sub').textContent = 'The whole tactical video. Rings on the video are where the tracking puts each slot; ' +
+$('sub').title = $('sub').textContent = 'The whole tactical video. Rings on the video are where the tracking puts each slot; ' +
   'a ring off a player, or a player with no ring, is the tracking being wrong. ← → step one frame, shift for a second, space plays.' +
   (D.pred ? ' Estimate from ' + D.pred_name + '.' : '') + (HAS_TRUTH ? ' Ground truth only covers video 7:27.4 – 12:27.4.' : '');
 $('lhome').textContent = name.H + ' slots';

@@ -39,6 +39,10 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
 
 Keyboard: space plays or pauses, ← / → step one frame, shift+← / → step one second.
 
+The page fits the window without scrolling: the video takes whatever height the strips, controls
+and panel leave. Narrow or very short windows (under 900 px wide or 480 px tall) switch to a
+scrolling column instead, so the video never shrinks to a thumbnail.
+
 ## How it is stored
 
 Tracking for 199k frames is too big for one page, so the first run writes it as one-minute chunk
