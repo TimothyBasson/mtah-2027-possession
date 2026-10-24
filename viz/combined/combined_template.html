@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Match viewer</title>
+<style>
+:root{--bg:#f7f6f2;--card:#fff;--text:#1f1e1c;--muted:#6b6a65;--border:rgba(0,0,0,.12);--grass:#e7f0e1;--line:#9fb894;--home:#185FA5;--homel:#E6F1FB;--away:#D85A30;--awayl:#FAECE7;--dead:#888780;--none:#d3d1c7;--ball:#1f1e1c;--ok:#3B6D11;--bad:#A32D2D}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b1a;--card:#252524;--text:#ecebe6;--muted:#a3a29c;--border:rgba(255,255,255,.14);--grass:#1f2a1c;--line:#4d6645;--home:#85B7EB;--homel:#0C447C;--away:#F0997B;--awayl:#712B13;--dead:#888780;--none:#444441;--ball:#f4f3ee;--ok:#97C459;--bad:#F09595}}
+:root[data-theme="dark"]{--bg:#1b1b1a;--card:#252524;--text:#ecebe6;--muted:#a3a29c;--border:rgba(255,255,255,.14);--grass:#1f2a1c;--line:#4d6645;--home:#85B7EB;--homel:#0C447C;--away:#F0997B;--awayl:#712B13;--dead:#888780;--none:#444441;--ball:#f4f3ee;--ok:#97C459;--bad:#F09595}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1640px;margin:0 auto;padding:16px}
+h1{font-size:20px;font-weight:600;margin:0 0 4px}
+p.sub{margin:0 0 14px;color:var(--muted);font-size:14px}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px}
+@media (max-width:1100px){.wrap{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;min-width:0}
+.stage{position:relative;background:#000;border-radius:8px;overflow:hidden}
+video{width:100%;height:auto;display:block}
+#over{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.hud{position:absolute;bottom:56px;left:10px;background:rgba(0,0,0,.72);color:#fff;border-radius:8px;padding:6px 12px;font-size:14px;line-height:1.6;pointer-events:none}
+.hud .row{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.hud .k{color:#cfcdc6;width:62px;font-size:12px}
+.hud .dot{width:11px;height:11px;border-radius:50%;flex:none}
+.hud b{font-weight:600}
+canvas.full{width:100%;height:auto;display:block;border-radius:8px}
+#strip{margin-top:10px;cursor:pointer;border-radius:4px}
+.keys{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-top:6px}
+.keys span.k{display:inline-block;width:14px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:4px}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:10px}
+button,select{font:inherit;font-size:14px;color:var(--text);background:transparent;border:1px solid var(--border);border-radius:8px;padding:5px 12px;cursor:pointer}
+button:hover{background:var(--bg)}
+label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4px}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--bg);border-radius:8px;padding:7px 10px;min-width:0}
+.stat .l{font-size:12px;color:var(--muted)}
+.stat .v{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat.wide{grid-column:1/-1}
+.agree{font-size:12px;font-weight:600;margin-left:6px}
+.legend{display:flex;flex-direction:column;gap:5px;font-size:13px;color:var(--muted);margin-top:12px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:-1px;margin-right:6px}
+.err{margin-top:10px;color:var(--bad);font-size:14px}
+</style>
+</head>
+<body>
+<main>
+<h1 id="title">Match viewer</h1>
+<p class="sub" id="sub"></p>
+<div class="wrap">
+  <div class="card">
+    <div class="stage">
+      <video id="video" controls controlslist="nofullscreen" preload="auto" muted></video>
+      <canvas id="over" width="1920" height="1080"></canvas>
+      <div class="hud" id="hud">
+        <div class="row" id="hudTruth"><span class="k">Truth</span><span class="dot"></span><b>–</b></div>
+        <div class="row" id="hudPred"><span class="k">Estimate</span><span class="dot"></span><b>–</b></div>
+        <div class="row" id="hudBall"><span class="k">Ball</span><b>–</b></div>
+      </div>
+    </div>
+    <canvas id="strip" class="full" width="1200" height="40" aria-label="Possession timeline; click to seek"></canvas>
+    <div class="keys" id="keys"></div>
+    <div class="controls">
+      <button id="play">Play</button>
+      <button id="back" title="Previous frame (←)">◀ frame</button>
+      <button id="fwd" title="Next frame (→)">frame ▶</button>
+      <select id="speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+      <label class="tg"><input type="checkbox" id="showTrack" checked> Tracking on video</label>
+      <label class="tg"><input type="checkbox" id="showIds" checked> Slot numbers</label>
+    </div>
+    <div class="err" id="err" hidden></div>
+  </div>
+  <div class="card">
+    <canvas id="pitch" class="full" width="1050" height="680"></canvas>
+    <div class="stats">
+      <div class="stat"><div class="l">Video time</div><div class="v" id="vtime">–</div></div>
+      <div class="stat"><div class="l">Game clock</div><div class="v" id="gtime">–</div></div>
+      <div class="stat"><div class="l" id="lhome">Home slots</div><div class="v" id="nhome">0</div></div>
+      <div class="stat"><div class="l" id="laway">Away slots</div><div class="v" id="naway">0</div></div>
+      <div class="stat wide"><div class="l">True possession</div><div class="v" id="truth">–</div></div>
+      <div class="stat wide" id="predbox"><div class="l" id="predlabel">Your estimate</div><div class="v"><span id="pred">–</span><span class="agree" id="agree"></span></div></div>
+    </div>
+    <div class="legend" id="legend"></div>
+  </div>
+</div>
+</main>
+<script>
+const D = __COMBINED_DATA__;
+const N = D.slots.length, FPS = D.clock.fps;
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const side = s => D.teams[s];
+const name = { H: D.names.H, A: D.names.A };
+const LABEL = l => ({ H: [name.H, '--home'], A: [name.A, '--away'], D: ['Dead ball', '--dead'] }[l] || ['–', '--muted']);
+// Fixed, bright colours for drawing on the video, which is the same in light and dark mode.
+const ON_VIDEO = { H: '#4EA3F5', A: '#FF8A50', ball: '#FFE04A' };
+
+function mmss(sec, decimals) {
+  const q = Math.pow(10, decimals); sec = Math.floor(sec * q + 1e-6) / q;
+  const m = Math.floor(sec / 60), s = sec - m * 60;
+  return m + ':' + s.toFixed(decimals).padStart(decimals ? 3 + decimals : 2, '0');
+}
+function videoTime(v) {
+  const s = v / FPS;
+  return s >= 3600 ? Math.floor(s / 3600) + ':' + mmss(s % 3600, 1).padStart(6, '0') : mmss(s, 1);
+}
+function gameClock(v) {
+  const k = D.clock.kickoff, e = D.clock.end;
+  const fmt = (el, base) => { const t = base + el, cap = base + 45 * 60; return t <= cap ? mmss(t, 0) : (cap / 60) + '+' + mmss(t - cap, 0); };
+  if (v < k[0]) return 'Pre-match';
+  if (v <= e[0]) return fmt((v - k[0]) / FPS, 0);
+  if (v < k[1]) return 'Half-time';
+  if (v <= e[1]) return fmt((v - k[1]) / FPS, 45 * 60);
+  return 'Full time';
+}
+
+$('title').textContent = name.H + ' vs ' + name.A + ' — match viewer';
+$('sub').textContent = 'Tactical video ' + videoTime(D.first) + ' – ' + videoTime(D.last) +
+  ' (frames ' + D.first.toLocaleString() + '–' + D.last.toLocaleString() + '). Rings on the video are where the tracking puts each slot; ' +
+  'a ring off a player, or a player with no ring, is the tracking being wrong. ← → step one frame, space plays.' +
+  (D.pred ? ' Estimate from ' + D.pred_name + '.' : '');
+$('lhome').textContent = name.H + ' slots';
+$('laway').textContent = name.A + ' slots';
+if (!D.pred) { $('predbox').style.display = 'none'; $('hudPred').style.display = 'none'; }
+else $('predlabel').textContent = 'Your estimate (' + D.pred_name + ')';
+if (!D.truth) $('hudTruth').style.display = 'none';
+$('legend').innerHTML = [
+  ['background:var(--home)', name.H + ' slot (number = slot ID, not a player)'],
+  ['background:var(--away)', name.A + ' slot'],
+  ['border:2px dashed var(--muted)', 'Hollow / dashed: no speed, position probably estimated'],
+  ['background:' + ON_VIDEO.ball, 'Ball (on the video: yellow ring)'],
+].map(([st, t]) => '<div><span class="sw" style="' + st + '"></span>' + t + '</div>').join('');
+$('keys').innerHTML = [['--home', name.H], ['--away', name.A], ['--dead', 'Dead ball'], ['--none', 'No label']]
+  .map(([c, t]) => '<span><span class="k" style="background:var(' + c + ')"></span>' + t + '</span>').join('') +
+  '<span>Top row: truth' + (D.pred ? ' · bottom row: your estimate' : '') + ' · click to jump</span>';
+
+// ---- video on the clock -------------------------------------------------------------------
+const video = $('video');
+video.src = D.video;
+const timeOf = i => (D.first + i + 0.5) / FPS;              // middle of the frame, never on an edge
+const indexOf = t => Math.floor(t * FPS + 1e-3) - D.first;
+function seekIndex(i) { video.currentTime = timeOf(Math.max(0, Math.min(N - 1, i))); }
+
+// ---- drawing on the video -----------------------------------------------------------------
+const ov = $('over'), oc = ov.getContext('2d');
+function project(h, x, y) {
+  const d = h[6] * x + h[7] * y + h[8];
+  return [(h[0] * x + h[1] * y + h[2]) / d, (h[3] * x + h[4] * y + h[5]) / d];
+}
+function drawVideo(i) {
+  oc.clearRect(0, 0, ov.width, ov.height);
+  const h = D.H[i];
+  if (!$('showTrack').checked || !h) return;
+  oc.font = '600 22px -apple-system,sans-serif'; oc.textAlign = 'center';
+  const ring = (x, y, colour, dashed, rx) => {
+    const [u, v] = project(h, x, y), r = Math.max(6, Math.abs(project(h, x + 0.008, y)[0] - u)) * (rx || 1);
+    oc.setLineDash(dashed ? [6, 5] : []);
+    oc.lineWidth = 6; oc.strokeStyle = 'rgba(0,0,0,.55)';
+    oc.beginPath(); oc.ellipse(u, v, r, r * 0.45, 0, 0, Math.PI * 2); oc.stroke();
+    oc.lineWidth = 3; oc.strokeStyle = colour; oc.stroke();
+    oc.setLineDash([]);
+    return [u, v, r];
+  };
+  for (const [s, x, y, est] of D.slots[i]) {
+    const [u, v, r] = ring(x / 1000, y / 1000, ON_VIDEO[side(s)], est);
+    if ($('showIds').checked) {
+      oc.lineWidth = 4; oc.strokeStyle = 'rgba(0,0,0,.7)'; oc.strokeText(s, u, v + r * 0.45 + 22);
+      oc.fillStyle = ON_VIDEO[side(s)]; oc.fillText(s, u, v + r * 0.45 + 22);
+    }
+  }
+  const b = D.ball[i];
+  if (b) ring(b[0] / 1000, b[1] / 1000, ON_VIDEO.ball, false, 0.6);
+}
+
+// ---- top-down pitch ---------------------------------------------------------------------
+const pc = $('pitch'), cx = pc.getContext('2d'), W = pc.width, PH = pc.height;
+function drawPitch(i) {
+  cx.fillStyle = css('--grass'); cx.fillRect(0, 0, W, PH);
+  cx.strokeStyle = css('--line'); cx.lineWidth = 2;
+  const sx = m => m / 105 * W, sy = m => m / 68 * PH;
+  cx.strokeRect(2, 2, W - 4, PH - 4);
+  cx.beginPath(); cx.moveTo(W / 2, 0); cx.lineTo(W / 2, PH); cx.stroke();
+  cx.beginPath(); cx.arc(W / 2, PH / 2, sx(9.15), 0, Math.PI * 2); cx.stroke();
+  for (const right of [false, true]) {
+    const box = (w, h) => cx.strokeRect(right ? W - sx(w) : 0, (PH - sy(h)) / 2, sx(w), sy(h));
+    box(16.5, 40.32); box(5.5, 18.32);
+  }
+  // Shade the part of the pitch the camera can see: cells whose centre projects inside the frame.
+  // A grid test rather than the frame's corners, because the top of the frame is above the horizon.
+  const h = D.H[i];
+  if (h) {
+    const GX = 42, GY = 27;
+    cx.fillStyle = css('--text'); cx.globalAlpha = 0.07;
+    for (let gx = 0; gx < GX; gx++) for (let gy = 0; gy < GY; gy++) {
+      const [u, v] = project(h, (gx + 0.5) / GX, (gy + 0.5) / GY);
+      if (u >= 0 && u <= 1920 && v >= 0 && v <= 1080) cx.fillRect(gx / GX * W, gy / GY * PH, W / GX + 0.5, PH / GY + 0.5);
+    }
+    cx.globalAlpha = 1;
+  }
+  const C = { H: css('--home'), A: css('--away') }, CL = { H: css('--homel'), A: css('--awayl') };
+  cx.font = '600 12px -apple-system,sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+  for (const [s, x, y, est] of D.slots[i]) {
+    const u = x / 1000 * W, v = y / 1000 * PH, team = side(s);
+    cx.beginPath(); cx.arc(u, v, 13, 0, Math.PI * 2);
+    if (est) { cx.fillStyle = css('--grass'); cx.fill(); cx.strokeStyle = C[team]; cx.lineWidth = 2.5; cx.stroke(); }
+    else { cx.fillStyle = C[team]; cx.fill(); }
+    cx.fillStyle = est ? C[team] : CL[team]; cx.fillText(s, u, v + 0.5);
+  }
+  cx.textBaseline = 'alphabetic';
+  const b = D.ball[i];
+  if (b) {
+    cx.fillStyle = css('--ball'); cx.strokeStyle = css('--grass'); cx.lineWidth = 2;
+    cx.beginPath(); cx.arc(b[0] / 1000 * W, b[1] / 1000 * PH, 6, 0, Math.PI * 2); cx.fill(); cx.stroke();
+  }
+}
+
+// ---- possession strip -------------------------------------------------------------------
+const strip = $('strip'), sc = strip.getContext('2d');
+const rows = [D.truth, D.pred].filter(Boolean);
+const stripBase = document.createElement('canvas');
+function paintStripBase() {
+  const SW = strip.width, SH = strip.height, rh = (SH - (rows.length - 1) * 4) / rows.length;
+  stripBase.width = SW; stripBase.height = SH;
+  const bc = stripBase.getContext('2d'), colour = l => css({ H: '--home', A: '--away', D: '--dead' }[l] || '--none');
+  rows.forEach((labels, r) => {
+    for (let x = 0; x < SW; x++) { bc.fillStyle = colour(labels[Math.floor(x / SW * N)]); bc.fillRect(x, r * (rh + 4), 1, rh); }
+  });
+}
+function drawStrip(i) {
+  sc.clearRect(0, 0, strip.width, strip.height); sc.drawImage(stripBase, 0, 0);
+  sc.fillStyle = css('--text'); sc.fillRect(i / Math.max(1, N - 1) * strip.width - 1, 0, 2, strip.height);
+}
+strip.onclick = e => { const r = strip.getBoundingClientRect(); seekIndex(Math.round((e.clientX - r.left) / r.width * (N - 1))); };
+
+// ---- read-outs --------------------------------------------------------------------------
+function hudRow(id, label, none) {
+  const [text, colour] = label === 'X' ? [none, '--none'] : LABEL(label);
+  const row = $(id); row.querySelector('b').textContent = text;
+  row.querySelector('.dot').style.background = label === 'X' ? 'transparent' : css(colour);
+}
+function readouts(i) {
+  const v = D.first + i;
+  let nh = 0, na = 0; for (const [s] of D.slots[i]) side(s) === 'H' ? nh++ : na++;
+  $('nhome').textContent = nh; $('naway').textContent = na;
+  $('vtime').textContent = videoTime(v) + ' · f' + v;
+  $('gtime').textContent = gameClock(v);
+  $('hudBall').querySelector('b').textContent = D.ball[i] ? 'tracked' : 'missing from tracking';
+  const t = D.truth ? D.truth[i] : 'X';
+  const tl = LABEL(t);
+  $('truth').textContent = t === 'X' ? 'No ground truth here' : tl[0];
+  $('truth').style.color = t === 'X' ? css('--muted') : css(tl[1]);
+  if (D.truth) hudRow('hudTruth', t, 'No ground truth');
+  if (D.pred) {
+    const p = D.pred[i], pl = LABEL(p);
+    $('pred').textContent = p === 'X' ? 'No answer (X)' : pl[0];
+    $('pred').style.color = p === 'X' ? css('--muted') : css(pl[1]);
+    hudRow('hudPred', p, 'No answer (X)');
+    const ag = $('agree');
+    if (t === 'X' || p === 'X') ag.textContent = '';
+    else if (t === p) { ag.textContent = '✓ matches'; ag.style.color = css('--ok'); }
+    else { ag.textContent = '✗ differs'; ag.style.color = css('--bad'); }
+  }
+}
+
+// ---- one clock: the video ---------------------------------------------------------------
+let shown = -1;
+function update(mediaTime, force) {
+  let i = indexOf(mediaTime);
+  if (i < 0 || i > N - 1) {                                  // keep playback inside the clip
+    if (!video.seeking) { if (i > N - 1) video.pause(); seekIndex(i < 0 ? 0 : N - 1); }
+    return;
+  }
+  if (i === shown && !force) return;
+  shown = i;
+  drawVideo(i); drawPitch(i); drawStrip(i); readouts(i);
+}
+if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+  const onFrame = (now, meta) => { update(meta.mediaTime); video.requestVideoFrameCallback(onFrame); };
+  video.requestVideoFrameCallback(onFrame);
+} else {
+  const loop = () => { update(video.currentTime); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+}
+video.addEventListener('seeked', () => update(video.currentTime, true));
+video.addEventListener('loadedmetadata', () => seekIndex(0));
+video.addEventListener('play', () => $('play').textContent = 'Pause');
+video.addEventListener('pause', () => $('play').textContent = 'Play');
+video.addEventListener('error', () => {
+  const e = $('err'); e.hidden = false;
+  e.textContent = "Couldn't load the video at " + D.video + ' (relative to this page). ' +
+    'Keep the page where make_combined.py wrote it, or regenerate it with --out. The tracking views still work: use the strip and the frame buttons.';
+});
+
+const step = d => { video.pause(); seekIndex((shown < 0 ? 0 : shown) + d); if (video.error) update(timeOf((shown < 0 ? 0 : shown) + d), true); };
+$('play').onclick = () => video.paused ? video.play() : video.pause();
+$('back').onclick = () => step(-1);
+$('fwd').onclick = () => step(1);
+$('speed').onchange = () => video.playbackRate = parseFloat($('speed').value);
+$('showTrack').onchange = $('showIds').onchange = () => update(timeOf(shown), true);
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space') { e.preventDefault(); $('play').click(); }
+  else if (e.code === 'ArrowLeft') { e.preventDefault(); step(e.shiftKey ? -25 : -1); }
+  else if (e.code === 'ArrowRight') { e.preventDefault(); step(e.shiftKey ? 25 : 1); }
+});
+paintStripBase();
+update(timeOf(0), true);
+</script>
+</body>
+</html>
