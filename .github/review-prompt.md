@@ -6,11 +6,11 @@ The repo belongs to our team's entry in **More than a Hack 2027, Phase 1: Ball P
 
 ## Your environment
 
-These facts come from the official docs ([scheduled tasks](https://code.claude.com/docs/en/routines.md), [cloud environments](https://code.claude.com/docs/en/cloud-environments.md)):
+These facts come from the official docs ([scheduled tasks](https://code.claude.com/docs/en/routines.md), [cloud environments](https://code.claude.com/docs/en/cloud-environments.md)) and from earlier runs of this task:
 
 - **A fresh session for every event.** Each event starts a new, independent session with no memory of earlier runs. Anything you need to know about earlier reviews must come from GitHub itself (see step 2).
 - **The checkout.** The repo is cloned fresh and starts at the **pull request's head commit**, not the default branch. The base branch may not be present locally, so fetch it before diffing.
-- **No event payload.** The docs don't describe any PR number or webhook payload being passed to you, so you have to find the PR yourself (step 1).
+- **Trigger context.** Alongside this prompt, the run receives a `<github-trigger-context>` block giving the event (e.g. `pull_request.opened` or `pull_request.synchronize`), the PR number, the branches and the head SHA. Treat it as the source of truth for which PR to review.
 - **GitHub goes through a proxy.** Your credentials are handled for you, and you don't need `gh auth login`. The proxy **rejects GraphQL with a 403**, so `gh pr …` and `gh issue …` subcommands fail. Use the built-in GitHub tools, or REST through `gh api repos/TimothyBasson/mtah-2027-possession/...`. Only repositories attached to this task are reachable.
 - **Time limits.** Foreground commands time out after 2 minutes by default (10 at most), so keep each check small.
 - **Tools available.** Python 3 with pip is pre-installed. The project's own dependencies are only present if the environment's setup script installed them. If `import numpy, pandas` fails, run `pip install -r requirements.txt` first.
@@ -22,7 +22,7 @@ These facts come from the official docs ([scheduled tasks](https://code.claude.c
 
 Follow these steps in order.
 
-1. **Find the PR that fired this run.** Get the head SHA with `git rev-parse HEAD` and find the open PR whose `head.sha` matches it: `gh api "repos/TimothyBasson/mtah-2027-possession/pulls?state=open&per_page=100"`. The checkout may be a detached HEAD, so match on SHA, not branch name. If no open PR matches exactly, stop and post nothing.
+1. **Identify the PR.** Take the PR number and head SHA from the `<github-trigger-context>` block. Check that `git rev-parse HEAD` equals that SHA. If it doesn't, run the `git fetch … refs/pull/<n>/head` command the block gives, then `git checkout FETCH_HEAD`. If there is no trigger-context block (for example, a manual "Run now"), fall back to finding the open PR whose `head.sha` matches `git rev-parse HEAD` via `gh api "repos/TimothyBasson/mtah-2027-possession/pulls?state=open&per_page=100"`. If that finds nothing either, stop and post nothing.
 2. **Decide whether to review.**
    - If the PR is a draft or closed, stop and post nothing.
    - List existing reviews (`.../pulls/{n}/reviews`) and look for this task's marker `<!-- possession-review sha=<SHA> -->` in their bodies.
