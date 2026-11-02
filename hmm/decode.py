@@ -1,0 +1,151 @@
+"""Sticky HMM v1: nearest-player gap + ball-missing, decoded with Viterbi, one path per half.
+
+    python -m hmm.decode                    # writes evaluation/results/hmm_v1.csv
+    python -m hmm.decode --baum-welch       # also prints what unsupervised EM would change
+
+Every number below is set by hand from football reasoning, never tuned on the public window --
+EVALUATION.md shows that tuning there picks the wrong setting. Baum-Welch on the full match
+(no labels) is run only as a check on these numbers, and does not overwrite them.
+
+numpy only, like starter/baseline.py, so it runs in the scorer's environment.
+"""
+
+import argparse
+import os
+import sys
+
+import numpy as np
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
+from hmm.clues import BALL_MISSING, N_GAP_BINS, gap_category, load_distances  # noqa: E402
+from hmm.model import (  # noqa: E402
+    A, D, H, STATES, baum_welch, build_log_emit, rate_log_trans, viterbi)
+from starter.baseline import RESULTS_DIR, team_of_each_track, write_submission  # noqa: E402
+
+FPS = GAMES[GAME]["fps"]
+
+# p(gap bin | H), bins from "away much closer" to "home much closer" (see hmm/clues.py). The team
+# in possession is usually, not always, nearest -- a pass in flight or a tackle puts the other
+# side closer. A mirrors H. During a stoppage the gap says nothing about the state: flat.
+GAP_GIVEN_HOME = np.array([0.05, 0.10, 0.20, 0.30, 0.35])
+GAP_GIVEN_DEAD = np.full(N_GAP_BINS, 1.0 / N_GAP_BINS)
+
+# p(ball missing | state). The tracking loses the ball on 41% of graded frames, mostly in live
+# play (occlusions, crowded boxes, balls in the air), so a missing ball only leans towards D.
+P_MISSING = {H: 0.35, A: 0.35, D: 0.70}
+
+# Trust exponent on each frame's clue. At 25 fps neighbouring frames repeat the same look at the
+# ball; 0.1 counts ~10 frames (0.4 s) as one independent observation.
+WEIGHT = 0.1
+
+# Mean possession and stoppage length, and the share of possessions that end in a stoppage
+# rather than going straight to the other team.
+POSSESSION_SECONDS = 12.0
+STOPPAGE_SECONDS = 8.0
+TO_DEAD_SHARE = 0.4
+
+# Each graded half opens just before a kickoff, i.e. out of a stoppage.
+START = np.array([0.1, 0.1, 0.8])
+
+CACHE = os.path.join(DATA_DIR, "cache", "hmm_v1_distances.npz")
+
+
+def emission_table():
+    """log p(category | state), states x categories: five gap bins then BALL_MISSING."""
+    table = np.zeros((3, N_GAP_BINS + 1))
+    for state, gap in ((H, GAP_GIVEN_HOME), (A, GAP_GIVEN_HOME[::-1]), (D, GAP_GIVEN_DEAD)):
+        table[state, :N_GAP_BINS] = (1.0 - P_MISSING[state]) * gap
+        table[state, BALL_MISSING] = P_MISSING[state]
+    return np.log(table)
+
+
+def transitions():
+    return rate_log_trans(POSSESSION_SECONDS * FPS, STOPPAGE_SECONDS * FPS, TO_DEAD_SHARE)
+
+
+def graded_segments(game=GAME):
+    """(start, stop) video-frame slices of the graded halves, stop exclusive."""
+    return [(first, last + 1) for _, first, last in half_video_blocks(game)]
+
+
+def decode(cats, log_table, log_trans, log_start, segments):
+    """Labels for every video frame: one Viterbi path per half, X everywhere else."""
+    labels = np.full(len(cats), "X", dtype="<U1")
+    for lo, hi in segments:
+        log_emit = build_log_emit([(cats[lo:hi], log_table, WEIGHT)])
+        labels[lo:hi] = STATES[viterbi(log_emit, log_trans, log_start)]
+    return labels
+
+
+def load_categories(game=GAME, data_dir=None):
+    meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
+    n_frames = source_frames("tactical", game)
+    print("reading {} (cached after the first run) ...".format(os.path.basename(raw_path)))
+    ball_seen, d_home, d_away = load_distances(
+        raw_path, team_of_each_track(meta_path), n_frames, GAMES[game]["pitch"], CACHE)
+    return gap_category(ball_seen, d_home, d_away)
+
+
+def summarise(labels, segments):
+    """Label counts and possession counts per half: what the file claims, no ground truth."""
+    for half, (lo, hi) in enumerate(segments, 1):
+        seg = labels[lo:hi]
+        runs = np.flatnonzero(seg[1:] != seg[:-1]) + 1
+        starts = np.concatenate(([0], runs))
+        kinds = seg[starts]
+        lengths = np.diff(np.concatenate((starts, [len(seg)])))
+        possessions = lengths[kinds != "D"]
+        stoppages = lengths[kinds == "D"]
+        print("half {}: H {:>6}  A {:>6}  D {:>6} | {} possessions, mean {:.1f} s | "
+              "{} stoppages, mean {:.1f} s".format(
+                  half, *(int(np.sum(seg == s)) for s in "HAD"), len(possessions),
+                  possessions.mean() / FPS if len(possessions) else 0, len(stoppages),
+                  stoppages.mean() / FPS if len(stoppages) else 0))
+
+
+def report_baum_welch(cats, log_table, log_trans, segments, n_iter):
+    """Fit EM from the hand-set numbers and print where it disagrees. Changes nothing."""
+    fit_table, fit_trans, history = baum_welch(cats, log_table, log_trans, np.log(START),
+                                               n_iter=n_iter, segments=segments)
+    print("\nBaum-Welch, {} iterations, log-likelihood {:.0f} -> {:.0f}".format(
+        n_iter, history[0], history[-1]))
+    names = ["gap{}".format(i) for i in range(N_GAP_BINS)] + ["missing"]
+    print("emissions       " + " ".join("{:>8}".format(n) for n in names))
+    for state in (H, A, D):
+        for tag, table in (("hand", log_table), ("fit ", fit_table)):
+            print("  {} {}     ".format(STATES[state], tag)
+                  + " ".join("{:8.3f}".format(p) for p in np.exp(table[state])))
+    hand, fit = np.exp(log_trans), np.exp(fit_trans)
+    for state in (H, A, D):
+        line = "  {} mean run: hand {:6.1f} s, fit {:6.1f} s".format(
+            STATES[state], 1 / (1 - hand[state, state]) / FPS, 1 / (1 - fit[state, state]) / FPS)
+        if state != D:
+            line += ";  share of exits to D: hand {:.2f}, fit {:.2f}".format(
+                hand[state, D] / (1 - hand[state, state]), fit[state, D] / (1 - fit[state, state]))
+        print(line)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--out", default=os.path.join(RESULTS_DIR, "hmm_v1.csv"))
+    parser.add_argument("--baum-welch", type=int, nargs="?", const=20, default=0,
+                        metavar="N_ITER", help="also run unsupervised EM as a check")
+    args = parser.parse_args()
+
+    cats = load_categories()
+    segments = graded_segments()
+    log_table, log_trans = emission_table(), transitions()
+
+    labels = decode(cats, log_table, log_trans, np.log(START), segments)
+    path = write_submission(args.out, labels)
+    print("-> {}".format(os.path.relpath(path, ROOT)))
+    summarise(labels, segments)
+
+    if args.baum_welch:
+        report_baum_welch(cats, log_table, log_trans, segments, args.baum_welch)
+
+
+if __name__ == "__main__":
+    main()
