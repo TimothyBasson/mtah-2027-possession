@@ -99,14 +99,19 @@ def test_forward_backward_posteriors_are_distributions_and_agree_with_brute_forc
 
 def test_baum_welch_never_lowers_the_likelihood_and_recovers_a_clear_chain():
     rng = np.random.default_rng(1)
-    true_table = np.array([[0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8]])
+    true_tables = [np.array([[0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8]]),
+                   np.array([[0.7, 0.3], [0.5, 0.5], [0.1, 0.9]])]
     states = np.repeat(rng.integers(0, 3, size=40), 50)
-    obs = np.array([rng.choice(3, p=true_table[s]) for s in states])
-    obs[::7] = -1  # some frames unobserved
+    clues = []
+    for k, true_table in enumerate(true_tables):
+        obs = np.array([rng.choice(true_table.shape[1], p=true_table[s]) for s in states])
+        obs[k::7] = -1  # some frames unobserved, different ones per clue
+        start = np.full(true_table.shape, 1.0 / true_table.shape[1])
+        start[np.arange(3), np.arange(3) % true_table.shape[1]] += 0.2
+        clues.append((obs, np.log(start / start.sum(axis=1, keepdims=True))))
 
-    start_table = np.log(np.array([[0.5, 0.3, 0.2], [0.3, 0.5, 0.2], [0.2, 0.2, 0.6]]))
-    table, _, history = baum_welch(obs, start_table, sticky_log_trans(0.05),
-                                   np.log(np.full(3, 1 / 3)), n_iter=15,
-                                   segments=[(0, 1000), (1000, 2000)])
+    tables, _, history = baum_welch(clues, sticky_log_trans(0.05), np.log(np.full(3, 1 / 3)),
+                                    n_iter=15, segments=[(0, 1000), (1000, 2000)])
     assert all(b >= a - 1e-6 for a, b in zip(history, history[1:]))
-    assert np.allclose(np.exp(table), true_table, atol=0.08)  # ~1.7k draws: sampling noise
+    for table, true_table in zip(tables, true_tables):  # ~1.7k draws: sampling noise
+        assert np.allclose(np.exp(table), true_table, atol=0.08)

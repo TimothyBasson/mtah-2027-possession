@@ -116,30 +116,36 @@ def forward_backward(log_emit, log_trans, log_start):
     return post, xi_sum, loglik
 
 
-def baum_welch(obs, log_table, log_trans, log_start, n_iter=20, weight=1.0, segments=None):
-    """Unsupervised EM for one categorical clue: re-estimates the emission table and transitions.
+def baum_welch(clues, log_trans, log_start, n_iter=20, weight=1.0, segments=None):
+    """Unsupervised EM: re-estimates every clue's emission table and the transitions.
 
-    `segments` is a list of (start, stop) slices decoded independently (the two halves). The start
-    prior is held fixed -- with two halves there is nothing to learn it from. Returns the fitted
-    log_table, log_trans and the log-likelihood after each iteration.
+    `clues` is a list of (obs, log_table), each obs an int category per frame with -1 for "not
+    observed", all the same length. The clues are treated as independent given the state, as in
+    build_log_emit. `segments` is a list of (start, stop) slices decoded independently (the two
+    halves). The start prior is held fixed -- with two halves there is nothing to learn it from.
+    Returns the fitted log_tables (one per clue), log_trans and the log-likelihood after each
+    iteration.
     """
-    obs = np.asarray(obs)
-    segments = segments or [(0, len(obs))]
-    n_states, n_cats = log_table.shape
+    obs_list = [np.asarray(obs) for obs, _ in clues]
+    tables = [log_table for _, log_table in clues]
+    segments = segments or [(0, len(obs_list[0]))]
+    n_states = log_trans.shape[0]
     history = []
     for _ in range(n_iter):
-        counts = np.zeros((n_states, n_cats))
+        counts = [np.zeros(table.shape) for table in tables]
         xi_total = np.zeros((n_states, n_states))
         loglik = 0.0
         for lo, hi in segments:
-            seg = obs[lo:hi]
-            log_emit = build_log_emit([(seg, log_table, weight)], n_states)
+            log_emit = build_log_emit(
+                [(obs[lo:hi], table, weight) for obs, table in zip(obs_list, tables)], n_states)
             post, xi_sum, ll = forward_backward(log_emit, log_trans, log_start)
             loglik += ll
             xi_total += xi_sum
-            seen = seg >= 0
-            np.add.at(counts.T, seg[seen], post[seen])
+            for obs, count in zip(obs_list, counts):
+                seg = obs[lo:hi]
+                seen = seg >= 0
+                np.add.at(count.T, seg[seen], post[seen])
         history.append(loglik)
-        log_table = np.log(counts / counts.sum(axis=1, keepdims=True))
+        tables = [np.log(count / count.sum(axis=1, keepdims=True)) for count in counts]
         log_trans = np.log(xi_total / xi_total.sum(axis=1, keepdims=True))
-    return log_table, log_trans, history
+    return tables, log_trans, history
