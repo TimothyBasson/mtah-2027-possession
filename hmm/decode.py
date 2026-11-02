@@ -2,6 +2,7 @@
 
     python -m hmm.decode                    # writes evaluation/results/hmm_v1.csv
     python -m hmm.decode --baum-welch       # also prints what unsupervised EM would change
+    python -m hmm.decode --baum-welch --bw-weight 0.1   # ... with the decoder's tempered emissions
 
 Every number below is set by hand from football reasoning, never tuned on the public window --
 EVALUATION.md shows that tuning there picks the wrong setting. Baum-Welch on the full match
@@ -54,6 +55,10 @@ START = np.array([0.1, 0.1, 0.8])
 # are the anchors games.py publishes ("the ball is struck on this frame"), not ground truth. The
 # second half's graded block opens ~2 minutes before its kickoff, and a soft start prior alone
 # lets the decoder fill that stretch with H.
+#
+# The kickoff frame itself is left free: the pin covers [half start, kickoff). The public ground
+# truth is already live (A) on 11185, one frame before the first-half anchor 11186, so the anchor
+# is not later than the ball going live, and pinning it too could mark a live frame D.
 KICKOFFS = tuple(anchor_video_frame(GAMES[GAME][key]) for key in ("kickoff", "kickoff_2nd"))
 
 # A log-likelihood low enough to rule a state out without the inf - inf of a true -inf.
@@ -129,12 +134,17 @@ def summarise(labels, segments):
                            spells.max()]) / FPS)))
 
 
-def report_baum_welch(cats, log_table, log_trans, segments, n_iter):
-    """Fit EM from the hand-set numbers and print where it disagrees. Changes nothing."""
+def report_baum_welch(cats, log_table, log_trans, segments, n_iter, weight=1.0):
+    """Fit EM from the hand-set numbers and print where it disagrees. Changes nothing.
+
+    With weight < 1 the E-step uses the same tempered emissions as the decoder, but the M-step
+    re-estimates the table as if they were untempered, so it is a heuristic rather than true EM.
+    It shows where the decoder's own posteriors pull the numbers, not a maximum-likelihood fit.
+    """
     fit_table, fit_trans, history = baum_welch(cats, log_table, log_trans, np.log(START),
-                                               n_iter=n_iter, segments=segments)
-    print("\nBaum-Welch, {} iterations, log-likelihood {:.0f} -> {:.0f}".format(
-        n_iter, history[0], history[-1]))
+                                               n_iter=n_iter, weight=weight, segments=segments)
+    print("\nBaum-Welch, {} iterations, emission weight {}, log-likelihood {:.0f} -> {:.0f}".format(
+        n_iter, weight, history[0], history[-1]))
     names = ["gap{}".format(i) for i in range(N_GAP_BINS)] + ["missing"]
     print("emissions       " + " ".join("{:>8}".format(n) for n in names))
     for state in (H, A, D):
@@ -156,6 +166,9 @@ def main():
     parser.add_argument("--out", default=os.path.join(RESULTS_DIR, "hmm_v1.csv"))
     parser.add_argument("--baum-welch", type=int, nargs="?", const=20, default=0,
                         metavar="N_ITER", help="also run unsupervised EM as a check")
+    parser.add_argument("--bw-weight", type=float, default=1.0, metavar="W",
+                        help="emission weight for the EM check: 1.0 is plain EM, {} matches "
+                             "the decoder (tempered, a heuristic)".format(WEIGHT))
     args = parser.parse_args()
 
     cats = load_categories()
@@ -168,7 +181,7 @@ def main():
     summarise(labels, segments)
 
     if args.baum_welch:
-        report_baum_welch(cats, log_table, log_trans, segments, args.baum_welch)
+        report_baum_welch(cats, log_table, log_trans, segments, args.baum_welch, args.bw_weight)
 
 
 if __name__ == "__main__":
