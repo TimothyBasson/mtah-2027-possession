@@ -4,9 +4,11 @@ import os
 import sys
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from hmm.clues import BALL_MISSING, gap_category, line_distances  # noqa: E402
+from hmm.clues import (  # noqa: E402
+    BALL_MISSING, gap_category, line_distances, load_distances, read_distances)
 
 PITCH = (100.0, 50.0)
 TEAMS = np.array([0, 1, 0], dtype=np.int8)  # slots: home, away, home
@@ -39,3 +41,42 @@ def test_gap_category_bins_away_minus_home():
     #       gap:      -7    -2   0.5  2.5   7    3 (edge, inclusive)
     cats = gap_category(ball_seen, d_home, d_away)
     assert cats.tolist() == [0, 1, 2, 3, 4, 3, BALL_MISSING, -1]
+
+
+def _write_atd(folder, lines):
+    path = os.path.join(str(folder), "atd.txt")
+    with open(path, "w") as handle:
+        handle.writelines(lines)
+    return path
+
+
+def test_read_distances_counts_malformed_and_missing_lines(tmp_path):
+    path = _write_atd(tmp_path, ["1:NaN,NaN,NaN;0.5,0.6,2.0;NaN,NaN,NaN:0.5,0.5,0.0\n",
+                                 "garbage\n",
+                                 "3:NaN,NaN,NaN;0.5,0.6,2.0;NaN,NaN,NaN:NaN,NaN,NaN\n"])
+    ball_seen, _, d_away, stats = read_distances(path, TEAMS, 4, PITCH)
+    assert ball_seen.tolist() == [True, False, False, False]
+    assert np.isclose(d_away[0], 5.0)
+    assert stats == (3, 1, 2)  # frames 1 and 3 (0-based) have no line
+
+
+def test_read_distances_rejects_a_frame_outside_the_video(tmp_path):
+    path = _write_atd(tmp_path, ["5:NaN,NaN,NaN;NaN,NaN,NaN;NaN,NaN,NaN:NaN,NaN,NaN\n"])
+    with pytest.raises(ValueError):
+        read_distances(path, TEAMS, 4, PITCH)
+    path = _write_atd(tmp_path, ["0:NaN,NaN,NaN;NaN,NaN,NaN;NaN,NaN,NaN:NaN,NaN,NaN\n"])
+    with pytest.raises(ValueError):
+        read_distances(path, TEAMS, 4, PITCH)
+
+
+def test_cache_is_reused_only_for_the_same_inputs(tmp_path):
+    path = _write_atd(tmp_path, ["1:0.5,0.6,1.0;0.5,0.6,2.0;NaN,NaN,NaN:0.5,0.5,0.0\n"])
+    cache = os.path.join(str(tmp_path), "cache")
+    first = load_distances(path, TEAMS, 1, PITCH, cache)
+    again = load_distances(path, TEAMS, 1, PITCH, cache)
+    assert np.allclose(first[1], again[1]) and first[3] == again[3]
+    assert len(os.listdir(cache)) == 1
+
+    swapped = load_distances(path, 1 - TEAMS, 1, PITCH, cache)  # home/away slot map changed
+    assert len(os.listdir(cache)) == 2
+    assert np.isclose(swapped[1][0], first[2][0])  # home and away distances trade places

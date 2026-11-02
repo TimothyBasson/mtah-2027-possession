@@ -18,7 +18,8 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
+from games import (  # noqa: E402
+    DATA_DIR, GAME, GAMES, anchor_video_frame, half_video_blocks, require, source_frames)
 from hmm.clues import BALL_MISSING, N_GAP_BINS, gap_category, load_distances  # noqa: E402
 from hmm.model import (  # noqa: E402
     A, D, H, STATES, baum_welch, build_log_emit, rate_log_trans, viterbi)
@@ -49,7 +50,16 @@ TO_DEAD_SHARE = 0.4
 # Each graded half opens just before a kickoff, i.e. out of a stoppage.
 START = np.array([0.1, 0.1, 0.8])
 
-CACHE = os.path.join(DATA_DIR, "cache", "hmm_v1_distances.npz")
+# The ball is not in play before a kickoff, so graded frames before one are D. The kickoff frames
+# are the anchors games.py publishes ("the ball is struck on this frame"), not ground truth. The
+# second half's graded block opens ~2 minutes before its kickoff, and a soft start prior alone
+# lets the decoder fill that stretch with H.
+KICKOFFS = tuple(anchor_video_frame(GAMES[GAME][key]) for key in ("kickoff", "kickoff_2nd"))
+
+# A log-likelihood low enough to rule a state out without the inf - inf of a true -inf.
+IMPOSSIBLE = -1e9
+
+CACHE_DIR = os.path.join(DATA_DIR, "cache")
 
 
 def emission_table():
@@ -70,11 +80,20 @@ def graded_segments(game=GAME):
     return [(first, last + 1) for _, first, last in half_video_blocks(game)]
 
 
-def decode(cats, log_table, log_trans, log_start, segments):
+def pin_dead_before_kickoff(log_emit, lo, hi, kickoffs):
+    """Rule out H and A on the frames of [lo, hi) that come before a kickoff inside it."""
+    for kickoff in kickoffs:
+        if lo < kickoff < hi:
+            log_emit[:kickoff - lo, [H, A]] = IMPOSSIBLE
+    return log_emit
+
+
+def decode(cats, log_table, log_trans, log_start, segments, kickoffs=KICKOFFS):
     """Labels for every video frame: one Viterbi path per half, X everywhere else."""
     labels = np.full(len(cats), "X", dtype="<U1")
     for lo, hi in segments:
         log_emit = build_log_emit([(cats[lo:hi], log_table, WEIGHT)])
+        pin_dead_before_kickoff(log_emit, lo, hi, kickoffs)
         labels[lo:hi] = STATES[viterbi(log_emit, log_trans, log_start)]
     return labels
 
@@ -83,8 +102,10 @@ def load_categories(game=GAME, data_dir=None):
     meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
     n_frames = source_frames("tactical", game)
     print("reading {} (cached after the first run) ...".format(os.path.basename(raw_path)))
-    ball_seen, d_home, d_away = load_distances(
-        raw_path, team_of_each_track(meta_path), n_frames, GAMES[game]["pitch"], CACHE)
+    ball_seen, d_home, d_away, stats = load_distances(
+        raw_path, team_of_each_track(meta_path), n_frames, GAMES[game]["pitch"], CACHE_DIR)
+    print("  {} tracking lines, {} malformed and skipped, {} frames with no line "
+          "(counted as ball missing)".format(*stats))
     return gap_category(ball_seen, d_home, d_away)
 
 
@@ -98,11 +119,14 @@ def summarise(labels, segments):
         lengths = np.diff(np.concatenate((starts, [len(seg)])))
         possessions = lengths[kinds != "D"]
         stoppages = lengths[kinds == "D"]
-        print("half {}: H {:>6}  A {:>6}  D {:>6} | {} possessions, mean {:.1f} s | "
-              "{} stoppages, mean {:.1f} s".format(
-                  half, *(int(np.sum(seg == s)) for s in "HAD"), len(possessions),
-                  possessions.mean() / FPS if len(possessions) else 0, len(stoppages),
-                  stoppages.mean() / FPS if len(stoppages) else 0))
+        print("half {}: H {:>6}  A {:>6}  D {:>6} (D {:.0%})".format(
+            half, *(int(np.sum(seg == s)) for s in "HAD"), np.mean(seg == "D")))
+        for name, spells in (("possessions", possessions), ("stoppages", stoppages)):
+            if len(spells):
+                print("  {:>4} {:<11} median {:5.1f} s  mean {:5.1f} s  p90 {:5.1f} s  "
+                      "max {:5.0f} s".format(len(spells), name, *(np.array(
+                          [np.median(spells), spells.mean(), np.percentile(spells, 90),
+                           spells.max()]) / FPS)))
 
 
 def report_baum_welch(cats, log_table, log_trans, segments, n_iter):
