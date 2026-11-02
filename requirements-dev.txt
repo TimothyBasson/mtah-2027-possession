@@ -1,0 +1,5 @@
+# Test-only tooling. Not needed to produce or score a submission.
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   python -m pytest tests
+pytest
