@@ -19,12 +19,12 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from games import (  # noqa: E402
-    DATA_DIR, GAME, GAMES, anchor_video_frame, half_video_blocks, require, source_frames)
+from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
 from hmm.clues import BALL_MISSING, N_GAP_BINS, gap_category, load_distances  # noqa: E402
 from hmm.model import (  # noqa: E402
     A, D, H, STATES, baum_welch, build_log_emit, rate_log_trans, viterbi)
 from starter.baseline import RESULTS_DIR, team_of_each_track, write_submission  # noqa: E402
+from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES  # noqa: E402
 
 FPS = GAMES[GAME]["fps"]
 
@@ -51,15 +51,15 @@ TO_DEAD_SHARE = 0.4
 # Each graded half opens just before a kickoff, i.e. out of a stoppage.
 START = np.array([0.1, 0.1, 0.8])
 
-# The ball is not in play before a kickoff, so graded frames before one are D. The kickoff frames
-# are the anchors games.py publishes ("the ball is struck on this frame"), not ground truth. The
-# second half's graded block opens ~2 minutes before its kickoff, and a soft start prior alone
-# lets the decoder fill that stretch with H.
+# The ball is not in play before a kickoff, so graded frames before one are D. The second half's
+# graded block opens ~2 minutes before its kickoff, and a soft start prior alone lets the decoder
+# fill that stretch with H.
 #
-# The kickoff frame itself is left free: the pin covers [half start, kickoff). The public ground
-# truth is already live (A) on 11185, one frame before the first-half anchor 11186, so the anchor
-# is not later than the ball going live, and pinning it too could mark a live frame D.
-KICKOFFS = tuple(anchor_video_frame(GAMES[GAME][key]) for key in ("kickoff", "kickoff_2nd"))
+# The kickoff frames are the published ones (DATA.md, FAQ.md, starter/load_smart_tagging.py):
+# 11185, the first graded frame, and 113742, so 110808..113741 -- the 2,934 frames FAQ.md says are
+# all D -- are pinned and the kickoff frame itself is live. Not the games.py playback anchors
+# (11186, 113741), which are one frame off in opposite directions.
+KICKOFFS = tuple(KICKOFF_VIDEO_FRAMES[half] for half in ("1st Half", "2nd Half"))
 
 # A log-likelihood low enough to rule a state out without the inf - inf of a true -inf.
 IMPOSSIBLE = -1e9

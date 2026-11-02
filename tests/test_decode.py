@@ -7,7 +7,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hmm.clues import N_GAP_BINS  # noqa: E402
-from hmm.decode import START, decode, emission_table, transitions  # noqa: E402
+from hmm.decode import (  # noqa: E402
+    KICKOFFS, START, decode, emission_table, graded_segments, pin_dead_before_kickoff, transitions)
 
 
 def test_frames_before_a_kickoff_are_dead_even_against_strong_evidence():
@@ -25,3 +26,14 @@ def test_a_kickoff_at_the_start_of_a_half_pins_nothing():
     labels = decode(cats, emission_table(), transitions(), np.log(START),
                     segments=[(0, 500)], kickoffs=(0,))
     assert set(labels) == {"H"}
+
+
+def test_published_kickoffs_pin_exactly_the_second_half_warm_up():
+    # FAQ.md: the second half is graded from 110,808 but kicks off at 113,742, and those 2,934
+    # frames are all D. The first half is graded from its kickoff, so nothing is pinned there.
+    (lo1, hi1), (lo2, hi2) = graded_segments()
+    assert KICKOFFS == (lo1, 113742)
+    log_emit = np.zeros((hi2 - lo2, 3))
+    pin_dead_before_kickoff(log_emit, lo2, hi2, KICKOFFS)
+    pinned = np.flatnonzero(log_emit[:, 0] < 0)
+    assert len(pinned) == 2934 and pinned[-1] + lo2 == 113741
