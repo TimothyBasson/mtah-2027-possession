@@ -8,9 +8,12 @@ neutral, and D comes from the ball being seen past a line, or lost at or past on
     python -m hmm.decode --baum-welch       # also prints what unsupervised EM would change
     python -m hmm.decode --baum-welch --bw-weight 0.1   # ... with the decoder's tempered emissions
 
-Every number below is set by hand from football reasoning, never tuned on the public window --
-EVALUATION.md shows that tuning there picks the wrong setting. Baum-Welch on the full match
-(no labels) is run only as a check on these numbers, and does not overwrite them.
+Every number below is set by hand, never tuned on the public window -- EVALUATION.md shows that
+tuning there picks the wrong setting. Where a number was checked against data, the data was
+label-free: summaries of the full match's own tracking (how often the ball is missing, where it
+was last seen) and Smart Tagging, which is Metrica's automatic output, not ground truth. Each
+comment below says which. Baum-Welch on the full match (no labels) is run only as a check on these
+numbers, and does not overwrite them.
 
 numpy only, like starter/baseline.py, so it runs in the scorer's environment.
 """
@@ -47,15 +50,26 @@ GAP_GIVEN_DEAD = np.full(N_GAP_BINS, 1.0 / N_GAP_BINS)
 #   gone out it is often seen past the line, before the tracker drops it or while it is fetched.
 # - MISSING_AFTER_LINE: in play the ball is within 2 m of a line on ~9% of frames, so few dropouts
 #   start there; a ball that goes out is usually lost right at the line.
-# - MISSING_AFTER_PLAY leans slightly live, MISSING_STALE says nothing.
+# - MISSING_AFTER_PLAY leans slightly live.
+# - MISSING_STALE says nothing on purpose: a long dropout is as likely to be live play as a
+#   stoppage (of the 44 dropouts over 20 s, about a third start at a line), and leaning it towards
+#   D would bring back v1's failure.
+# The shape is football reasoning; the levels were checked against the full match's own
+# label-free summaries (41% missing, 9% of sightings within 2 m of a line, 25-43% of dropouts
+# starting there), and report_places prints the observed shares on every run.
+#
+# Not double counting with the gap clue: the gap table is p(gap | state, ball usable) and is only
+# observed when the ball is usable, so the two tables factor p(place, gap | state) by the chain
+# rule. IN_PLAY's 0.59 vs 0.41 is p(ball usable | state), which the gap table does not contain.
 PLACE_GIVEN_LIVE = np.array([0.590, 0.003, 0.040, 0.217, 0.150])
 PLACE_GIVEN_DEAD = np.array([0.410, 0.040, 0.250, 0.150, 0.150])
 
 # How long a last sighting at the line is carried into a missing stretch; past this the decoder
-# relies on the transitions alone. Throw-ins are taken within ~10 s, but at the tagged corners the
-# ball was last seen a median 24 s before the kick, so 15 s ended the stoppage early. Checked
-# label-free on the full match: 30 s catches more tagged corners and goal kicks than 15 s, and
-# 45 s, 60 s or the whole stretch catch no more -- they only stretch the longest stoppages.
+# relies on the transitions alone. Football reasoning: a throw-in is taken within ~10 s, a goal
+# kick or corner usually within 20-40 s of the ball going out. Checked against Smart Tagging (not
+# ground truth): at the tagged corners the ball was last seen a median 24 s before the kick, so
+# 15 s ended the stoppage early; 30 s catches more tagged corners and goal kicks, and 45 s, 60 s or
+# the whole stretch catch no more -- they only stretch the longest stoppages.
 CARRY_SECONDS = 30
 
 # Trust exponent on each frame's clue. At 25 fps neighbouring frames repeat the same look at the

@@ -130,3 +130,10 @@ def test_a_far_outside_sighting_counts_as_missing_and_does_not_reset_the_carry()
     # Midfield, then a "ball" 10 m outside (a spare ball), then missing: all carried from midfield.
     assert _place([50, -10, nan, nan, nan], [25, 25, nan, nan, nan]) == (
         [IN_PLAY] + [MISSING_AFTER_PLAY] * 3 + [MISSING_STALE])
+
+
+def test_a_ball_fetched_far_behind_the_goal_line_stays_lost_at_the_line():
+    nan = np.nan
+    # Last seen on the goal line, then tracked 8 m behind it while fetched, then lost.
+    assert _place([0.5, -8, -8, nan, nan], [25] * 3 + [nan] * 2, carry=4) == (
+        [IN_PLAY] + [MISSING_AFTER_LINE] * 4)
