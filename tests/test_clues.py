@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hmm.clues import (  # noqa: E402
-    IN_PLAY, MAX_SPEED, MISSING_AFTER_LINE, MISSING_AFTER_PLAY, MISSING_STALE, OUTSIDE, SPEED_LAG,
+    IN_PLAY, MAX_SPEED, MIN_PLAYERS, MISSING_AFTER_LINE, MISSING_AFTER_PLAY, MISSING_STALE, OUTSIDE, SPEED_LAG,
     ball_is_usable, ball_place_category, gap_category, line_distances, line_positions,
     load_distances, median_player_speed, metres_outside, read_distances, speed_category)
 
@@ -148,21 +148,27 @@ def test_a_ball_fetched_far_behind_the_goal_line_stays_lost_at_the_line():
         [IN_PLAY] + [MISSING_AFTER_LINE] * 4)
 
 
-def test_median_player_speed_is_over_the_lag_and_ignores_identity_jumps():
-    n = 3 * SPEED_LAG
+def _walkers(n, speeds):
     t = np.arange(n, dtype=float)[:, None]
-    # Three players walking at 1, 2 and 3 m/s along x, and one that jumps far (an identity swap).
-    px = np.hstack([t * v / FPS for v in (1.0, 2.0, 3.0)] + [t * (2 * MAX_SPEED) / FPS])
-    py = np.zeros_like(px)
+    px = np.hstack([t * v / FPS for v in speeds])
+    return px, np.zeros_like(px)
+
+
+def test_median_player_speed_is_over_a_centred_lag_and_ignores_identity_jumps():
+    n = 3 * SPEED_LAG
+    # Players at 1, 2 and 3 m/s along x, and one that jumps far (an identity swap).
+    px, py = _walkers(n, [1.0, 2.0, 3.0] * MIN_PLAYERS + [2 * MAX_SPEED])
     speed = median_player_speed(px, py, FPS)
-    assert np.isnan(speed[:SPEED_LAG]).all()  # no position SPEED_LAG frames back yet
-    assert np.allclose(speed[SPEED_LAG:], 2.0)
+    behind, ahead = SPEED_LAG - SPEED_LAG // 2, SPEED_LAG // 2
+    assert np.isnan(speed[:behind]).all() and np.isnan(speed[n - ahead:]).all()
+    assert np.allclose(speed[behind:n - ahead], 2.0)
 
 
-def test_median_player_speed_is_nan_where_nobody_is_tracked_at_both_ends():
-    px = np.zeros((2 * SPEED_LAG, 2))
-    px[SPEED_LAG:, :] = np.nan
-    assert np.isnan(median_player_speed(px, np.zeros_like(px), FPS)[SPEED_LAG:]).all()
+def test_a_speed_over_too_few_players_counts_as_unmeasured():
+    px, py = _walkers(3 * SPEED_LAG, [1.0] * MIN_PLAYERS)
+    px[2 * SPEED_LAG:, 0] = np.nan  # one player lost: MIN_PLAYERS - 1 left
+    speed = median_player_speed(px, py, FPS)
+    assert np.isfinite(speed[SPEED_LAG]) and np.isnan(speed[2 * SPEED_LAG:]).all()
 
 
 def test_speed_category_bins_from_standing_to_running_and_skips_nan():
@@ -173,8 +179,12 @@ def test_speed_category_bins_from_standing_to_running_and_skips_nan():
 
 def test_read_distances_measures_how_fast_the_players_move(tmp_path):
     # Slot 0 moves 0.1 of the 100 m pitch (10 m) every frame: 250 m/s, an identity jump, ignored.
-    # Slots 1 and 2 move 0.0008 of 50 m (0.04 m) a frame: 1 m/s.
-    lines = ["{}:{:.4f},0.5,0;0.5,{:.4f},0;0.2,{:.4f},0:0.5,0.5,0\n".format(
-        f + 1, (0.1 * f) % 1, 0.1 + 0.0008 * f, 0.1 + 0.0008 * f) for f in range(2 * SPEED_LAG)]
-    *_, speed, _ = read_distances(_write_atd(tmp_path, lines), TEAMS, 2 * SPEED_LAG, PITCH, FPS)
-    assert np.allclose(speed[SPEED_LAG:], 1.0)
+    # The other slots move 0.0008 of 50 m (0.04 m) a frame: 1 m/s.
+    n_slots = MIN_PLAYERS + 1
+    teams = np.arange(n_slots, dtype=np.int8) % 2
+    n = 3 * SPEED_LAG
+    lines = ["{}:{:.4f},0.5,0;{}:0.5,0.5,0\n".format(
+        f + 1, (0.1 * f) % 1, ";".join(["0.5,{:.4f},0".format(0.1 + 0.0008 * f)] * MIN_PLAYERS))
+        for f in range(n)]
+    *_, speed, _ = read_distances(_write_atd(tmp_path, lines), teams, n, PITCH, FPS)
+    assert np.allclose(speed[SPEED_LAG:2 * SPEED_LAG], 1.0)

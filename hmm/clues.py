@@ -33,7 +33,7 @@ import numpy as np
 from starter.baseline import FIELD_SEP, GROUP_SEP, HOME, MISSING
 
 # Bump when the parsing below changes, so an old cache is never read back as new.
-CLUES_VERSION = 3
+CLUES_VERSION = 4
 
 # Bin edges on the gap, in metres. Right-inclusive: (-inf, -3], (-3, -1], (-1, 1], (1, 3], (3, inf).
 GAP_EDGES = np.array([-3.0, -1.0, 1.0, 3.0])
@@ -55,10 +55,13 @@ LINE_MARGIN = 2.0
 FAR_OUTSIDE = 5.0
 
 # Player speed is measured over SPEED_LAG frames (0.2 s at 25 fps), as in external/build.py, from
-# positions; the speed field in the ATD is not used. A step faster than MAX_SPEED m/s is no
-# footballer but a tracked identity jumping to another player, and is dropped.
+# positions; the speed field in the ATD is not used. The window is centred on the frame, since the
+# decoding is offline. A step faster than MAX_SPEED m/s is no footballer but a tracked identity
+# jumping to another player, and is dropped. A median over fewer than MIN_PLAYERS measured players
+# is too thin to say the team is walking, and counts as unmeasured.
 SPEED_LAG = 5
 MAX_SPEED = 12.0
+MIN_PLAYERS = 6
 # Bin edges on the median player speed, m/s: standing, walking, jogging, running.
 SPEED_EDGES = np.array([0.6, 0.9, 1.2, 1.5, 2.0, 2.5])
 N_SPEED_BINS = len(SPEED_EDGES) + 1
@@ -107,18 +110,28 @@ def line_positions(line, n_slots, pitch):
     return int(parts[0]) - 1, xs, ys
 
 
-def median_player_speed(px, py, fps):
-    """Median speed of the tracked players per frame, m/s, from (frames, slots) positions.
+def measured_player_speeds(px, py, fps):
+    """Speed of every player slot per frame, m/s, over a SPEED_LAG window centred on the frame:
+    frame t uses the positions at t - (SPEED_LAG - SPEED_LAG // 2) and t + SPEED_LAG // 2.
 
-    NaN for the first SPEED_LAG frames and where no player is tracked at both ends of the lag."""
+    NaN where the slot is untracked at either end, at the edges of the array, and above MAX_SPEED."""
+    ahead = SPEED_LAG // 2
     speed = np.full(px.shape, np.nan)
-    speed[SPEED_LAG:] = np.hypot(px[SPEED_LAG:] - px[:-SPEED_LAG],
-                                 py[SPEED_LAG:] - py[:-SPEED_LAG]) * fps / SPEED_LAG
+    speed[SPEED_LAG - ahead:len(px) - ahead] = np.hypot(
+        px[SPEED_LAG:] - px[:-SPEED_LAG], py[SPEED_LAG:] - py[:-SPEED_LAG]) * fps / SPEED_LAG
     with np.errstate(invalid="ignore"):
         speed[speed > MAX_SPEED] = np.nan
+    return speed
+
+
+def median_player_speed(px, py, fps):
+    """Median speed of the measured players per frame, m/s, from (frames, slots) positions.
+
+    NaN where fewer than MIN_PLAYERS are measured (see measured_player_speeds)."""
+    speed = measured_player_speeds(px, py, fps)
     out = np.full(len(px), np.nan)
-    tracked = np.isfinite(speed).any(axis=1)
-    out[tracked] = np.nanmedian(speed[tracked], axis=1)
+    enough = np.isfinite(speed).sum(axis=1) >= MIN_PLAYERS
+    out[enough] = np.nanmedian(speed[enough], axis=1)
     return out
 
 
