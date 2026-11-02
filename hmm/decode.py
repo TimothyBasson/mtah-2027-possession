@@ -1,18 +1,23 @@
-"""Sticky HMM v2: nearest-player gap + where the ball is, decoded with Viterbi, one path per half.
+"""Sticky HMM v3: nearest-player gap + where the ball is + how fast the players move, decoded with
+Viterbi, one path per half.
 
-v2 adds one thing to v1: a ball that goes out of play. In v1 a missing ball was the only evidence
-for D, so every long tracker dropout became a stoppage. Now a missing ball on its own is close to
-neutral, and D comes from the ball being seen past a line, or lost at or past one.
+v2 added a ball that goes out of play: a missing ball on its own is close to neutral, and D comes
+from the ball being seen past a line, or lost at or past one. v3 adds the players' speed. When the
+ball is dead the players walk; in play most of them run. That catches stoppages with the ball in
+view (fouls, free kicks), and says what a missing ball means: missing while the players walk leans
+D, missing while they run leans live -- without assuming either for every dropout, which is where
+v1 (missing = D) and v2 (missing = neutral) each went wrong on some of the external matches.
 
-    python -m hmm.decode                    # writes evaluation/results/hmm_v2.csv
+    python -m hmm.decode                    # writes evaluation/results/hmm_v3.csv
     python -m hmm.decode --baum-welch       # also prints what unsupervised EM would change
     python -m hmm.decode --baum-welch --bw-weight 0.1   # ... with the decoder's tempered emissions
 
-Every number below is set by hand, never tuned on the public window -- EVALUATION.md shows that
-tuning there picks the wrong setting. Where a number was checked against data, the data was
-label-free: summaries of the full match's own tracking (how often the ball is missing, where it
-was last seen) and Smart Tagging, which is Metrica's automatic output, not ground truth. Each
-comment below says which. Baum-Welch on the full match (no labels) is run only as a check on these
+No number below is tuned on the public window -- EVALUATION.md shows that tuning there picks the
+wrong setting. Most are set by hand; where one was checked against this match, the data was
+label-free: summaries of its own tracking (how often the ball is missing, where it was last seen)
+and Smart Tagging, which is Metrica's automatic output, not ground truth. The speed table is the
+one exception to "by hand": it is counted from the labelled external matches (external/, other
+games, which RULES.md allows). Each comment below says which. Baum-Welch on the full match (no labels) is run only as a check on these
 numbers, and does not overwrite them.
 
 numpy only, like starter/baseline.py, so it runs in the scorer's environment.
@@ -28,7 +33,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
 from hmm.clues import (  # noqa: E402
-    N_GAP_BINS, ball_is_usable, ball_place_category, gap_category, load_distances)
+    N_GAP_BINS, ball_is_usable, ball_place_category, gap_category, load_distances, speed_category)
 from hmm.model import (  # noqa: E402
     A, D, H, STATES, baum_welch, build_log_emit, rate_log_trans, viterbi)
 from starter.baseline import RESULTS_DIR, team_of_each_track, write_submission  # noqa: E402
@@ -56,13 +61,21 @@ GAP_GIVEN_DEAD = np.full(N_GAP_BINS, 1.0 / N_GAP_BINS)
 #   D would bring back v1's failure.
 # The shape is football reasoning; the levels were checked against the full match's own
 # label-free summaries (41% missing, 9% of sightings within 2 m of a line, 25-43% of dropouts
-# starting there), and report_places prints the observed shares on every run.
+# starting there), and report_shares prints the observed shares on every run.
 #
 # Not double counting with the gap clue: the gap table is p(gap | state, ball usable) and is only
 # observed when the ball is usable, so the two tables factor p(place, gap | state) by the chain
 # rule. IN_PLAY's 0.59 vs 0.41 is p(ball usable | state), which the gap table does not contain.
 PLACE_GIVEN_LIVE = np.array([0.590, 0.003, 0.040, 0.217, 0.150])
 PLACE_GIVEN_DEAD = np.array([0.410, 0.040, 0.250, 0.150, 0.150])
+
+# p(median player speed bin | state), bins (hmm/clues.py SPEED_EDGES) <0.6, <0.9, <1.2, <1.5,
+# <2.0, <2.5, >=2.5 m/s. Counted on the labelled external matches: the mean over the 7 IDSSE
+# matches and the mean over the 3 Metrica samples, averaged so each provider counts once. The two
+# providers agree to within 0.03 in most bins (IDSSE live has fewer standing frames, 0.002 against
+# 0.036). H and A share the live row: speed says the ball is in play, not who has it.
+SPEED_GIVEN_LIVE = np.array([0.020, 0.035, 0.100, 0.167, 0.213, 0.148, 0.317])
+SPEED_GIVEN_DEAD = np.array([0.222, 0.221, 0.247, 0.208, 0.076, 0.013, 0.013])
 
 # How long a last sighting at the line is carried into a missing stretch; past this the decoder
 # relies on the transitions alone. Football reasoning: a throw-in is taken within ~10 s, a goal
@@ -111,6 +124,11 @@ def place_table():
     return np.log(np.array([PLACE_GIVEN_LIVE, PLACE_GIVEN_LIVE, PLACE_GIVEN_DEAD]))
 
 
+def speed_table(live=SPEED_GIVEN_LIVE, dead=SPEED_GIVEN_DEAD):
+    """log p(speed bin | state), states x speed bins."""
+    return np.log(np.array([live, live, dead]))
+
+
 def transitions():
     return rate_log_trans(POSSESSION_SECONDS * FPS, STOPPAGE_SECONDS * FPS, TO_DEAD_SHARE)
 
@@ -141,29 +159,30 @@ def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS):
 
 
 def load_observations(game=GAME, data_dir=None):
-    """(gap, place) categories for every video frame."""
+    """(gap, place, speed) categories for every video frame."""
     meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
     n_frames = source_frames("tactical", game)
     print("reading {} (cached after the first run) ...".format(os.path.basename(raw_path)))
     pitch = GAMES[game]["pitch"]
-    ball_x, ball_y, d_home, d_away, stats = load_distances(
-        raw_path, team_of_each_track(meta_path), n_frames, pitch, CACHE_DIR)
+    ball_x, ball_y, d_home, d_away, speed, stats = load_distances(
+        raw_path, team_of_each_track(meta_path), n_frames, pitch, FPS, CACHE_DIR)
     print("  {} tracking lines, {} malformed and skipped, {} frames with no line "
           "(counted as ball missing)".format(*stats))
     gap = gap_category(ball_is_usable(ball_x, ball_y, pitch), d_home, d_away)
     place = ball_place_category(ball_x, ball_y, pitch, CARRY_SECONDS * FPS)
-    return gap, place
+    return gap, place, speed_category(speed)
 
 
 PLACE_NAMES = ["in play", "outside", "lost@line", "lost@play", "stale"]
+SPEED_NAMES = ["<0.6", "<0.9", "<1.2", "<1.5", "<2.0", "<2.5", ">=2.5"]
 
 
-def report_places(place, segments):
-    """Share of each ball-place category over the graded frames: label-free, a check on the
-    hand-set PLACE_GIVEN_* (mixed at the decoded D share they should land near these)."""
-    graded = np.concatenate([place[lo:hi] for lo, hi in segments])
-    print("ball place on graded frames: " + "  ".join(
-        "{} {:.1%}".format(name, np.mean(graded == k)) for k, name in enumerate(PLACE_NAMES)))
+def report_shares(obs, names, what, segments):
+    """Share of each category over the graded frames: label-free, a check on the PLACE_GIVEN_* and
+    SPEED_GIVEN_* tables (mixed at the decoded D share they should land near these)."""
+    graded = np.concatenate([obs[lo:hi] for lo, hi in segments])
+    print("{} on graded frames: ".format(what) + "  ".join(
+        "{} {:.1%}".format(name, np.mean(graded == k)) for k, name in enumerate(names)))
 
 
 def summarise(labels, segments):
@@ -198,7 +217,8 @@ def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
     print("\nBaum-Welch, {} iterations, emission weight {}, log-likelihood {:.0f} -> {:.0f}".format(
         n_iter, weight, history[0], history[-1]))
     gap_names = ["gap{}".format(i) for i in range(N_GAP_BINS)]
-    for names, (_, log_table), fit_table in zip((gap_names, PLACE_NAMES), clues, fit_tables):
+    for names, (_, log_table), fit_table in zip((gap_names, PLACE_NAMES, SPEED_NAMES), clues,
+                                                fit_tables):
         print("emissions       " + " ".join("{:>9}".format(n) for n in names))
         for state in (H, A, D):
             for tag, table in (("hand", log_table), ("fit ", fit_table)):
@@ -216,7 +236,7 @@ def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", default=os.path.join(RESULTS_DIR, "hmm_v2.csv"))
+    parser.add_argument("--out", default=os.path.join(RESULTS_DIR, "hmm_v3.csv"))
     parser.add_argument("--baum-welch", type=int, nargs="?", const=20, default=0,
                         metavar="N_ITER", help="also run unsupervised EM as a check")
     parser.add_argument("--bw-weight", type=float, default=1.0, metavar="W",
@@ -224,10 +244,11 @@ def main():
                              "the decoder (tempered, a heuristic)".format(WEIGHT))
     args = parser.parse_args()
 
-    gap, place = load_observations()
+    gap, place, speed = load_observations()
     segments = graded_segments()
-    report_places(place, segments)
-    clues = [(gap, gap_table()), (place, place_table())]
+    report_shares(place, PLACE_NAMES, "ball place", segments)
+    report_shares(speed, SPEED_NAMES, "player speed (m/s)", segments)
+    clues = [(gap, gap_table()), (place, place_table()), (speed, speed_table())]
     log_trans = transitions()
 
     labels = decode(clues, log_trans, np.log(START), segments)

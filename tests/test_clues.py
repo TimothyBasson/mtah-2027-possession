@@ -1,4 +1,5 @@
-"""Turning raw ATD into the clues: the nearest-player gap and where the ball is."""
+"""Turning raw ATD into the clues: the nearest-player gap, where the ball is, and how fast the
+players move."""
 
 import os
 import sys
@@ -8,11 +9,12 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hmm.clues import (  # noqa: E402
-    IN_PLAY, MISSING_AFTER_LINE, MISSING_AFTER_PLAY, MISSING_STALE, OUTSIDE, ball_is_usable,
-    ball_place_category, gap_category, line_distances, load_distances, metres_outside,
-    read_distances)
+    IN_PLAY, MAX_SPEED, MISSING_AFTER_LINE, MISSING_AFTER_PLAY, MISSING_STALE, OUTSIDE, SPEED_LAG,
+    ball_is_usable, ball_place_category, gap_category, line_distances, line_positions,
+    load_distances, median_player_speed, metres_outside, read_distances, speed_category)
 
 PITCH = (100.0, 50.0)
+FPS = 25
 TEAMS = np.array([0, 1, 0], dtype=np.int8)  # slots: home, away, home
 
 
@@ -36,6 +38,13 @@ def test_line_distances_handles_missing_ball_and_missing_players():
     assert not np.isnan(ball_x) and np.isnan(d_home) and np.isclose(d_away, 5.0)
 
 
+def test_line_positions_scales_every_slot_to_metres_with_nan_for_the_untracked():
+    frame, xs, ys = line_positions("7:0.6,0.5,1.0;NaN,NaN,NaN;0.5,0.44,0.0:NaN,NaN,NaN\n", 3, PITCH)
+    assert frame == 6
+    assert np.allclose(xs, [60.0, np.nan, 50.0], equal_nan=True)
+    assert np.allclose(ys, [25.0, np.nan, 22.0], equal_nan=True)
+
+
 def test_gap_category_bins_away_minus_home_and_skips_frames_without_a_usable_ball():
     usable = np.array([True, True, True, True, True, True, False, True])
     d_home = np.array([9.0, 2.0, 2.0, 2.0, 2.0, 2.0, np.nan, np.nan])
@@ -56,7 +65,7 @@ def test_read_distances_counts_malformed_and_missing_lines(tmp_path):
     path = _write_atd(tmp_path, ["1:NaN,NaN,NaN;0.5,0.6,2.0;NaN,NaN,NaN:0.5,0.5,0.0\n",
                                  "garbage\n",
                                  "3:NaN,NaN,NaN;0.5,0.6,2.0;NaN,NaN,NaN:NaN,NaN,NaN\n"])
-    ball_x, _, _, d_away, stats = read_distances(path, TEAMS, 4, PITCH)
+    ball_x, _, _, d_away, _, stats = read_distances(path, TEAMS, 4, PITCH, FPS)
     assert (~np.isnan(ball_x)).tolist() == [True, False, False, False]
     assert np.isclose(d_away[0], 5.0)
     assert stats == (3, 1, 2)  # frames 1 and 3 (0-based) have no line
@@ -65,22 +74,22 @@ def test_read_distances_counts_malformed_and_missing_lines(tmp_path):
 def test_read_distances_rejects_a_frame_outside_the_video(tmp_path):
     path = _write_atd(tmp_path, ["5:NaN,NaN,NaN;NaN,NaN,NaN;NaN,NaN,NaN:NaN,NaN,NaN\n"])
     with pytest.raises(ValueError):
-        read_distances(path, TEAMS, 4, PITCH)
+        read_distances(path, TEAMS, 4, PITCH, FPS)
     path = _write_atd(tmp_path, ["0:NaN,NaN,NaN;NaN,NaN,NaN;NaN,NaN,NaN:NaN,NaN,NaN\n"])
     with pytest.raises(ValueError):
-        read_distances(path, TEAMS, 4, PITCH)
+        read_distances(path, TEAMS, 4, PITCH, FPS)
 
 
 def test_cache_is_reused_only_for_the_same_inputs(tmp_path):
     path = _write_atd(tmp_path, ["1:0.5,0.6,1.0;0.5,0.6,2.0;NaN,NaN,NaN:0.5,0.5,0.0\n"])
     cache = os.path.join(str(tmp_path), "cache")
-    first = load_distances(path, TEAMS, 1, PITCH, cache)
-    again = load_distances(path, TEAMS, 1, PITCH, cache)
+    first = load_distances(path, TEAMS, 1, PITCH, FPS, cache)
+    again = load_distances(path, TEAMS, 1, PITCH, FPS, cache)
     assert np.allclose(first[0], again[0]) and np.allclose(first[3], again[3])
-    assert first[4] == again[4]
+    assert first[5] == again[5]
     assert len(os.listdir(cache)) == 1
 
-    swapped = load_distances(path, 1 - TEAMS, 1, PITCH, cache)  # home/away slot map changed
+    swapped = load_distances(path, 1 - TEAMS, 1, PITCH, FPS, cache)  # home/away slot map changed
     assert len(os.listdir(cache)) == 2
     assert np.isclose(swapped[2][0], first[3][0])  # home and away distances trade places
 
@@ -137,3 +146,35 @@ def test_a_ball_fetched_far_behind_the_goal_line_stays_lost_at_the_line():
     # Last seen on the goal line, then tracked 8 m behind it while fetched, then lost.
     assert _place([0.5, -8, -8, nan, nan], [25] * 3 + [nan] * 2, carry=4) == (
         [IN_PLAY] + [MISSING_AFTER_LINE] * 4)
+
+
+def test_median_player_speed_is_over_the_lag_and_ignores_identity_jumps():
+    n = 3 * SPEED_LAG
+    t = np.arange(n, dtype=float)[:, None]
+    # Three players walking at 1, 2 and 3 m/s along x, and one that jumps far (an identity swap).
+    px = np.hstack([t * v / FPS for v in (1.0, 2.0, 3.0)] + [t * (2 * MAX_SPEED) / FPS])
+    py = np.zeros_like(px)
+    speed = median_player_speed(px, py, FPS)
+    assert np.isnan(speed[:SPEED_LAG]).all()  # no position SPEED_LAG frames back yet
+    assert np.allclose(speed[SPEED_LAG:], 2.0)
+
+
+def test_median_player_speed_is_nan_where_nobody_is_tracked_at_both_ends():
+    px = np.zeros((2 * SPEED_LAG, 2))
+    px[SPEED_LAG:, :] = np.nan
+    assert np.isnan(median_player_speed(px, np.zeros_like(px), FPS)[SPEED_LAG:]).all()
+
+
+def test_speed_category_bins_from_standing_to_running_and_skips_nan():
+    cats = speed_category(np.array([0.0, 1.0, 1.7, 10.0, np.nan]))
+    assert cats[0] == 0 and cats[3] == cats.max() and cats[-1] == -1
+    assert 0 < cats[1] < cats[2] < cats[3]
+
+
+def test_read_distances_measures_how_fast_the_players_move(tmp_path):
+    # Slot 0 moves 0.1 of the 100 m pitch (10 m) every frame: 250 m/s, an identity jump, ignored.
+    # Slots 1 and 2 move 0.0008 of 50 m (0.04 m) a frame: 1 m/s.
+    lines = ["{}:{:.4f},0.5,0;0.5,{:.4f},0;0.2,{:.4f},0:0.5,0.5,0\n".format(
+        f + 1, (0.1 * f) % 1, 0.1 + 0.0008 * f, 0.1 + 0.0008 * f) for f in range(2 * SPEED_LAG)]
+    *_, speed, _ = read_distances(_write_atd(tmp_path, lines), TEAMS, 2 * SPEED_LAG, PITCH, FPS)
+    assert np.allclose(speed[SPEED_LAG:], 1.0)
