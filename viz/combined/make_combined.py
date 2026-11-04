@@ -2,6 +2,11 @@
 
     python viz/combined/make_combined.py --open
     python viz/combined/make_combined.py --pred evaluation/results/baseline_smooth50.csv --start 1:20:05 --open
+    uv run python viz/combined/make_combined.py --match all --open
+
+--match plays an outside match from data/external/ (external/README.md) instead, or with 'all', writes
+a page for BAR-ATH and every outside match with a dropdown to switch between them. Those matches
+have no video, so a timer drives the page and the pitch takes the video's place. Needs numpy.
 
 One HTML page for the entire tactical video, with three views driven by one clock -- the video:
 
@@ -26,6 +31,7 @@ out of git. Do not commit it or share it: the data terms cover derived data too.
 
 import argparse
 import csv
+import glob
 import json
 import os
 import sys
@@ -48,8 +54,8 @@ SERVE_URL = "http://localhost:8765"   # where .claude/launch.json's "viz" config
 HOM_KEYS = ("h00", "h01", "h02", "h10", "h11", "h12", "h20", "h21", "h22")
 
 
-def chunk_path(k):
-    return os.path.join(CHUNK_DIR, "chunk_{:04d}.js".format(k))
+def chunk_path(k, chunk_dir=CHUNK_DIR):
+    return os.path.join(chunk_dir, "chunk_{:04d}.js".format(k))
 
 
 def write_chunks(n_frames):
@@ -104,11 +110,43 @@ def build(pred_path=None, gt_path=PUBLIC_GT):
             "pred_name": os.path.basename(pred_path) if pred_path else None}
 
 
-def write_page(payload, out_path, video_path):
+def build_external(match, pred_path=None, rebuild=False):
+    """The page payload for an outside match, writing its chunks to data/viz/match_<match>/ first if
+    needed. Same chunk format as write_chunks, without a homography; frames are npz rows."""
+    import numpy as np
+    path = os.path.join(DATA_DIR, "external", match + ".npz")
+    if not os.path.exists(path):
+        raise SystemExit("no {} -- build it with external/build.py".format(path))
+    z = np.load(path)
+    chunk_dir = os.path.join(OUT_DIR, "match_" + match)
+    labels = z["labels"]
+    n_frames, size = len(labels), z["pitch"]
+    if rebuild or not os.path.exists(chunk_path((n_frames - 1) // CHUNK, chunk_dir)):
+        print("writing {} tracking chunks to {}".format(match, chunk_dir))
+        os.makedirs(chunk_dir, exist_ok=True)
+        players = np.rint(z["players"][..., :2] / size * 1000)
+        ball = np.rint(z["ball"][:, :2] / size * 1000)
+        for k in range(0, n_frames, CHUNK):
+            slots = [[[s + 1, int(x), int(y), 0] for s, (x, y) in enumerate(frame) if x == x]
+                     for frame in players[k:k + CHUNK].tolist()]
+            balls = [[int(x), int(y)] if x == x else None for x, y in ball[k:k + CHUNK].tolist()]
+            with open(chunk_path(k // CHUNK, chunk_dir), "w") as out:
+                out.write("MATCH_CHUNK({},{});\n".format(k // CHUNK, json.dumps(
+                    {"slots": slots, "ball": balls, "H": None}, separators=(",", ":"))))
+    halves = z["halves"].tolist()[:2]
+    return {"teams": {s + 1: "HA"[t] for s, t in enumerate(z["team"].tolist())},
+            "names": {"H": "Home", "A": "Away"}, "match": match, "n_frames": n_frames, "chunk": CHUNK,
+            "clock": {"fps": int(z["fps"]), "kickoff": [h[0] for h in halves], "end": [h[1] for h in halves]},
+            "truth": "".join(labels.tolist()),
+            "pred": label_string(pred_path, n_frames) if pred_path else None,
+            "pred_name": os.path.basename(pred_path) if pred_path else None}, chunk_dir
+
+
+def write_page(payload, out_path, video_path, chunk_dir=CHUNK_DIR):
     out_dir = os.path.dirname(os.path.abspath(out_path))
     os.makedirs(out_dir, exist_ok=True)
     rel = lambda path: os.path.relpath(path, out_dir).replace(os.sep, "/")
-    payload = dict(payload, video=rel(video_path), chunks=rel(CHUNK_DIR))
+    payload = dict(payload, video=video_path and rel(video_path), chunks=rel(chunk_dir))
     with open(TEMPLATE) as handle:
         template = handle.read()
     # "</" inside a <script> would end it early; JSON allows the escaped form.
@@ -122,6 +160,8 @@ if __name__ == '__main__':
     parser.add_argument("--start", type=parse_time, default=parse_time(DEFAULT_START),
                         help="tactical video time the page opens at: 7:27.4, 1:14:10, 453.4 or "
                              "f11185 (default: start of the public ground truth)")
+    parser.add_argument("--match", help="an outside match in data/external/ (idsse_J03WMX, metrica_1, ...), "
+                        "or 'all' for BAR-ATH and every outside match with a switcher (needs numpy)")
     parser.add_argument("--pred", help="a frame,label submission CSV to show alongside the truth")
     parser.add_argument("--gt", default=PUBLIC_GT,
                         help="ground truth CSV (default: the public 5 minutes); 'none' to hide")
@@ -132,18 +172,38 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     gt = None if args.gt.lower() == "none" else args.gt
-    n_frames = source_frames()
-    last_chunk = chunk_path((n_frames - 1) // CHUNK)
-    if args.rebuild or not os.path.exists(last_chunk):
-        print("writing tracking chunks to {} (once; takes a minute)".format(CHUNK_DIR))
-        write_chunks(n_frames)
+    matches = [args.match]
+    if args.match == "all":
+        if args.pred or args.out:
+            parser.error("--match all can't take --pred or --out: frames and paths differ per game")
+        matches = [None] + sorted(os.path.basename(f)[:-4] for f in
+                                  glob.glob(os.path.join(DATA_DIR, "external", "*.npz")))
+    suffix = "_" + os.path.splitext(os.path.basename(args.pred))[0] if args.pred else ""
+    outs = [args.out or os.path.join(OUT_DIR, "match" + ("_" + m if m else "") + suffix + ".html")
+            for m in matches]
+    games = [[m or "BAR-ATH", os.path.basename(o)] for m, o in zip(matches, outs)]
 
-    name = "match" + ("_" + os.path.splitext(os.path.basename(args.pred))[0] if args.pred else "")
-    out = args.out or os.path.join(OUT_DIR, name + ".html")
-    write_page(build(args.pred, gt), out, require(["video"])[0])
+    for match, out in zip(matches, outs):
+        if match:
+            payload, chunk_dir = build_external(match, args.pred, args.rebuild)
+            video = None
+        else:
+            n_frames = source_frames()
+            if args.rebuild or not os.path.exists(chunk_path((n_frames - 1) // CHUNK)):
+                print("writing tracking chunks to {} (once; takes a minute)".format(CHUNK_DIR))
+                write_chunks(n_frames)
+            payload, chunk_dir, video = build(args.pred, gt), CHUNK_DIR, require(["video"])[0]
+        if len(games) > 1:
+            payload["games"] = games
+        write_page(payload, out, video, chunk_dir)
+        print("wrote {}".format(out))
 
+    n_frames = payload["n_frames"] if len(matches) == 1 else source_frames()
+    # BAR-ATH opens at its default start; outside matches at the time given, else their kickoff.
     start = "#f{}".format(min(n_frames - 1, int(round(args.start * FPS))))
-    print("wrote {}".format(out))
+    if matches[0] and args.start == parse_time(DEFAULT_START):
+        start = ""
+    out = outs[0]
     if os.path.dirname(os.path.abspath(out)) == os.path.abspath(OUT_DIR):
         print("served (the 'viz' preview in .claude/launch.json): {}/viz/{}{}".format(
             SERVE_URL, os.path.basename(out), start))

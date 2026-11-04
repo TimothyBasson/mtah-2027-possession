@@ -15,6 +15,7 @@ python viz/replay/make_replay.py --start 7:33.4 --pred evaluation/results/baseli
 |---|---|
 | `--start` | tactical **video** time to start at: `7:33.4`, `1:20:05`, `453.4` (seconds) or `f11335` (a video frame) |
 | `--duration` | seconds to include, default 40, up to 15 minutes |
+| `--match` | replay an outside match from `data/external/` instead (`idsse_J03WMX`, `metrica_1`, ... see [external/README.md](../../external/README.md)). Times and frames are then that match's own, there is no video, and truth is the provider's label, not the challenge rule. Needs numpy: run with `uv run`. `--match all` writes BAR-ATH and every outside match for the same `--start`/`--duration`, with a dropdown by the title to switch between them |
 | `--pred` | a `frame,label` submission CSV; its label is shown next to the truth at every moment |
 | `--gt` | ground truth CSV, default the public 5 minutes; `none` to hide it |
 | `--step` | keep every n-th frame (default 3; the page interpolates in between). `1` is frame-exact |
