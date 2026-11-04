@@ -3,6 +3,8 @@
     python viz/replay/make_replay.py --start 7:33.4 --duration 40
     python viz/replay/make_replay.py --start 7:33.4 --pred evaluation/results/baseline_smooth50.csv
     python viz/replay/make_replay.py --start 1:20:05 --duration 60 --open
+    uv run python viz/replay/make_replay.py --match idsse_J03WMX --start 10:00 --open
+    uv run python viz/replay/make_replay.py --match all --start 10:00 --open
 
 The page draws every tracked slot on a top-down pitch, with the ball, and plays it back. Alongside
 it shows the tactical video time (seek your video player there to watch along), the game clock,
@@ -10,7 +12,8 @@ the true possession wherever the public ground truth covers the frame, and -- wh
 --pred -- what your submission says at that moment.
 
 Standard library only, on purpose: it reads the raw ATD by hand the same way starter/baseline.py
-does, so it runs in any Python 3 without numpy, pandas or kloppy.
+does, so it runs in any Python 3 without numpy, pandas or kloppy. The exception is --match, which
+replays one of the outside matches in data/external/ (see external/README.md) and needs numpy.
 
 What is on the page
 -------------------
@@ -37,6 +40,7 @@ keeps out of git. Do not commit it or share it: the data terms cover derived dat
 
 import argparse
 import csv
+import glob
 import json
 import os
 import re
@@ -171,10 +175,45 @@ def build(start_s, duration_s, pred_path=None, gt_path=PUBLIC_GT, step=DEFAULT_S
             "pred_name": os.path.basename(pred_path) if pred_path else None}
 
 
-def default_out(start_s, duration_s, pred_path):
+def build_external(match, start_s, duration_s, pred_path=None, step=DEFAULT_STEP):
+    """The same payload for an outside match from external/build.py. Frames are npz rows; the truth
+    is that provider's own label, not the challenge rule (see external/README.md)."""
+    import numpy as np
+    path = os.path.join(DATA_DIR, "external", match + ".npz")
+    if not os.path.exists(path):
+        raise SystemExit("no {} -- build it with external/build.py".format(path))
+    z = np.load(path)
+    fps, (length, width), halves = int(z["fps"]), z["pitch"], z["halves"].tolist()
+    n = len(z["labels"])
+    first = max(0, int(round(start_s * fps)))
+    last = min(n - 1, first + int(round(duration_s * fps)) - 1)
+    if first >= n:
+        raise SystemExit("start {:.1f} s is past the end of {} ({:.1f} s)".format(start_s, match, n / fps))
+
+    rows = range(first, last + 1, step)
+    players, ball, labels = z["players"][rows], z["ball"][rows], z["labels"][rows]
+    pred = read_labels(pred_path, first, last) if pred_path else None
+    frames = []
+    for i, frame in enumerate(rows):
+        slots = [[k + 1, round(float(x / length * 1000)), round(float(y / width * 1000)), 0]
+                 for k, (x, y, _) in enumerate(players[i]) if np.isfinite(x)]
+        b = ball[i]
+        frames.append([frame, slots, [round(float(b[0] / length * 1000)), round(float(b[1] / width * 1000))]
+                       if np.isfinite(b[0]) else None, str(labels[i])])
+        if pred is not None:
+            frames[-1].append(pred.get(frame, "X"))
+
+    return {"teams": {k + 1: "HA"[t] for k, t in enumerate(z["team"].tolist())},
+            "names": {"H": "Home", "A": "Away"}, "match": match, "step": step, "first": first,
+            "last": last, "frames": frames, "gt_name": match + " labels",
+            "clock": {"fps": fps, "kickoff": [h[0] for h in halves[:2]], "end": [h[1] for h in halves[:2]]},
+            "pred_name": os.path.basename(pred_path) if pred_path else None}
+
+
+def default_out(start_s, duration_s, pred_path, match=None):
     hours, rest = divmod(start_s, 3600)
     stamp = "{:d}-{:02d}-{:04.1f}".format(int(hours), int(rest // 60), rest % 60)
-    name = "replay_{}_{:d}s".format(stamp, int(round(duration_s)))
+    name = "replay_{}{}_{:d}s".format(match + "_" if match else "", stamp, int(round(duration_s)))
     if pred_path:
         name += "_" + os.path.splitext(os.path.basename(pred_path))[0]
     return os.path.join(OUT_DIR, name + ".html")
@@ -196,6 +235,9 @@ if __name__ == '__main__':
                         help="tactical video time to start at: 7:33.4, 1:14:10, 453.4 or f11335")
     parser.add_argument("--duration", type=float, default=DEFAULT_DURATION,
                         help="seconds of video to include (default %(default)s)")
+    parser.add_argument("--match", help="an outside match in data/external/, e.g. idsse_J03WMX or "
+                        "metrica_1, or 'all' for BAR-ATH and every outside match with a switcher "
+                        "between them; times and frames are then that match's own (needs numpy)")
     parser.add_argument("--pred", help="a frame,label submission CSV to show alongside the truth")
     parser.add_argument("--gt", default=PUBLIC_GT,
                         help="ground truth CSV (default: the public 5 minutes); 'none' to hide")
@@ -211,13 +253,25 @@ if __name__ == '__main__':
         parser.error("--step must be at least 1")
     gt = None if args.gt.lower() == "none" else args.gt
 
-    payload = build(args.start, args.duration, args.pred, gt, args.step)
-    out = args.out or default_out(args.start, args.duration, args.pred)
-    write_page(payload, out)
+    matches = [args.match]
+    if args.match == "all":  # BAR-ATH plus every outside match, each page linking to the others
+        if args.pred or args.out:
+            parser.error("--match all can't take --pred or --out: frames and paths differ per game")
+        matches = [None] + sorted(os.path.basename(f)[:-4] for f in
+                                  glob.glob(os.path.join(DATA_DIR, "external", "*.npz")))
+    outs = [args.out or default_out(args.start, args.duration, args.pred, m) for m in matches]
+    games = [[m or GAME, os.path.basename(o)] for m, o in zip(matches, outs)]
 
-    print("wrote {}".format(out))
-    print("video frames {}..{}  ({} samples, every {} frame{})".format(
-        payload["first"], payload["last"], len(payload["frames"]), args.step,
-        "" if args.step == 1 else "s"))
+    for match, out in zip(matches, outs):
+        if match:
+            payload = build_external(match, args.start, args.duration, args.pred, args.step)
+        else:
+            payload = build(args.start, args.duration, args.pred, gt, args.step)
+        if len(games) > 1:
+            payload["games"] = games
+        write_page(payload, out)
+        print("wrote {}  (frames {}..{}, {} samples, every {} frame{})".format(
+            out, payload["first"], payload["last"], len(payload["frames"]), args.step,
+            "" if args.step == 1 else "s"))
     if args.open:
-        webbrowser.open("file://" + os.path.abspath(out))
+        webbrowser.open("file://" + os.path.abspath(outs[0]))

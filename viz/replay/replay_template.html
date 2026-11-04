@@ -44,7 +44,7 @@ h2{font-size:14px;font-weight:600;margin:4px 0 6px}
 </head>
 <body>
 <main>
-<h1 id="title">Tracking replay</h1>
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px"><h1 id="title">Tracking replay</h1><select id="games" aria-label="Switch game" hidden></select></div>
 <p class="sub" id="sub"></p>
 <div class="wrap">
   <div class="card">
@@ -107,13 +107,23 @@ function gameClock(v) {
 }
 const LABEL = l => ({ H: [name.H, '--home'], A: [name.A, '--away'], D: ['Dead ball', '--dead'] }[l] || ['–', '--muted']);
 
-$('title').textContent = name.H + ' vs ' + name.A + ' — tracking replay';
-$('sub').textContent = 'Tactical video ' + videoTime(D.first) + ' – ' + videoTime(D.last) +
+$('title').textContent = (D.match || name.H + ' vs ' + name.A) + ' — tracking replay';
+$('sub').textContent = D.match
+  ? 'Outside match, ' + videoTime(D.first) + ' – ' + videoTime(D.last) + ' from the start of its tracking (frames ' +
+    D.first.toLocaleString() + '–' + D.last.toLocaleString() + '). No video. Truth is the provider\'s own label, not the challenge rule.' +
+    (HAS_PRED ? ' Estimate from ' + D.pred_name + '.' : '')
+  : 'Tactical video ' + videoTime(D.first) + ' – ' + videoTime(D.last) +
   ' (video frames ' + D.first.toLocaleString() + '–' + D.last.toLocaleString() + '). ' +
   'Seek your video player to the video time to watch along. Each circle is a tracking slot, not a player.' +
   (HAS_PRED ? ' Estimate from ' + D.pred_name + '.' : '');
 $('lhome').textContent = name.H + ' slots';
 $('laway').textContent = name.A + ' slots';
+if (D.games) {
+  const g = $('games'), here = decodeURIComponent(location.pathname.split('/').pop());
+  g.innerHTML = D.games.map(([l, f]) => '<option value="' + f + '"' + (f === here ? ' selected' : '') + '>' + l + '</option>').join('');
+  g.hidden = false; g.onchange = () => { location.href = g.value; };
+}
+if (D.match) $('vtime').previousElementSibling.textContent = 'Match time';
 if (!HAS_PRED) $('predbox').style.display = 'none';
 else $('predlabel').textContent = 'Your estimate (' + D.pred_name + ')';
 $('legend').innerHTML = [
