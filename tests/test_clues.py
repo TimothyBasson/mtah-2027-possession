@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hmm.clues import (  # noqa: E402
     IN_PLAY, MAX_SPEED, MIN_PLAYERS, MISSING_AFTER_LINE, MISSING_AFTER_PLAY, MISSING_STALE, OUTSIDE, SPEED_LAG,
-    ball_is_usable, ball_place_category, gap_category, home_defends_low_x, keeper_slots, line_ball,
+    KEEPER_ZONE, ball_is_usable, ball_place_category, gap_category, home_defends_low_x, keeper_slots, line_ball,
     line_positions, load_distances, median_player_speed, metres_outside, nearest_by_team,
     read_distances, speed_category, team_by_frame)
 
@@ -64,7 +64,7 @@ def test_read_distances_counts_malformed_and_missing_lines(tmp_path):
     ball_x, _, _, d_away, _, stats = read_distances(path, TEAMS, 4, PITCH, FPS)
     assert (~np.isnan(ball_x)).tolist() == [True, False, False, False]
     assert np.isclose(d_away[0], 5.0)
-    assert stats == (3, 1, 2, 0)  # frames 1 and 3 (0-based) have no line; no keepers
+    assert stats == (3, 1, 2, 0, 0)  # frames 1 and 3 (0-based) have no line; no keepers
 
 
 def test_read_distances_rejects_a_frame_outside_the_video(tmp_path):
@@ -231,7 +231,7 @@ def test_read_distances_gives_the_ball_to_the_keeper_standing_in_his_teams_goal(
                                                     keepers=KEEPERS, halves=[(0, 1)])
     assert np.isclose(d_home[0], 1.0) and np.isclose(d_away[0], 64.0)  # inside the half
     assert np.isclose(d_home[1], 24.0) and np.isclose(d_away[1], 1.0)  # outside: metadata's map
-    assert stats[3] == 1
+    assert stats[3:] == (1, 1)  # one keeper frame moved, with the ball 1 m away
 
 
 def test_keeper_slots_reads_the_goalkeeper_flag_from_the_metadata(tmp_path):
@@ -244,3 +244,24 @@ def test_keeper_slots_reads_the_goalkeeper_flag_from_the_metadata(tmp_path):
         handle.write("<main><Players>{}</Players></main>".format(
             "".join(player(k) for k in ("Unknown", "Goalkeeper", "Unknown", "Goalkeeper"))))
     assert keeper_slots(path) == (1, 3)
+
+
+def test_a_keeper_slot_away_from_both_goals_keeps_the_metadata_team():
+    # The home keeper's slot sweeping just past the zone, and on halfway, and the away keeper's
+    # slot carried onto an outfield player in the home half: none of them is moved.
+    px = _keeper_positions([KEEPER_ZONE + 1, 52.5, 5.0], [100.0, 100.0, 40.0])
+    team = team_by_frame(px, KEEPER_TEAMS, KEEPERS, [(0, 3)], 105.0)
+    assert team[:, 2].tolist() == [0, 0, 0] and team[:, 3].tolist() == [1, 1, 1]
+
+
+def test_keepers_must_be_one_per_team():
+    px = _keeper_positions([5.0], [100.0])
+    with pytest.raises(ValueError):
+        team_by_frame(px, KEEPER_TEAMS, (0, 2), [(0, 1)], 105.0)  # two home slots
+    assert (team_by_frame(px, KEEPER_TEAMS, (), [(0, 1)], 105.0) == KEEPER_TEAMS).all()
+
+
+def test_halves_where_the_teams_do_not_switch_ends_are_an_error():
+    px = np.vstack([_keeper_positions([5.0], [100.0])] * 2)
+    with pytest.raises(ValueError):
+        team_by_frame(px, KEEPER_TEAMS, KEEPERS, [(0, 1), (1, 2)], 105.0)

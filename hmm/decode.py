@@ -8,7 +8,7 @@ view (fouls, free kicks), and says what a missing ball means: missing while the 
 D, missing while they run leans live -- without assuming either for every dropout, which is where
 v1 (missing = D) and v2 (missing = neutral) each went wrong on some of the external matches.
 
-The gap clue counts each goalkeeper slot for the team defending the end it stands in, not the team
+The gap clue counts a goalkeeper slot near a goal for the team defending that goal, not the team
 the metadata gives the slot: the tracker sometimes carries one keeper under the other keeper's
 slot (hmm/clues.py).
 
@@ -37,7 +37,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
 from hmm.clues import (  # noqa: E402
-    N_GAP_BINS, ball_is_usable, ball_place_category, gap_category, keeper_slots, load_distances,
+    KEEPER_ON_BALL, N_GAP_BINS, ball_is_usable, ball_place_category, gap_category, keeper_slots, load_distances,
     speed_category)
 from hmm.model import (  # noqa: E402
     A, D, H, STATES, baum_welch, build_log_emit, rate_log_trans, viterbi)
@@ -169,12 +169,15 @@ def load_observations(game=GAME, data_dir=None):
     n_frames = source_frames("tactical", game)
     print("reading {} (cached after the first run) ...".format(os.path.basename(raw_path)))
     pitch = GAMES[game]["pitch"]
+    keepers = keeper_slots(meta_path)
     ball_x, ball_y, d_home, d_away, speed, stats = load_distances(
         raw_path, team_of_each_track(meta_path), n_frames, pitch, FPS, CACHE_DIR,
-        keepers=keeper_slots(meta_path), halves=graded_segments(game))
+        keepers=keepers, halves=graded_segments(game))
     print("  {} tracking lines, {} malformed and skipped, {} frames with no line "
-          "(counted as ball missing), {} keeper-slot frames counted for the other team "
-          "(the end they stand in)".format(*stats))
+          "(counted as ball missing)".format(*stats[:3]))
+    print("  keeper slots {}: {} frames counted for the team defending the goal they stand by, "
+          "{} of them within {:.0f} m of the ball".format(
+              [slot + 1 for slot in keepers], stats[3], stats[4], KEEPER_ON_BALL))
     gap = gap_category(ball_is_usable(ball_x, ball_y, pitch), d_home, d_away)
     place = ball_place_category(ball_x, ball_y, pitch, CARRY_SECONDS * FPS)
     return gap, place, speed_category(speed)

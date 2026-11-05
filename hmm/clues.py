@@ -12,8 +12,10 @@ observed" (which the emission model skips):
    keeper drops out of tracking at the far end, the tracker often carries the near keeper under
    the absent keeper's slot -- the away keeper's slot moving with the home keeper in the home goal,
    say -- and the keeper on the ball then counts for the wrong team. So within each half a keeper
-   slot takes the team of the end it stands in: the team defending that half of the pitch, found
-   from where each team's outfield slots stand on average over the half.
+   slot near a goal takes the team defending that goal, found from where each team's outfield
+   slots stand on average over the half. "Near" is within KEEPER_ZONE of the goal line: a keeper
+   further out (sweeping, up for a late corner), or a keeper slot carried onto an outfield player,
+   keeps the metadata's team.
 
 2. Where the ball is, for whether it is in play. A ball seen clearly past a line is out of play.
    A missing ball is not evidence on its own -- the tracking loses it in open play all the time --
@@ -42,7 +44,7 @@ import numpy as np
 from starter.baseline import AWAY, FIELD_SEP, GROUP_SEP, HOME, MISSING
 
 # Bump when the parsing below changes, so an old cache is never read back as new.
-CLUES_VERSION = 5
+CLUES_VERSION = 6
 
 # Bin edges on the gap, in metres. Right-inclusive: (-inf, -3], (-3, -1], (-1, 1], (1, 3], (3, inf).
 GAP_EDGES = np.array([-3.0, -1.0, 1.0, 3.0])
@@ -74,6 +76,12 @@ MIN_PLAYERS = 6
 # Bin edges on the median player speed, m/s: standing, walking, jogging, running.
 SPEED_EDGES = np.array([0.6, 0.9, 1.2, 1.5, 2.0, 2.5])
 N_SPEED_BINS = len(SPEED_EDGES) + 1
+
+# Metres from a goal line within which a keeper slot counts for the team defending that goal: the
+# penalty area (16.5 m) plus a margin. On BAR-ATH a keeper slot is further out on 2% of its frames.
+KEEPER_ZONE = 25.0
+# Metres: a keeper this close to the ball is on it or about to be, for the count in read_distances.
+KEEPER_ON_BALL = 3.0
 
 # Frames per block when computing distances over the whole match, to bound memory.
 CHUNK = 20000
@@ -111,15 +119,31 @@ def home_defends_low_x(px, team_of_track, keepers):
 
 def team_by_frame(px, team_of_track, keepers, halves, length):
     """(frames, slots) team per slot per frame: the metadata's map, except that inside each half a
-    keeper slot takes the team defending the half of the pitch it stands in (see the top of this
-    file). Outside the halves, and wherever a keeper slot is untracked, the metadata's map holds."""
-    team = np.tile(np.asarray(team_of_track, dtype=np.int8), (len(px), 1))
-    for lo, hi in halves:
-        low_end = HOME if home_defends_low_x(px[lo:hi], team_of_track, keepers) else AWAY
+    keeper slot within KEEPER_ZONE of a goal line takes the team defending that goal (see the top
+    of this file). Outside the halves, and wherever a keeper slot is untracked or further out, the
+    metadata's map holds.
+
+    keepers must be one slot per team, or none. With two halves the teams must switch ends, or the
+    rule would hand both keepers to the wrong team all half; either failure raises ValueError."""
+    team_of_track = np.asarray(team_of_track, dtype=np.int8)
+    team = np.tile(team_of_track, (len(px), 1))
+    if not keepers:
+        return team
+    if sorted(team_of_track[list(keepers)]) != [HOME, AWAY]:
+        raise ValueError("expected one keeper slot per team, got slots {} of teams {}".format(
+            list(keepers), team_of_track[list(keepers)].tolist()))
+    low_ends = [HOME if home_defends_low_x(px[lo:hi], team_of_track, keepers) else AWAY
+                for lo, hi in halves]
+    if len(low_ends) == 2 and low_ends[0] == low_ends[1]:
+        raise ValueError("the teams do not switch ends at halftime: home defends the {} end in "
+                         "both halves".format("x = 0" if low_ends[0] == HOME else "x = length"))
+    for (lo, hi), low_end in zip(halves, low_ends):
         for slot in keepers:
             x = px[lo:hi, slot]
-            seen = np.isfinite(x)
-            team[lo:hi, slot][seen] = np.where(x[seen] < length / 2, low_end, 1 - low_end)
+            with np.errstate(invalid="ignore"):  # NaN where untracked: neither near a goal
+                near_low, near_high = x < KEEPER_ZONE, x > length - KEEPER_ZONE
+            team[lo:hi, slot][near_low] = low_end
+            team[lo:hi, slot][near_high] = 1 - low_end
     return team
 
 
@@ -195,10 +219,11 @@ def read_distances(raw_path, team_of_track, n_frames, pitch, fps, keepers=(), ha
 
     Returns (ball_x, ball_y, d_home, d_away, speed, stats): metres, NaN where not seen, and the
     median player speed in m/s. stats is (lines read, malformed lines skipped, frames with no
-    line, keeper frames moved to the other team), reported so that a broken file does not pass
-    for a long stretch of missing ball. A frame outside 0..n_frames-1 is an error, not something
-    to index around. keepers are goalkeeper slots and halves (start, stop) frame slices; a keeper
-    slot's team follows the end it stands in within each half (team_by_frame).
+    line, keeper frames moved to the other team, and how many of those have that keeper within
+    KEEPER_ON_BALL of the ball), reported so that a broken file does not pass for a long stretch of
+    missing ball. A frame outside 0..n_frames-1 is an error, not something to index around.
+    keepers are goalkeeper slots and halves (start, stop) frame slices; a keeper slot near a goal
+    counts for the team defending it (team_by_frame).
     """
     n_slots = len(team_of_track)
     px = np.full((n_frames, n_slots), np.nan, dtype=np.float32)
@@ -221,11 +246,14 @@ def read_distances(raw_path, team_of_track, n_frames, pitch, fps, keepers=(), ha
             ball_x[frame], ball_y[frame] = line_ball(line, pitch)
             has_line[frame] = True
     team = team_by_frame(px, team_of_track, keepers, halves, pitch[0])
-    moved = int(np.sum(team != np.asarray(team_of_track, dtype=np.int8)))
+    moved = team != np.asarray(team_of_track, dtype=np.int8)
+    with np.errstate(invalid="ignore"):
+        on_ball = np.hypot(px - ball_x[:, None], py - ball_y[:, None]) < KEEPER_ON_BALL
     d_home, d_away = nearest_by_team(px, py, ball_x, ball_y, team)
     speed = median_player_speed(px.astype(float), py.astype(float), fps)
     return ball_x, ball_y, d_home, d_away, speed, (
-        n_lines, n_malformed, int(np.sum(~has_line)), moved)
+        n_lines, n_malformed, int(np.sum(~has_line)), int(np.sum(moved)),
+        int(np.sum(moved & on_ball)))
 
 
 def metres_outside(ball_x, ball_y, pitch):
