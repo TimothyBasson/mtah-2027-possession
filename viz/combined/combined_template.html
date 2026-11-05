@@ -46,7 +46,8 @@ video{width:100%;height:auto;display:block}
 .hud b{font-weight:600}
 canvas.full{width:100%;height:auto;display:block;border-radius:8px}
 .striplabel{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:6px}
-canvas.strip{width:100%;display:block;cursor:pointer;border-radius:4px;margin-top:2px}
+canvas.strip{width:100%;display:block;cursor:grab;border-radius:4px;margin-top:2px;touch-action:none}
+canvas.dragging{cursor:grabbing}
 #whole{height:16px}
 #zoom{height:28px}
 .keys{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-left:auto}
@@ -83,7 +84,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
 .lanes{display:grid;grid-template-columns:minmax(150px,max-content) minmax(0,1fr);gap:1px 8px;margin-top:3px;font-size:12px;align-items:center}
 .lanes .ln{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 .lanes .ln b{color:var(--text);font-weight:600}
-.lanes canvas{width:100%;height:16px;display:block;cursor:pointer;border-radius:2px;background:var(--bg)}
+.lanes canvas{width:100%;height:16px;display:block;cursor:grab;touch-action:none;border-radius:2px;background:var(--bg)}
 [hidden]{display:none!important}
 .seg{display:inline-flex}.seg button{font-size:12px;padding:2px 10px;border-radius:0;margin-left:-1px}
 .seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
@@ -109,9 +110,9 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
       </div>
     </div></div>
     <div class="striplabel"><span>Whole match</span><span id="wholeRange"></span></div>
-    <canvas id="whole" class="strip" width="1200" height="30" aria-label="Possession over the whole match; click to seek"></canvas>
+    <canvas id="whole" class="strip" width="1200" height="30" aria-label="Possession over the whole match; click to jump, drag to scrub"></canvas>
     <div class="striplabel"><span>Two minutes around the playhead</span><span id="zoomRange"></span></div>
-    <canvas id="zoom" class="strip" width="1200" height="40" aria-label="Possession around the playhead; click to seek"></canvas>
+    <canvas id="zoom" class="strip" width="1200" height="40" aria-label="Possession around the playhead; click to jump, drag to scrub"></canvas>
     <div id="explain" hidden>
       <div class="striplabel"><span class="seg" id="level"><button data-l="0">Simple</button><button data-l="1">Why</button><button data-l="2">Every clue</button></span><span id="scores"></span></div>
       <div class="striplabel" id="barkey" hidden><span>Same two minutes as above · bars up lean <b class="hk">home</b> or <b class="dk">dead</b>, down lean <b class="ak">away</b> or <b class="lk">in play</b> · hover a name for what it is</span></div>
@@ -200,7 +201,7 @@ $('legend').innerHTML = [
 ].map(([st, t]) => '<div><span class="sw" style="' + st + '"></span>' + t + '</div>').join('');
 $('keys').innerHTML = [['--home', name.H], ['--away', name.A], ['--dead', 'Dead ball'], ['--none', 'No label']]
   .map(([c, t]) => '<span><span class="k" style="background:var(' + c + ')"></span>' + t + '</span>').join('') +
-  '<span>' + (HAS_TRUTH ? 'Truth on top where it exists · ' : '') + (D.pred ? 'your estimate below · ' : '') + 'click to jump</span>';
+  '<span>' + (HAS_TRUTH ? 'Truth on top where it exists · ' : '') + (D.pred ? 'your estimate below · ' : '') + 'click or drag to move</span>';
 $('wholeRange').textContent = '0:00 – ' + videoTime(NF - 1, 0);
 
 // ---- tracking, loaded a minute at a time --------------------------------------------------
@@ -362,8 +363,28 @@ function drawZoom(v) {
   $('zoomRange').textContent = videoTime(Math.max(0, a), 0) + ' – ' + videoTime(Math.min(NF - 1, b), 0);
 }
 const clickFrac = (e, el) => { const r = el.getBoundingClientRect(); return (e.clientX - r.left) / r.width; };
-whole.onclick = e => seekFrame(Math.round(clickFrac(e, whole) * (NF - 1)));
-zoom.onclick = e => seekFrame(Math.round(zoomFrom + clickFrac(e, zoom) * 2 * ZOOM));
+// Click to jump; drag to scrub. The whole-match strip follows the pointer. The two-minute strips
+// recentre on the playhead, so dragging them pans time like a map: drag left to go forward.
+function scrub(el, whole) {
+  let x0 = null, f0 = 0, moved = false;
+  el.onpointerdown = e => {
+    x0 = e.clientX; f0 = cur; moved = false; video.pause();
+    el.setPointerCapture(e.pointerId); el.classList.add('dragging');
+    if (whole) seekFrame(Math.round(clickFrac(e, el) * (NF - 1)));
+  };
+  el.onpointermove = e => {
+    if (x0 === null) return;
+    moved = moved || Math.abs(e.clientX - x0) > 3;
+    if (!moved) return;
+    seekFrame(Math.round(whole ? clickFrac(e, el) * (NF - 1) : f0 - (e.clientX - x0) / el.getBoundingClientRect().width * 2 * ZOOM));
+  };
+  el.onpointerup = el.onpointercancel = e => {
+    if (x0 !== null && !moved && !whole) seekFrame(Math.round(zoomFrom + clickFrac(e, el) * 2 * ZOOM));
+    x0 = null; el.classList.remove('dragging');
+  };
+}
+scrub(whole, true);
+scrub(zoom, false);
 
 // ---- the model's working, under the strips (make_combined.py --explain) -------------------
 // Three levels, simplest first. Simple: the scores and the mistakes over the whole match. Why: around
@@ -391,7 +412,7 @@ if (X) {
   for (const l of lanes) {
     l.label = document.createElement('div'); l.label.className = 'ln'; l.label.title = l.note || l.name;
     l.cv = document.createElement('canvas'); l.cv.width = 1000; l.cv.height = 16;
-    l.cv.onclick = e => seekFrame(Math.round(l.whole ? clickFrac(e, l.cv) * (NF - 1) : zoomFrom + clickFrac(e, l.cv) * 2 * ZOOM));
+    scrub(l.cv, l.whole);
     box.append(l.label, l.cv);
   }
   let level = 0;
