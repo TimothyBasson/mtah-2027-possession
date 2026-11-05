@@ -254,14 +254,16 @@ def test_a_keeper_slot_away_from_both_goals_keeps_the_metadata_team():
     assert team[:, 2].tolist() == [0, 0, 0] and team[:, 3].tolist() == [1, 1, 1]
 
 
-def test_keepers_must_be_one_per_team():
+def test_keepers_not_one_per_team_warn_and_keep_the_metadata_team():
     px = _keeper_positions([5.0], [100.0])
-    with pytest.raises(ValueError):
-        team_by_frame(px, KEEPER_TEAMS, (0, 2), [(0, 1)], 105.0)  # two home slots
+    with pytest.warns(UserWarning):
+        team = team_by_frame(px, KEEPER_TEAMS, (0, 2), [(0, 1)], 105.0)  # two home slots
+    assert (team == KEEPER_TEAMS).all()
     assert (team_by_frame(px, KEEPER_TEAMS, (), [(0, 1)], 105.0) == KEEPER_TEAMS).all()
 
 
-def test_halves_where_the_teams_do_not_switch_ends_are_an_error():
-    px = np.vstack([_keeper_positions([5.0], [100.0])] * 2)
-    with pytest.raises(ValueError):
-        team_by_frame(px, KEEPER_TEAMS, KEEPERS, [(0, 1), (1, 2)], 105.0)
+def test_halves_where_the_teams_do_not_switch_ends_warn_and_keep_the_metadata_team():
+    px = np.vstack([_keeper_positions([5.0], [6.0])] * 2)  # the away keeper's slot at the home end
+    with pytest.warns(UserWarning):
+        team = team_by_frame(px, KEEPER_TEAMS, KEEPERS, [(0, 1), (1, 2)], 105.0)
+    assert (team == KEEPER_TEAMS).all()

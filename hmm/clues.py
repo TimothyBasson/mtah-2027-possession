@@ -78,7 +78,8 @@ SPEED_EDGES = np.array([0.6, 0.9, 1.2, 1.5, 2.0, 2.5])
 N_SPEED_BINS = len(SPEED_EDGES) + 1
 
 # Metres from a goal line within which a keeper slot counts for the team defending that goal: the
-# penalty area (16.5 m) plus a margin. On BAR-ATH a keeper slot is further out on 2% of its frames.
+# penalty area (16.5 m) plus a margin. A physical constant, not swept or fitted. (On BAR-ATH a
+# keeper slot is further out on 2% of its frames.)
 KEEPER_ZONE = 25.0
 # Metres: a keeper this close to the ball is on it or about to be, for the count in read_distances.
 KEEPER_ON_BALL = 3.0
@@ -124,19 +125,24 @@ def team_by_frame(px, team_of_track, keepers, halves, length):
     metadata's map holds.
 
     keepers must be one slot per team, or none. With two halves the teams must switch ends, or the
-    rule would hand both keepers to the wrong team all half; either failure raises ValueError."""
+    rule would hand both keepers to the wrong team all half. If either check fails, it warns and
+    keeps the metadata's map everywhere: loud, but the run still completes."""
     team_of_track = np.asarray(team_of_track, dtype=np.int8)
     team = np.tile(team_of_track, (len(px), 1))
     if not keepers:
         return team
     if sorted(team_of_track[list(keepers)]) != [HOME, AWAY]:
-        raise ValueError("expected one keeper slot per team, got slots {} of teams {}".format(
-            list(keepers), team_of_track[list(keepers)].tolist()))
+        warnings.warn("expected one keeper slot per team, got slots {} of teams {}; keeper slots "
+                      "keep the metadata's team".format(
+                          list(keepers), team_of_track[list(keepers)].tolist()))
+        return team
     low_ends = [HOME if home_defends_low_x(px[lo:hi], team_of_track, keepers) else AWAY
                 for lo, hi in halves]
     if len(low_ends) == 2 and low_ends[0] == low_ends[1]:
-        raise ValueError("the teams do not switch ends at halftime: home defends the {} end in "
-                         "both halves".format("x = 0" if low_ends[0] == HOME else "x = length"))
+        warnings.warn("the teams do not switch ends at halftime (home defends the {} end in both "
+                      "halves); keeper slots keep the metadata's team".format(
+                          "x = 0" if low_ends[0] == HOME else "x = length"))
+        return team
     for (lo, hi), low_end in zip(halves, low_ends):
         for slot in keepers:
             x = px[lo:hi, slot]
