@@ -8,22 +8,20 @@ uv run python external/score.py --seen 0.59        # score on the 10 outside mat
 uv run python viz/combined/make_combined.py --match all --explain --open   # see how it works
 ```
 
-## v1: how it works
+## v0: how it works
 
-1. **Clues.** Each clue scores every frame for H, A and D (`model.clues`):
-   - **nearest:** which team's nearest player is closer to the ball.
-   - **ball out:** the ball is seen more than 1 m past a line.
-   - **player speed:** the mean player speed. Players jog or run in play and walk at a stoppage.
-2. **Sum.** The clue scores are added and multiplied by `weight`. Neighbouring frames repeat the same look, so a single frame should not count for much.
-3. **Smooth.** Viterbi picks the best label sequence per half. Every change of label costs `team_cost` (H↔A) or `dead_cost` (to or from D), so a short flicker isn't worth a new possession.
-
-All numbers are in `model.DEFAULTS`. The two costs were picked by a sweep on the outside matches, never on BAR-ATH.
+The simplest model. On each frame, the team whose nearest player is closer to the ball has it.
+Where the ball isn't seen, the label is D. There is no smoothing.
 
 | outside matches, `--seen 0.59` | spellF1 | macroF1 |
 |---|---|---|
-| IDSSE (7) | 0.269 | 0.723 |
-| Metrica (3) | 0.438 | 0.746 |
-| all 10 | 0.320 | 0.730 |
+| IDSSE (7) | 0.041 | 0.432 |
+| Metrica (3) | 0.096 | 0.767 |
+| all 10 | 0.057 | 0.532 |
+
+What it gets wrong:
+- **Far too many possessions.** About 5 times too many (3,609 against 614 on idsse_J03WMX), with half of them under 1 s. The label flips every time the two nearest players swap.
+- **A missing ball counted as dead.** On Metrica, and on our match by the players' speed, a missing ball usually is dead. IDSSE's dropout is random, so there it is wrong half the time.
 
 ## Ideas to try (research, 2026-11-05)
 

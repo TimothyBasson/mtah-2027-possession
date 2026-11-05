@@ -37,15 +37,20 @@ have 17 possessions, roughly 360 over a full match, so DFL counts some touches w
 Metrica has about 315, which is closer. Expect a low spellF1 on IDSSE even when the model is right
 by the organisers' rule. That set is better for alive/dead and team accuracy.
 
-## Baseline: `possession/` v1, `--seen 0.59`, no tags
+## Baseline: `possession/` v0 (nearest team, missing ball = D, no smoothing), `--seen 0.59`
 
 | | spellF1 | macroF1 | alive/dead F1 | team acc |
 |---|---|---|---|---|
-| IDSSE mean (7) | 0.269 | 0.723 | 0.871 | 0.794 |
-| Metrica mean (3) | 0.438 | 0.746 | 0.876 | 0.857 |
-| all 10 | 0.320 | 0.730 | 0.873 | 0.813 |
+| IDSSE mean (7) | 0.041 | 0.432 | 0.566 | 0.775 |
+| Metrica mean (3) | 0.096 | 0.767 | 0.908 | 0.805 |
+| all 10 | 0.057 | 0.532 | 0.669 | 0.784 |
 
 The old v3 model these numbers used to describe (0.431 across all 10) was never committed and is lost.
 
 Use `--seen` on IDSSE. With the ball always visible, the model's hardest problem disappears.
+But `--seen` drops the ball at random, live or dead alike, and our match does not lose it that way.
+With the ball missing, BAR-ATH's players move at a median 1.0 m/s against 1.9 m/s with it seen,
+which is the dead-ball pattern. Metrica shows the same pattern: there the ball is missing on 92% of
+dead frames and 12% of live ones. So IDSSE under `--seen` punishes "missing means dead" more than
+our match would.
 Scores also get no help from set-piece tags, because these matches have no Smart Tagging.
