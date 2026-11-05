@@ -8,6 +8,13 @@ observed" (which the emission model skips):
    Positive means home is closer, binned into five categories. It is only observed on frames with
    a usable ball and a tracked player on each side.
 
+   The two goalkeeper slots are the exception to the metadata's home/away slot map. When one
+   keeper drops out of tracking at the far end, the tracker often carries the near keeper under
+   the absent keeper's slot -- the away keeper's slot moving with the home keeper in the home goal,
+   say -- and the keeper on the ball then counts for the wrong team. So within each half a keeper
+   slot takes the team of the end it stands in: the team defending that half of the pitch, found
+   from where each team's outfield slots stand on average over the half.
+
 2. Where the ball is, for whether it is in play. A ball seen clearly past a line is out of play.
    A missing ball is not evidence on its own -- the tracking loses it in open play all the time --
    but where it was last seen is: a ball lost at or past a line has probably gone out. That last
@@ -27,13 +34,15 @@ reuses; the difference is that we keep both distances instead of only the winner
 
 import hashlib
 import os
+import warnings
+import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from starter.baseline import FIELD_SEP, GROUP_SEP, HOME, MISSING
+from starter.baseline import AWAY, FIELD_SEP, GROUP_SEP, HOME, MISSING
 
 # Bump when the parsing below changes, so an old cache is never read back as new.
-CLUES_VERSION = 4
+CLUES_VERSION = 5
 
 # Bin edges on the gap, in metres. Right-inclusive: (-inf, -3], (-3, -1], (-1, 1], (1, 3], (3, inf).
 GAP_EDGES = np.array([-3.0, -1.0, 1.0, 3.0])
@@ -66,6 +75,9 @@ MIN_PLAYERS = 6
 SPEED_EDGES = np.array([0.6, 0.9, 1.2, 1.5, 2.0, 2.5])
 N_SPEED_BINS = len(SPEED_EDGES) + 1
 
+# Frames per block when computing distances over the whole match, to bound memory.
+CHUNK = 20000
+
 
 def _xy(group, length, width):
     comma = group.index(",")
@@ -73,29 +85,57 @@ def _xy(group, length, width):
             float(group[comma + 1:group.index(",", comma + 1)]) * width)
 
 
-def line_distances(line, team_of_track, pitch):
-    """(video_frame, ball_x, ball_y, d_home, d_away) for one raw ATD line, in metres.
+def keeper_slots(meta_path):
+    """Slot indices the ATD metadata marks as goalkeepers (position_type "Goalkeeper")."""
+    root = ET.parse(meta_path).getroot()
+    slots = []
+    for slot, player in enumerate(root.iter("Player")):
+        for parameter in player.iter("ProviderParameter"):
+            if (parameter.findtext("Name") == "position_type"
+                    and parameter.findtext("Value") == "Goalkeeper"):
+                slots.append(slot)
+    return tuple(slots)
 
-    NaN where nobody, or no ball, is seen."""
-    length, width = pitch
-    parts = line.split(FIELD_SEP)
-    frame = int(parts[0]) - 1  # frame_id counts from 1, submissions from 0
-    nearest = [np.inf, np.inf]
-    ball = parts[2]
-    if ball[0] == MISSING:
-        return frame, np.nan, np.nan, np.nan, np.nan
 
-    ball_x, ball_y = _xy(ball, length, width)
-    for slot, group in enumerate(parts[1].split(GROUP_SEP)):
-        if group[0] == MISSING:
-            continue
-        x, y = _xy(group, length, width)
-        distance = (x - ball_x) ** 2 + (y - ball_y) ** 2
-        side = 0 if team_of_track[slot] == HOME else 1
-        if distance < nearest[side]:
-            nearest[side] = distance
-    d_home, d_away = (np.sqrt(d) if np.isfinite(d) else np.nan for d in nearest)
-    return frame, ball_x, ball_y, d_home, d_away
+def home_defends_low_x(px, team_of_track, keepers):
+    """True if the home team defends the x = 0 end over these frames: its outfield slots stand at a
+    lower x than the away team's on the median frame."""
+    outfield = np.ones(len(team_of_track), dtype=bool)
+    outfield[list(keepers)] = False
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # frames with nobody of a team tracked
+        mean_x = [np.nanmean(px[:, outfield & (team_of_track == side)], axis=1)
+                  for side in (HOME, AWAY)]
+        return bool(np.nanmedian(mean_x[0]) < np.nanmedian(mean_x[1]))
+
+
+def team_by_frame(px, team_of_track, keepers, halves, length):
+    """(frames, slots) team per slot per frame: the metadata's map, except that inside each half a
+    keeper slot takes the team defending the half of the pitch it stands in (see the top of this
+    file). Outside the halves, and wherever a keeper slot is untracked, the metadata's map holds."""
+    team = np.tile(np.asarray(team_of_track, dtype=np.int8), (len(px), 1))
+    for lo, hi in halves:
+        low_end = HOME if home_defends_low_x(px[lo:hi], team_of_track, keepers) else AWAY
+        for slot in keepers:
+            x = px[lo:hi, slot]
+            seen = np.isfinite(x)
+            team[lo:hi, slot][seen] = np.where(x[seen] < length / 2, low_end, 1 - low_end)
+    return team
+
+
+def nearest_by_team(px, py, ball_x, ball_y, team):
+    """(d_home, d_away): distance from the ball to the nearest tracked slot of each team per frame,
+    metres, NaN where the ball or every slot of that team is unseen. team is (frames, slots)."""
+    d_home = np.full(len(px), np.nan)
+    d_away = np.full(len(px), np.nan)
+    for lo in range(0, len(px), CHUNK):
+        hi = lo + CHUNK
+        d = np.hypot(px[lo:hi] - ball_x[lo:hi, None], py[lo:hi] - ball_y[lo:hi, None])
+        d = np.where(np.isfinite(d), d, np.inf)
+        for side, out in ((HOME, d_home), (AWAY, d_away)):
+            nearest = np.min(np.where(team[lo:hi] == side, d, np.inf), axis=1)
+            out[lo:hi] = np.where(np.isfinite(nearest), nearest, np.nan)
+    return d_home, d_away
 
 
 def line_positions(line, n_slots, pitch):
@@ -108,6 +148,14 @@ def line_positions(line, n_slots, pitch):
         if group[0] != MISSING:
             xs[slot], ys[slot] = _xy(group, length, width)
     return int(parts[0]) - 1, xs, ys
+
+
+def line_ball(line, pitch):
+    """(ball_x, ball_y) for one raw ATD line, in metres, NaN if the ball is not seen."""
+    ball = line.split(FIELD_SEP)[2]
+    if ball[0] == MISSING:
+        return np.nan, np.nan
+    return _xy(ball, *pitch)
 
 
 def measured_player_speeds(px, py, fps):
@@ -142,21 +190,21 @@ def speed_category(speed):
     return cats
 
 
-def read_distances(raw_path, team_of_track, n_frames, pitch, fps):
+def read_distances(raw_path, team_of_track, n_frames, pitch, fps, keepers=(), halves=()):
     """Stream the raw ATD once. Frames with no tracking line count as ball missing.
 
     Returns (ball_x, ball_y, d_home, d_away, speed, stats): metres, NaN where not seen, and the
     median player speed in m/s. stats is (lines read, malformed lines skipped, frames with no
-    line), reported so that a broken file does not pass for a long stretch of missing ball.
-    A frame outside 0..n_frames-1 is an error, not something to index around.
+    line, keeper frames moved to the other team), reported so that a broken file does not pass
+    for a long stretch of missing ball. A frame outside 0..n_frames-1 is an error, not something
+    to index around. keepers are goalkeeper slots and halves (start, stop) frame slices; a keeper
+    slot's team follows the end it stands in within each half (team_by_frame).
     """
     n_slots = len(team_of_track)
     px = np.full((n_frames, n_slots), np.nan, dtype=np.float32)
     py = np.full((n_frames, n_slots), np.nan, dtype=np.float32)
     ball_x = np.full(n_frames, np.nan)
     ball_y = np.full(n_frames, np.nan)
-    d_home = np.full(n_frames, np.nan)
-    d_away = np.full(n_frames, np.nan)
     has_line = np.zeros(n_frames, dtype=bool)
     n_lines = n_malformed = 0
     with open(raw_path) as handle:
@@ -165,15 +213,19 @@ def read_distances(raw_path, team_of_track, n_frames, pitch, fps):
             if line.count(FIELD_SEP) != 2:
                 n_malformed += 1
                 continue
-            frame, x, y, home, away = line_distances(line, team_of_track, pitch)
+            frame, xs, ys = line_positions(line, n_slots, pitch)
             if not 0 <= frame < n_frames:
                 raise ValueError("{}: frame_id {} is outside 1..{}".format(
                     raw_path, frame + 1, n_frames))
-            ball_x[frame], ball_y[frame], d_home[frame], d_away[frame] = x, y, home, away
-            _, px[frame], py[frame] = line_positions(line, n_slots, pitch)
+            px[frame], py[frame] = xs, ys
+            ball_x[frame], ball_y[frame] = line_ball(line, pitch)
             has_line[frame] = True
+    team = team_by_frame(px, team_of_track, keepers, halves, pitch[0])
+    moved = int(np.sum(team != np.asarray(team_of_track, dtype=np.int8)))
+    d_home, d_away = nearest_by_team(px, py, ball_x, ball_y, team)
     speed = median_player_speed(px.astype(float), py.astype(float), fps)
-    return ball_x, ball_y, d_home, d_away, speed, (n_lines, n_malformed, int(np.sum(~has_line)))
+    return ball_x, ball_y, d_home, d_away, speed, (
+        n_lines, n_malformed, int(np.sum(~has_line)), moved)
 
 
 def metres_outside(ball_x, ball_y, pitch):
@@ -220,32 +272,35 @@ def ball_place_category(ball_x, ball_y, pitch, carry_frames):
     return cats
 
 
-def cache_key(raw_path, team_of_track, n_frames, pitch, fps):
+def cache_key(raw_path, team_of_track, n_frames, pitch, fps, keepers=(), halves=()):
     """Short hash of everything the distances depend on: parser version, the raw file (by size
-    and modification time), the home/away slot map, the frame count, the pitch and the fps."""
+    and modification time), the home/away slot map, the frame count, the pitch, the fps, the
+    keeper slots and the halves."""
     stat = os.stat(raw_path)
     digest = hashlib.sha1(repr((CLUES_VERSION, os.path.basename(raw_path), stat.st_size,
-                                int(stat.st_mtime), n_frames, tuple(pitch), fps)).encode())
+                                int(stat.st_mtime), n_frames, tuple(pitch), fps,
+                                tuple(keepers), tuple(map(tuple, halves)))).encode())
     digest.update(np.asarray(team_of_track, dtype=np.int8).tobytes())
     return digest.hexdigest()[:12]
 
 
-def load_distances(raw_path, team_of_track, n_frames, pitch, fps, cache_dir):
+def load_distances(raw_path, team_of_track, n_frames, pitch, fps, cache_dir, keepers=(),
+                   halves=()):
     """read_distances, cached as .npz under cache_dir (data/, never committed).
 
-    The file name carries cache_key(), so changing the parser, the data, the slot map or the pitch
-    writes a new cache instead of silently reading a stale one.
+    The file name carries cache_key(), so changing the parser, the data, the slot map, the pitch,
+    the keepers or the halves writes a new cache instead of silently reading a stale one.
     """
     cache_path = None
     if cache_dir:
         cache_path = os.path.join(cache_dir, "hmm_distances_{}.npz".format(
-            cache_key(raw_path, team_of_track, n_frames, pitch, fps)))
+            cache_key(raw_path, team_of_track, n_frames, pitch, fps, keepers, halves)))
         if os.path.exists(cache_path):
             cached = np.load(cache_path)
             return (cached["ball_x"], cached["ball_y"], cached["d_home"], cached["d_away"],
                     cached["speed"], tuple(int(x) for x in cached["stats"]))
     ball_x, ball_y, d_home, d_away, speed, stats = read_distances(
-        raw_path, team_of_track, n_frames, pitch, fps)
+        raw_path, team_of_track, n_frames, pitch, fps, keepers, halves)
     if cache_path:
         os.makedirs(cache_dir, exist_ok=True)
         np.savez_compressed(cache_path, ball_x=ball_x, ball_y=ball_y, d_home=d_home,

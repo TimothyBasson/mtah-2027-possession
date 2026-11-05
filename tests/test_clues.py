@@ -1,5 +1,5 @@
 """Turning raw ATD into the clues: the nearest-player gap, where the ball is, and how fast the
-players move."""
+players move -- and which team a goalkeeper slot belongs to."""
 
 import os
 import sys
@@ -10,32 +10,28 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hmm.clues import (  # noqa: E402
     IN_PLAY, MAX_SPEED, MIN_PLAYERS, MISSING_AFTER_LINE, MISSING_AFTER_PLAY, MISSING_STALE, OUTSIDE, SPEED_LAG,
-    ball_is_usable, ball_place_category, gap_category, line_distances, line_positions,
-    load_distances, median_player_speed, metres_outside, read_distances, speed_category)
+    ball_is_usable, ball_place_category, gap_category, home_defends_low_x, keeper_slots, line_ball,
+    line_positions, load_distances, median_player_speed, metres_outside, nearest_by_team,
+    read_distances, speed_category, team_by_frame)
 
 PITCH = (100.0, 50.0)
 FPS = 25
 TEAMS = np.array([0, 1, 0], dtype=np.int8)  # slots: home, away, home
 
 
-def test_line_distances_scales_to_metres_and_takes_the_nearest_of_each_team():
+def test_nearest_by_team_takes_the_nearest_tracked_slot_of_each_team():
     # Ball at (50 m, 25 m). Slot 0 home 10 m away along x, slot 1 away 5 m along y, slot 2 home 3 m.
-    line = "7:0.6,0.5,1.0;0.5,0.6,2.0;0.5,0.44,0.0:0.5,0.5,0.0\n"
-    frame, ball_x, ball_y, d_home, d_away = line_distances(line, TEAMS, PITCH)
-    assert frame == 6  # frame_id counts from 1
-    assert np.isclose(ball_x, 50.0) and np.isclose(ball_y, 25.0)
-    assert np.isclose(d_home, 3.0)
-    assert np.isclose(d_away, 5.0)
+    px = np.array([[60.0, 50.0, 50.0], [60.0, 50.0, np.nan], [60.0, 50.0, 50.0]])
+    py = np.array([[25.0, 30.0, 22.0], [25.0, 30.0, np.nan], [25.0, 30.0, 22.0]])
+    ball_x, ball_y = np.array([50.0, 50.0, np.nan]), np.array([25.0, 25.0, np.nan])
+    d_home, d_away = nearest_by_team(px, py, ball_x, ball_y, np.tile(TEAMS, (3, 1)))
+    assert np.allclose(d_home, [3.0, 10.0, np.nan], equal_nan=True)  # slot 2 untracked on frame 1
+    assert np.allclose(d_away, [5.0, 5.0, np.nan], equal_nan=True)   # no ball on frame 2
 
 
-def test_line_distances_handles_missing_ball_and_missing_players():
-    _, ball_x, ball_y, d_home, d_away = line_distances(
-        "1:NaN,NaN,NaN;0.5,0.6,2.0;NaN,NaN,NaN:NaN,NaN,NaN\n", TEAMS, PITCH)
-    assert np.isnan(ball_x) and np.isnan(ball_y) and np.isnan(d_home) and np.isnan(d_away)
-
-    _, ball_x, _, d_home, d_away = line_distances(
-        "1:NaN,NaN,NaN;0.5,0.6,2.0;NaN,NaN,NaN:0.5,0.5,0.0\n", TEAMS, PITCH)
-    assert not np.isnan(ball_x) and np.isnan(d_home) and np.isclose(d_away, 5.0)
+def test_line_ball_scales_to_metres_and_is_nan_when_missing():
+    assert np.allclose(line_ball("7:0.6,0.5,1.0;NaN,NaN,NaN:0.5,0.4,0.0\n", PITCH), (50.0, 20.0))
+    assert np.isnan(line_ball("7:0.6,0.5,1.0;NaN,NaN,NaN:NaN,NaN,NaN\n", PITCH)).all()
 
 
 def test_line_positions_scales_every_slot_to_metres_with_nan_for_the_untracked():
@@ -68,7 +64,7 @@ def test_read_distances_counts_malformed_and_missing_lines(tmp_path):
     ball_x, _, _, d_away, _, stats = read_distances(path, TEAMS, 4, PITCH, FPS)
     assert (~np.isnan(ball_x)).tolist() == [True, False, False, False]
     assert np.isclose(d_away[0], 5.0)
-    assert stats == (3, 1, 2)  # frames 1 and 3 (0-based) have no line
+    assert stats == (3, 1, 2, 0)  # frames 1 and 3 (0-based) have no line; no keepers
 
 
 def test_read_distances_rejects_a_frame_outside_the_video(tmp_path):
@@ -188,3 +184,63 @@ def test_read_distances_measures_how_fast_the_players_move(tmp_path):
         for f in range(n)]
     *_, speed, _ = read_distances(_write_atd(tmp_path, lines), teams, n, PITCH, FPS)
     assert np.allclose(speed[SPEED_LAG:2 * SPEED_LAG], 1.0)
+
+
+# Keepers. Slots: 0 home outfield, 1 away outfield, 2 home keeper, 3 away keeper. Home's outfield
+# stands at x = 30 m, away's at 70 m, so home defends the x = 0 end.
+KEEPER_TEAMS = np.array([0, 1, 0, 1], dtype=np.int8)
+KEEPERS = (2, 3)
+
+
+def _keeper_positions(home_keeper_x, away_keeper_x):
+    n = len(home_keeper_x)
+    return np.column_stack([np.full(n, 30.0), np.full(n, 70.0), home_keeper_x, away_keeper_x])
+
+
+def test_the_side_a_team_defends_comes_from_its_outfield_slots():
+    px = _keeper_positions([95.0] * 3, [5.0] * 3)  # keepers at the wrong ends do not decide it
+    assert home_defends_low_x(px, KEEPER_TEAMS, KEEPERS)
+    assert not home_defends_low_x(px[:, [1, 0, 2, 3]], KEEPER_TEAMS, KEEPERS)
+
+
+def test_a_keeper_slot_in_the_other_teams_half_counts_for_that_team():
+    # Frame 0: both keepers at their own ends. Frame 1: the away keeper's slot carries the home
+    # keeper in the home goal. Frame 2: the home keeper's slot is untracked. Frame 3 is halftime.
+    px = _keeper_positions([5.0, 8.0, np.nan, 95.0], [100.0, 6.0, 100.0, 6.0])
+    team = team_by_frame(px, KEEPER_TEAMS, KEEPERS, [(0, 3)], 105.0)
+    assert team[:, 3].tolist() == [1, 0, 1, 1]  # outside the halves the metadata's map holds
+    assert team[:, 2].tolist() == [0, 0, 0, 0]
+    assert (team[:, :2] == KEEPER_TEAMS[:2]).all()  # outfield slots never move
+
+
+def test_the_keeper_rule_follows_the_teams_switching_ends_at_halftime():
+    first = _keeper_positions([5.0, 5.0], [100.0, 100.0])
+    second = first[:, [1, 0, 3, 2]].copy()  # everyone at the other end
+    second[1, 3] = 90.0  # the away keeper's slot in the home goal, now at the high-x end
+    team = team_by_frame(np.vstack([first, second]), KEEPER_TEAMS, KEEPERS, [(0, 2), (2, 4)], 105.0)
+    assert team[:, 2].tolist() == [0, 0, 0, 0]
+    assert team[:, 3].tolist() == [1, 1, 1, 0]
+
+
+def test_read_distances_gives_the_ball_to_the_keeper_standing_in_his_teams_goal(tmp_path):
+    # The ball sits 1 m from slot 3, the away keeper's slot, which stands in the home goal (x = 5 m
+    # on a 100 m pitch where home defends x = 0). The nearest home slot is otherwise 25 m away.
+    line = "{}:0.3,0.5,0;0.7,0.5,0;NaN,NaN,NaN;0.05,0.5,0:0.06,0.5,0\n"  # home keeper untracked
+    path = _write_atd(tmp_path, [line.format(f + 1) for f in range(2)])
+    _, _, d_home, d_away, _, stats = read_distances(path, KEEPER_TEAMS, 2, PITCH, FPS,
+                                                    keepers=KEEPERS, halves=[(0, 1)])
+    assert np.isclose(d_home[0], 1.0) and np.isclose(d_away[0], 64.0)  # inside the half
+    assert np.isclose(d_home[1], 24.0) and np.isclose(d_away[1], 1.0)  # outside: metadata's map
+    assert stats[3] == 1
+
+
+def test_keeper_slots_reads_the_goalkeeper_flag_from_the_metadata(tmp_path):
+    def player(kind):
+        return ("<Player teamId='t'><ProviderPlayerParameters><ProviderParameter><Name>"
+                "position_type</Name><Value>{}</Value></ProviderParameter>"
+                "</ProviderPlayerParameters></Player>").format(kind)
+    path = os.path.join(str(tmp_path), "meta.xml")
+    with open(path, "w") as handle:
+        handle.write("<main><Players>{}</Players></main>".format(
+            "".join(player(k) for k in ("Unknown", "Goalkeeper", "Unknown", "Goalkeeper"))))
+    assert keeper_slots(path) == (1, 3)
