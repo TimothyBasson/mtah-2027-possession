@@ -1,5 +1,5 @@
 """The football wiring in hmm/decode.py: frames before a kickoff are dead, and so is a ball that
-went out of play."""
+went out of play, or that went missing while the players walked."""
 
 import os
 import sys
@@ -7,10 +7,10 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from hmm.clues import IN_PLAY, N_GAP_BINS, ball_place_category  # noqa: E402
+from hmm.clues import IN_PLAY, N_GAP_BINS, ball_place_category, speed_category  # noqa: E402
 from hmm.decode import (  # noqa: E402
     CARRY_SECONDS, FPS, KICKOFFS, START, decode, gap_table, graded_segments,
-    pin_dead_before_kickoff, place_table, transitions)
+    pin_dead_before_kickoff, place_table, speed_table, transitions)
 
 HOME_MUCH_CLOSER = N_GAP_BINS - 1
 PITCH = (105.0, 68.0)
@@ -46,8 +46,9 @@ def test_published_kickoffs_pin_exactly_the_second_half_warm_up():
     assert len(pinned) == 2934 and pinned[-1] + lo2 == 113741
 
 
-def _gap_then_missing(last_y):
-    """Home on the ball for 40 s, the ball last seen at (50, last_y), missing for 10 s, home again."""
+def _gap_then_missing(last_y, speed_while_missing=1.7):
+    """Home on the ball for 40 s, the ball last seen at (50, last_y), missing for 10 s, home again.
+    The players run at 2.2 m/s while home has the ball, and at speed_while_missing during the gap."""
     live, gone = 1000, 10 * FPS
     n = 2 * live + gone
     x = np.full(n, 50.0)
@@ -57,7 +58,10 @@ def _gap_then_missing(last_y):
     place = ball_place_category(x, y, PITCH, CARRY_SECONDS * FPS)
     gap = np.full(n, HOME_MUCH_CLOSER, dtype=np.int8)
     gap[live:live + gone] = -1
-    labels = decode([(gap, gap_table()), (place, place_table())], transitions(), np.log(START),
+    speed = np.full(n, 2.2)
+    speed[live:live + gone] = speed_while_missing
+    labels = decode([(gap, gap_table()), (place, place_table()),
+                     (speed_category(speed), speed_table())], transitions(), np.log(START),
                     segments=[(0, n)], kickoffs=())
     return labels[live:live + gone]
 
@@ -68,3 +72,18 @@ def test_a_ball_lost_at_the_touchline_is_a_stoppage():
 
 def test_a_ball_lost_in_open_play_stays_with_the_team():
     assert set(_gap_then_missing(last_y=34.0)) == {"H"}
+
+
+def test_a_ball_lost_in_open_play_while_the_players_walk_is_a_stoppage():
+    assert np.mean(_gap_then_missing(last_y=34.0, speed_while_missing=0.5) == "D") > 0.8
+
+
+def test_players_slowing_down_while_the_ball_is_seen_is_not_enough_for_a_stoppage():
+    # Walking pace (1.3 m/s) happens in live play too, so with the ball seen and home close to it,
+    # it stays H.
+    n = 2000
+    speed = np.full(n, 2.2)
+    speed[800:1200] = 1.3
+    clues = _home_dominates(n) + [(speed_category(speed), speed_table())]
+    labels = decode(clues, transitions(), np.log(START), segments=[(0, n)], kickoffs=())
+    assert set(labels) == {"H"}

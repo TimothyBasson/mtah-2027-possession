@@ -7,6 +7,7 @@ for ours:
 ```bash
 uv run python external/build.py            # -> data/external/*.npz (gitignored, ~1 min/match)
 uv run python external/score.py --seen 0.59 [param=value ...]
+uv run python external/score_hmm.py --seen 0.59   # the HMM decoder in hmm/, and smooth50
 ```
 
 | set | matches | tracking | label source |
