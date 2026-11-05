@@ -46,7 +46,8 @@ video{width:100%;height:auto;display:block}
 .hud b{font-weight:600}
 canvas.full{width:100%;height:auto;display:block;border-radius:8px}
 .striplabel{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:6px}
-canvas.strip{width:100%;display:block;cursor:pointer;border-radius:4px;margin-top:2px}
+canvas.strip{width:100%;display:block;cursor:grab;border-radius:4px;margin-top:2px;touch-action:none}
+canvas.dragging{cursor:grabbing}
 #whole{height:16px}
 #zoom{height:28px}
 .keys{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-left:auto}
@@ -98,9 +99,9 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
       </div>
     </div></div>
     <div class="striplabel"><span>Whole match</span><span id="wholeRange"></span></div>
-    <canvas id="whole" class="strip" width="1200" height="30" aria-label="Possession over the whole match; click to seek"></canvas>
+    <canvas id="whole" class="strip" width="1200" height="30" aria-label="Possession over the whole match; click to jump, drag to scrub"></canvas>
     <div class="striplabel"><span>Two minutes around the playhead</span><span id="zoomRange"></span></div>
-    <canvas id="zoom" class="strip" width="1200" height="40" aria-label="Possession around the playhead; click to seek"></canvas>
+    <canvas id="zoom" class="strip" width="1200" height="40" aria-label="Possession around the playhead; click to jump, drag to scrub"></canvas>
     <div class="controls">
       <button id="play">Play</button>
       <button id="back" title="Previous frame (←)">◀ frame</button>
@@ -184,7 +185,7 @@ $('legend').innerHTML = [
 ].map(([st, t]) => '<div><span class="sw" style="' + st + '"></span>' + t + '</div>').join('');
 $('keys').innerHTML = [['--home', name.H], ['--away', name.A], ['--dead', 'Dead ball'], ['--none', 'No label']]
   .map(([c, t]) => '<span><span class="k" style="background:var(' + c + ')"></span>' + t + '</span>').join('') +
-  '<span>' + (HAS_TRUTH ? 'Truth on top where it exists · ' : '') + (D.pred ? 'your estimate below · ' : '') + 'click to jump</span>';
+  '<span>' + (HAS_TRUTH ? 'Truth on top where it exists · ' : '') + (D.pred ? 'your estimate below · ' : '') + 'click or drag to move</span>';
 $('wholeRange').textContent = '0:00 – ' + videoTime(NF - 1, 0);
 
 // ---- tracking, loaded a minute at a time --------------------------------------------------
@@ -346,8 +347,28 @@ function drawZoom(v) {
   $('zoomRange').textContent = videoTime(Math.max(0, a), 0) + ' – ' + videoTime(Math.min(NF - 1, b), 0);
 }
 const clickFrac = (e, el) => { const r = el.getBoundingClientRect(); return (e.clientX - r.left) / r.width; };
-whole.onclick = e => seekFrame(Math.round(clickFrac(e, whole) * (NF - 1)));
-zoom.onclick = e => seekFrame(Math.round(zoomFrom + clickFrac(e, zoom) * 2 * ZOOM));
+// Click to jump; drag to scrub. The whole-match strip follows the pointer. The two-minute strip
+// recentres on the playhead, so dragging it pans time like a map: drag left to go forward.
+function scrub(el, whole) {
+  let x0 = null, f0 = 0, moved = false;
+  el.onpointerdown = e => {
+    x0 = e.clientX; f0 = cur; moved = false; video.pause();
+    el.setPointerCapture(e.pointerId); el.classList.add('dragging');
+    if (whole) seekFrame(Math.round(clickFrac(e, el) * (NF - 1)));
+  };
+  el.onpointermove = e => {
+    if (x0 === null) return;
+    moved = moved || Math.abs(e.clientX - x0) > 3;
+    if (!moved) return;
+    seekFrame(Math.round(whole ? clickFrac(e, el) * (NF - 1) : f0 - (e.clientX - x0) / el.getBoundingClientRect().width * 2 * ZOOM));
+  };
+  el.onpointerup = el.onpointercancel = e => {
+    if (x0 !== null && !moved && !whole) seekFrame(Math.round(zoomFrom + clickFrac(e, el) * 2 * ZOOM));
+    x0 = null; el.classList.remove('dragging');
+  };
+}
+scrub(whole, true);
+scrub(zoom, false);
 
 // ---- read-outs --------------------------------------------------------------------------
 function hudRow(id, label, none) {
