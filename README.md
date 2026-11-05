@@ -113,6 +113,7 @@ Full description of every asset and how the frames line up: **[DATA.md](DATA.md)
 |---|---|
 | **[CHALLENGE.md](CHALLENGE.md)** | the problem, the four labels, what counts as possession |
 | **[DATA.md](DATA.md)** | every provided asset, its format, and the frame alignment |
+| **[DATA_POINTS.md](DATA_POINTS.md)** | every data point we can measure or derive, and what it might say about possession |
 | **[EVALUATION.md](EVALUATION.md)** | how you are scored, and why — read before optimising anything |
 | **[SUBMISSION.md](SUBMISSION.md)** | the file contract, the three deliverables, how to submit |
 | **[RULES.md](RULES.md)** | what you may and may not do |

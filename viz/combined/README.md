@@ -31,9 +31,11 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
 - **Label box on the video:** true possession, your estimate, and whether the tracking has the ball.
 - **Under the video, side by side:** the same frame as a top-down pitch (as in viz/replay; the
   shaded area is the part of the pitch the camera can see), the read-outs, and the legend.
-- **Two strips under the video**, both click-to-seek:
-  - *Whole match*: possession for the entire video, for finding your way around.
+- **Two strips under the video.** Click either one to jump, or drag it to scrub:
+  - *Whole match*: possession for the entire video, for finding your way around. Dragging moves
+    the playhead with the pointer.
   - *Two minutes around the playhead*: the same at a scale where single possessions are visible.
+    It stays centred on the playhead, so dragging pans time like a map: drag left to go forward.
 
   Truth is the top row only where the ground truth has labels, which for the public file is video
   7:27.4 to 12:27.4. Elsewhere the strip shows your estimate alone.
