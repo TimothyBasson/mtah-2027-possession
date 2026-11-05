@@ -10,8 +10,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hmm.clues import (  # noqa: E402
     IN_PLAY, MAX_SPEED, MIN_PLAYERS, MISSING_AFTER_LINE, MISSING_AFTER_PLAY, MISSING_STALE, OUTSIDE, SPEED_LAG,
-    KEEPER_ZONE, ball_is_usable, ball_place_category, gap_category, home_defends_low_x, keeper_slots, line_ball,
-    line_positions, load_distances, median_player_speed, metres_outside, nearest_by_team,
+    KEEPER_ZONE, ball_is_usable, ball_place_category, gap_category, home_defends_low_x, keeper_slots,
+    line_ball, line_positions, load_distances, median_player_speed, metres_outside, nearest_by_team,
     read_distances, speed_category, team_by_frame)
 
 PITCH = (100.0, 50.0)

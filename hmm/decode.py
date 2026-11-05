@@ -37,8 +37,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
 from hmm.clues import (  # noqa: E402
-    KEEPER_ON_BALL, N_GAP_BINS, ball_is_usable, ball_place_category, gap_category, keeper_slots, load_distances,
-    speed_category)
+    KEEPER_ON_BALL, N_GAP_BINS, ball_is_usable, ball_place_category, gap_category, keeper_slots,
+    load_distances, speed_category)
 from hmm.model import (  # noqa: E402
     A, D, H, STATES, baum_welch, build_log_emit, rate_log_trans, viterbi)
 from starter.baseline import RESULTS_DIR, team_of_each_track, write_submission  # noqa: E402
