@@ -18,6 +18,7 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
 | `--pred` | a `frame,label` submission CSV; its label is shown next to the truth |
 | `--start` | where the page opens: `7:27.4` (default, kickoff), `1:20:05`, `453.4` or `f11185`. Added to the URL as `#f<frame>`, which you can edit or share |
 | `--gt` | ground truth CSV, default the public 5 minutes; `none` to hide it |
+| `--explain` | show `possession/`'s labels with its working, under the strips. The rows are: truth, the model, its frame-by-frame guess before smoothing, wrong frames, whether the model saw the ball (on outside matches after knocking it out to 59%, as `external/score.py --seen 0.59` does), then each clue's lean in log-odds (up means home or dead, down means away or live), and a whole-match strip of mistakes to click through. Outside matches also show their scores. Pages are written as `data/viz/match[_<name>]_explain.html`. Needs numpy |
 | `--out` | output path, default `data/viz/match[_<pred>].html` |
 | `--rebuild` | rewrite the tracking chunks (see below) |
 | `--open` | open the page in your default browser when done |

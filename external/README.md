@@ -37,16 +37,15 @@ have 17 possessions, roughly 360 over a full match, so DFL counts some touches w
 Metrica has about 315, which is closer. Expect a low spellF1 on IDSSE even when the model is right
 by the organisers' rule. That set is better for alive/dead and team accuracy.
 
-## Baseline: v3 model, `--seen 0.59`, no tags
+## Baseline: `possession/` v1, `--seen 0.59`, no tags
 
 | | spellF1 | macroF1 | alive/dead F1 | team acc |
 |---|---|---|---|---|
-| IDSSE mean (7) | 0.369 | 0.803 | 0.881 | 0.873 |
-| Metrica mean (3) | 0.576 | 0.849 | 0.918 | 0.920 |
-| all 10 | 0.431 | 0.817 | 0.892 | 0.887 |
+| IDSSE mean (7) | 0.269 | 0.723 | 0.871 | 0.794 |
+| Metrica mean (3) | 0.438 | 0.746 | 0.876 | 0.857 |
+| all 10 | 0.320 | 0.730 | 0.873 | 0.813 |
 
-For comparison, public spellF1 is 0.594. With the ball always seen, IDSSE rises to 0.458 spellF1
-and 0.975 alive/dead.
+The old v3 model these numbers used to describe (0.431 across all 10) was never committed and is lost.
 
 Use `--seen` on IDSSE. With the ball always visible, the model's hardest problem disappears.
 Scores also get no help from set-piece tags, because these matches have no Smart Tagging.
