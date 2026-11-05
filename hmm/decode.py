@@ -178,6 +178,11 @@ def load_observations(game=GAME, data_dir=None):
     print("  keeper slots {}: {} frames counted for the team defending the goal they stand by, "
           "{} of them within {:.0f} m of the ball".format(
               [slot + 1 for slot in keepers], stats[3], stats[4], KEEPER_ON_BALL))
+    if keepers and stats[3] == 0:
+        # team_by_frame fell back to the metadata's map (its warning is not repeated when the
+        # distances come from the cache), so the keeper fix is off for this run.
+        print("WARNING: the keeper rule moved no frames -- it fell back to the metadata's teams. "
+              "Check the keeper slots and that the teams switch ends.", file=sys.stderr)
     gap = gap_category(ball_is_usable(ball_x, ball_y, pitch), d_home, d_away)
     place = ball_place_category(ball_x, ball_y, pitch, CARRY_SECONDS * FPS)
     return gap, place, speed_category(speed)
