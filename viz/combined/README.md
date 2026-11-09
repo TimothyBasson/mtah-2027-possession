@@ -33,12 +33,15 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
 - **Under the video, side by side:** the same frame as a top-down pitch (as in viz/replay; the
   shaded area is the part of the pitch the camera can see), the read-outs, and the legend.
 - **Team spread** (checkbox by the play controls, remembered): each team's centre, a line to every
-  player, and a dashed circle at the average distance from the centre, leaving out the keeper (ringed), with both numbers on the
-  pitch. The team your estimate says has the ball is shaded. It is the who-has-the-ball clue in `possession/model.py` for this one frame; the model
-  averages it over 2 s either side.
-- **Two strips under the video**, both click-to-seek:
-  - *Whole match*: possession for the entire video, for finding your way around.
+  player, and a dashed circle at the average distance from the centre, leaving out the keeper
+  (ringed), with both numbers on the pitch. The team your estimate says has the ball is shaded. It
+  is the who-has-the-ball clue in `possession/model.py` for this one frame; the model averages it
+  over 2 s either side.
+- **Two strips under the video.** Click either one to jump, or drag it to scrub:
+  - *Whole match*: possession for the entire video, for finding your way around. Dragging moves
+    the playhead with the pointer.
   - *Two minutes around the playhead*: the same at a scale where single possessions are visible.
+    It stays centred on the playhead, so dragging pans time like a map: drag left to go forward.
 
   Truth is the top row only where the ground truth has labels, which for the public file is video
   7:27.4 to 12:27.4. Elsewhere the strip shows your estimate alone.
