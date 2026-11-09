@@ -60,6 +60,13 @@ def explain(F, params=None):
         warnings.simplefilter("ignore", RuntimeWarning)  # nobody tracked
         pace = smooth(np.nanmedian(F["players"][:, :, 2], 1), p["dead_window"])
     pred = np.where(lean >= 0, "H", "A")
+    # No lean where a side is untracked for the whole window: possession stays with the team that
+    # had it (CHALLENGE.md), so carry the last lean in this half, or the first one at its start.
+    for a, b in HALVES:
+        ok = np.flatnonzero(np.isfinite(lean[a:b + 1]))
+        if len(ok):
+            last = ok[np.clip(np.searchsorted(ok, np.arange(b + 1 - a), "right") - 1, 0, None)]
+            pred[a:b + 1] = pred[a:b + 1][last]
     pred[~(pace >= p["walking"])] = "D"  # NaN pace counts as dead
     if "dead" in F:  # graded frames before a kickoff
         pred[F["dead"]] = "D"
