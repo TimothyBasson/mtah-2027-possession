@@ -45,7 +45,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "viz", "replay"))
-from games import DATA_DIR, require, source_frames  # noqa: E402
+from games import DATA_DIR, GAME, GAMES, require, source_frames  # noqa: E402
 from make_replay import FPS, PUBLIC_GT, clock_spec, parse_time, read_labels, read_teams  # noqa: E402
 
 # Params
@@ -108,7 +108,7 @@ def build(pred_path=None, gt_path=PUBLIC_GT):
     n_frames = source_frames()
     slots, names = read_teams(require(["atd_meta"])[0])
     return {"teams": slots, "names": names, "n_frames": n_frames, "chunk": CHUNK,
-            "clock": clock_spec(),
+            "clock": clock_spec(), "pitch": list(GAMES[GAME]["pitch"]),
             "truth": label_string(gt_path, n_frames) if gt_path else None,
             "pred": label_string(pred_path, n_frames) if pred_path else None,
             "pred_name": os.path.basename(pred_path) if pred_path else None}
@@ -140,6 +140,7 @@ def build_external(match, pred_path=None, rebuild=False):
     halves = z["halves"].tolist()[:2]
     return {"teams": {s + 1: "HA"[t] for s, t in enumerate(z["team"].tolist())},
             "names": {"H": "Home", "A": "Away"}, "match": match, "n_frames": n_frames, "chunk": CHUNK,
+            "pitch": size.tolist(),
             "clock": {"fps": int(z["fps"]), "kickoff": [h[0] for h in halves], "end": [h[1] for h in halves]},
             "truth": "".join(labels.tolist()),
             "pred": label_string(pred_path, n_frames) if pred_path else None,
