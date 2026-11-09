@@ -153,6 +153,7 @@ def explain(match):
     tenths (base64 int8), the ball as the model saw it, and scores where the whole match is labelled."""
     import numpy as np
     sys.path.insert(0, os.path.join(ROOT, "possession"))
+    import features
     import model
     import run
     sys.path.insert(0, os.path.join(ROOT, "evaluation"))
@@ -162,7 +163,10 @@ def explain(match):
     tenths = lambda v: base64.b64encode(np.clip(np.rint(np.nan_to_num(v) * 10), -127, 127)
                                         .astype(np.int8).tobytes()).decode()
     out = {"raw": "".join(x["raw"]), "lanes": [[name, kind, tenths(v)] for name, kind, v in x["lanes"]],
-           "seen": "".join(np.where(F["seen"], "1", "0"))}
+           "seen": "".join(np.where(F["seen"], "1", "0")),
+           # per half: first, last frame, then +1/-1 for whether home's and away's own goal is at x=0
+           "own_goal": [[int(a), int(b), h, w] for (a, b), h, w in zip(model.HALVES, *features.own_goal(
+               F["players"], F["team"], model.HALVES))]}
     if labels is not None:
         spells = lambda l: int(1 + (l[l != "X"][1:] != l[l != "X"][:-1]).sum())
         r = pm.evaluate(pm.label_codes(labels), pm.label_codes(x["pred"]), bootstrap_n=0)

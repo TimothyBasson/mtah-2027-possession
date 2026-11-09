@@ -22,6 +22,7 @@ HALVES = None  # [(first, last)] graded frames per half, set by the caller
 TEAM_WINDOW = 2.0  # s either side for the spread lean
 DEAD_WINDOW = 0.5  # s either side for the walking test
 WALKING = 1.2      # m/s median player speed below which play is dead
+KEEPERS = 0        # 1 counts each team's deepest player (the keeper) in its spread
 
 
 def graded_mask(n):
@@ -52,8 +53,8 @@ def predict(F, params=None):
 def explain(F, params=None):
     """predict, with its working for the viewer: how much more spread out home is than away, in
     metres (positive leans home), and the median player speed in m/s."""
-    p = dict(team_window=TEAM_WINDOW, dead_window=DEAD_WINDOW, walking=WALKING, **(params or {}))
-    sh, sa = features.spread(F["players"], F["team"])
+    p = dict(keepers=KEEPERS, team_window=TEAM_WINDOW, dead_window=DEAD_WINDOW, walking=WALKING) | (params or {})
+    sh, sa = features.spread(F["players"], F["team"], HALVES, keepers=bool(p["keepers"]))
     lean = smooth(sh - sa, p["team_window"])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # nobody tracked

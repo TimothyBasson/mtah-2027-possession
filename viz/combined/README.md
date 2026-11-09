@@ -33,7 +33,7 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
 - **Under the video, side by side:** the same frame as a top-down pitch (as in viz/replay; the
   shaded area is the part of the pitch the camera can see), the read-outs, and the legend.
 - **Team spread** (checkbox by the play controls, remembered): each team's centre, a line to every
-  player, and a dashed circle at the average distance from the centre, with both numbers on the
+  player, and a dashed circle at the average distance from the centre, leaving out the keeper (ringed), with both numbers on the
   pitch. The team your estimate says has the ball is shaded. It is the who-has-the-ball clue in `possession/model.py` for this one frame; the model
   averages it over 2 s either side.
 - **Two strips under the video**, both click-to-seek:

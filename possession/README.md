@@ -15,7 +15,9 @@ different eyes and should make different mistakes, which is what makes combining
 
 On each frame:
 - **Who:** the more spread-out team has the ball. Spread is each team's mean distance from its own
-  centre, averaged over 2 s either side of the frame.
+  centre, averaged over 2 s either side of the frame. The keeper, taken as the team's deepest player
+  toward its own goal, is left out: he adds several metres that depend on where play is, not on who
+  has the ball.
 - **Dead:** when the median player's speed, averaged over 0.5 s either side, is under 1.2 m/s.
 - Graded frames before each kickoff are D on BAR-ATH.
 
@@ -23,9 +25,12 @@ Windows look forward as well as back (the task is offline) and stop at the edge 
 
 | outside matches | spellF1 | macroF1 | alive/dead | team |
 |---|---|---|---|---|
-| IDSSE (7) | 0.173 | 0.658 | 0.831 | 0.745 |
-| Metrica (3) | 0.202 | 0.646 | 0.829 | 0.768 |
-| all 10 | 0.182 | 0.655 | 0.830 | 0.752 |
+| IDSSE (7) | 0.187 | 0.667 | 0.831 | 0.760 |
+| Metrica (3) | 0.212 | 0.660 | 0.829 | 0.794 |
+| all 10 | 0.194 | 0.665 | 0.830 | 0.771 |
+
+With the keepers counted (`external/score.py keepers=1`) it was 0.182 / 0.655 / 0.830 / 0.752.
+Leaving them out raised team accuracy on 9 of the 10 matches.
 
 For comparison, the earlier nearest-player-to-ball v0 scored spellF1 0.057 and macroF1 0.532 on all
 10 (`--seen 0.59`). `--seen` does nothing here, because the ball is never read.
