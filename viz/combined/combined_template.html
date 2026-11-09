@@ -336,10 +336,8 @@ function drawPitch(f, v) {
 // This is the single frame; the model averages it over 2 s either side.
 function drawSpread(f, C, frame) {
   const [L, Wm] = D.pitch, out = {};
-  // Shade the team that has the ball: by the truth where this frame has it, else by the estimate.
-  const t = D.truth && D.truth[frame], est = D.pred && D.pred[frame];
-  const known = !!t && 'HAD'.includes(t), l = known ? t : est;
-  const owner = !!l && 'HA'.includes(l) ? l : null, ownerSrc = known ? 'true' : 'estimate';
+  // Shade the team the model says has the ball.
+  const est = D.pred && D.pred[frame], owner = !!est && 'HA'.includes(est) ? est : null;
   for (const team of ['H', 'A']) {
     const pts = f.slots.filter(([s]) => side(s) === team).map(([, x, y]) => [x / 1000 * L, y / 1000 * Wm]);
     if (!pts.length) continue;
@@ -359,7 +357,7 @@ function drawSpread(f, C, frame) {
   const txt = ['H', 'A'].filter(t => t in out).map(t => `${name[t]} ${out[t].toFixed(1)} m`);
   const wide = out.H !== undefined && out.A !== undefined ? (out.H >= out.A ? 'H' : 'A') : null;
   const line = 'Spread: ' + txt.join(' · ') + (wide ? `  → ${name[wide]} more spread out` : '')
-    + (owner ? ` · shaded: ${name[owner]} has it (${ownerSrc})` : '');
+    + (owner ? ` · shaded: model says ${name[owner]}` : '');
   cx.lineWidth = 5; cx.strokeStyle = 'rgba(0,0,0,.6)'; cx.strokeText(line, 14, 30);
   cx.fillStyle = '#fff'; cx.fillText(line, 14, 30);
 }
