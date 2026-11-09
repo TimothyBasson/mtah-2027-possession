@@ -8,20 +8,36 @@ uv run python external/score.py --seen 0.59        # score on the 10 outside mat
 uv run python viz/combined/make_combined.py --match all --explain --open   # see how it works
 ```
 
-## v0: how it works
+## v0: players only, no ball
 
-The simplest model. On each frame, the team whose nearest player is closer to the ball has it.
-Where the ball isn't seen, the label is D. There is no smoothing.
+The model never reads the ball. Tim's `hmm/` works from the ball, so the two see the match through
+different eyes and should make different mistakes, which is what makes combining them worth it.
 
-| outside matches, `--seen 0.59` | spellF1 | macroF1 |
-|---|---|---|
-| IDSSE (7) | 0.041 | 0.432 |
-| Metrica (3) | 0.096 | 0.767 |
-| all 10 | 0.057 | 0.532 |
+On each frame:
+- **Who:** the more spread-out team has the ball. Spread is each team's mean distance from its own
+  centre, averaged over 2 s either side of the frame.
+- **Dead:** when the median player's speed, averaged over 0.5 s either side, is under 1.2 m/s.
+- Graded frames before each kickoff are D on BAR-ATH.
+
+Windows look forward as well as back (the task is offline) and stop at the edge of each half.
+
+| outside matches | spellF1 | macroF1 | alive/dead | team |
+|---|---|---|---|---|
+| IDSSE (7) | 0.173 | 0.658 | 0.831 | 0.745 |
+| Metrica (3) | 0.202 | 0.646 | 0.829 | 0.768 |
+| all 10 | 0.182 | 0.655 | 0.830 | 0.752 |
+
+For comparison, the earlier nearest-player-to-ball v0 scored spellF1 0.057 and macroF1 0.532 on all
+10 (`--seen 0.59`). `--seen` does nothing here, because the ball is never read.
+
+Possessions now come out about the right length: 634 predicted against 614 true on idsse_J03WMX
+(median 4.8 s against 4.2 s), and 680 against 439 on metrica_1.
 
 What it gets wrong:
-- **Far too many possessions.** About 5 times too many (3,609 against 614 on idsse_J03WMX), with half of them under 1 s. The label flips every time the two nearest players swap.
-- **A missing ball counted as dead.** On Metrica, and on our match by the players' speed, a missing ball usually is dead. IDSSE's dropout is random, so there it is wrong half the time.
+- **Late changes.** Shape takes a couple of seconds to change after a turnover, and the 2 s window
+  adds to that.
+- **Style.** A team keeping the ball deep looks compact, and a high press looks stretched.
+- **One number per question.** Each of who and dead uses a single signal with a fixed cutoff.
 
 ## Ideas to try (research, 2026-11-05)
 
