@@ -289,7 +289,7 @@ function drawVideo(f) {
 
 // ---- top-down pitch ---------------------------------------------------------------------
 const pc = $('pitch'), cx = pc.getContext('2d'), W = pc.width, PH = pc.height;
-function drawPitch(f) {
+function drawPitch(f, v) {
   cx.fillStyle = css('--grass'); cx.fillRect(0, 0, W, PH);
   cx.strokeStyle = css('--line'); cx.lineWidth = 2;
   const sx = m => m / 105 * W, sy = m => m / 68 * PH;
@@ -325,7 +325,7 @@ function drawPitch(f) {
     cx.fillStyle = est ? C[team] : CL[team]; cx.fillText(s, u, v + 0.5);
   }
   cx.textBaseline = 'alphabetic';
-  if ($('showSpread').checked) drawSpread(f, C);
+  if ($('showSpread').checked) drawSpread(f, C, v);
   if (f.ball) {
     cx.fillStyle = css('--ball'); cx.strokeStyle = css('--grass'); cx.lineWidth = 2;
     cx.beginPath(); cx.arc(f.ball[0] / 1000 * W, f.ball[1] / 1000 * PH, 6, 0, Math.PI * 2); cx.fill(); cx.stroke();
@@ -334,8 +334,12 @@ function drawPitch(f) {
 
 // Team spread, as possession/model.py measures it: each team's mean distance from its own centre.
 // This is the single frame; the model averages it over 2 s either side.
-function drawSpread(f, C) {
+function drawSpread(f, C, frame) {
   const [L, Wm] = D.pitch, out = {};
+  // Shade the team that has the ball: by the truth where this frame has it, else by the estimate.
+  const t = D.truth && D.truth[frame], est = D.pred && D.pred[frame];
+  const known = !!t && 'HAD'.includes(t), l = known ? t : est;
+  const owner = !!l && 'HA'.includes(l) ? l : null, ownerSrc = known ? 'true' : 'estimate';
   for (const team of ['H', 'A']) {
     const pts = f.slots.filter(([s]) => side(s) === team).map(([, x, y]) => [x / 1000 * L, y / 1000 * Wm]);
     if (!pts.length) continue;
@@ -346,6 +350,7 @@ function drawSpread(f, C) {
     for (const [x, y] of pts) { cx.beginPath(); cx.moveTo(u, v); cx.lineTo(x / L * W, y / Wm * PH); cx.stroke(); }
     cx.globalAlpha = 1; cx.lineWidth = 3; cx.setLineDash([8, 6]);
     cx.beginPath(); cx.ellipse(u, v, r / L * W, r / Wm * PH, 0, 0, Math.PI * 2); cx.stroke(); cx.setLineDash([]);
+    if (team === owner) { cx.fillStyle = C[team]; cx.globalAlpha = 0.15; cx.fill(); cx.globalAlpha = 1; }
     cx.fillStyle = C[team]; cx.beginPath(); cx.arc(u, v, 7, 0, Math.PI * 2); cx.fill();
     cx.strokeStyle = css('--grass'); cx.lineWidth = 2; cx.stroke();
     out[team] = r;
@@ -353,7 +358,8 @@ function drawSpread(f, C) {
   cx.font = '600 22px -apple-system,sans-serif'; cx.textAlign = 'left';
   const txt = ['H', 'A'].filter(t => t in out).map(t => `${name[t]} ${out[t].toFixed(1)} m`);
   const wide = out.H !== undefined && out.A !== undefined ? (out.H >= out.A ? 'H' : 'A') : null;
-  const line = 'Spread: ' + txt.join(' · ') + (wide ? `  → ${name[wide]} more spread out` : '');
+  const line = 'Spread: ' + txt.join(' · ') + (wide ? `  → ${name[wide]} more spread out` : '')
+    + (owner ? ` · shaded: ${name[owner]} has it (${ownerSrc})` : '');
   cx.lineWidth = 5; cx.strokeStyle = 'rgba(0,0,0,.6)'; cx.strokeText(line, 14, 30);
   cx.fillStyle = '#fff'; cx.fillText(line, 14, 30);
 }
@@ -531,7 +537,7 @@ function readouts(v, f) {
 // ---- one clock: the video ---------------------------------------------------------------
 function render(v) {
   const f = frameData(v);
-  drawVideo(f); drawPitch(f); readouts(v, f); drawWhole(v); drawZoom(v); drawLanes(v);
+  drawVideo(f); drawPitch(f, v); readouts(v, f); drawWhole(v); drawZoom(v); drawLanes(v);
 }
 function update(mediaTime, force) {
   const v = frameOf(mediaTime);
