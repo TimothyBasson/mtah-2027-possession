@@ -35,7 +35,8 @@ ball was tried, and moved the external scores by 0.001 at most.
 
 The thresholds are physical or chosen against Metrica's event data (external/touches.py), never
 on the public window. FLIGHT_SPEED was chosen on the 10 external matches; picked with each match
-left out in turn, every fold still picks 0 and the held-out spellF1 is the same 0.445.
+left out in turn, every fold still picks 0 and the held-out spellF1 is the same 0.443 (0.445 with a
+5 s cap). The numbers below were measured with a 5 s cap.
 
 Tried on the external matches and not kept, since a real interception or a missed receiving touch
 could leave the kicker's team holding a ball it had lost:
@@ -47,9 +48,12 @@ v4 also gets more of the frames right than v3 on flights that end with the ball 
 Known limits on BAR-ATH:
 - It finds 7.5 touches a minute, a third of the external rate, because the ball is so often lost
   at a player's feet.
-- 20% of its flight frames run to the FLIGHT_SECONDS cap, against 0-1% on the external matches.
-  Those 47 flights move at a median 8 m/s with a player a median 2.3 m away: mostly a carry whose
-  small touches stay under TOUCH_DV, so the carrier's team holds it, which is right for a carry.
+- Flights run to the FLIGHT_SECONDS cap far more often than on the external matches (0-1% of
+  flight frames). With a 5 s cap, 20% of flight frames did. Those flights move at a median 8 m/s
+  with a player a median 2.3 m away, and look like a mix: on 37% of them the kicker's team is
+  nearer the ball on at least 80% of frames (a carry whose small touches stay under TOUCH_DV), but
+  on 27% the other team is nearer for most of the flight, and on 43% for most of the second after
+  the cap (a receiving touch missed). Hence the 3 s cap.
 - The table's unknown-kicker share (0.04) comes from random ~2 s dropouts, while BAR-ATH loses the
   ball around players, so that share fits it less well.
 - The tables come from labels (DFL, Metrica events) that may hand possession over on a first touch
@@ -70,14 +74,18 @@ MAX_BALL_SPEED = 40.0
 TOUCH_DV = 4.0
 TOUCH_RADIUS = 2.5
 # m/s off the touch that makes a flight, m/s below which the ball is no longer flying, and the
-# longest flight in seconds (a 70 m ball at 20 m/s takes under 4 s). FLIGHT_SPEED was meant for
-# long balls (12 m/s), but on the external matches spellF1 rises steadily as it drops and levels
-# off below 2 m/s (all 10: 0.318 at 16, 0.357 at 12, 0.403 at 8, 0.437 at 4, 0.446 at 0). So every
-# touch with a measured speed starts one: the ball belongs to the last team to touch it until the
-# next touch, and long balls are just where the nearest player misleads most.
+# longest flight in seconds. FLIGHT_SECONDS bounds how long a missed receiving touch can leave the
+# kicker's team holding a ball it has lost. Few balls are in the air over 3 s (60 m at 20 m/s). On
+# the external matches it hardly matters, as few flights reach it there (all 10 spellF1: 0.437 at
+# 2 s, 0.443 at 3, 0.444 at 4, 0.445 at 5), so it is set by that physics, for BAR-ATH, where many do
+# (see the top of this file). FLIGHT_SPEED was meant for long balls (12 m/s), but on the external
+# matches spellF1 rises steadily as it drops and levels off below 2 m/s (all 10, 5 s cap: 0.318 at
+# 16, 0.357 at 12, 0.403 at 8, 0.437 at 4, 0.446 at 0). So every touch with a measured speed starts
+# one: the ball belongs to the last team to touch it until the next touch, and long balls are just
+# where the nearest player misleads most.
 FLIGHT_SPEED = 0.0
 SLOW_SPEED = 3.0
-FLIGHT_SECONDS = 5.0
+FLIGHT_SECONDS = 3.0
 # Why a flight ended.
 END_TOUCH, END_LOST, END_SLOW, END_CAP = 0, 1, 2, 3
 # Seconds since the kick that split a flight into phases, for the flight clue. Categories: kicker
