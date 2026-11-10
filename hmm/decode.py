@@ -95,10 +95,11 @@ SPEED_GIVEN_DEAD = np.array([0.222, 0.221, 0.247, 0.208, 0.076, 0.013, 0.013])
 # to 59%, as the model sees it), so each provider counts once. A mirrors H. D is the mean of the
 # two (flight_table): a flight in a stoppage is rare, and the few such frames are no basis for a
 # row of their own.
-# The providers agree to within 0.1 in every bin; the unknown-kicker share is larger on IDSSE
-# (0.07 against 0.01) because its ball is knocked out. The kicker's team is 24-29 times likelier
-# than the other team in every phase, so the later phases are not weaker in the labels.
-FLIGHT_GIVEN_HOME = np.array([0.354, 0.400, 0.169, 0.015, 0.014, 0.007, 0.040])
+# Counted with the 3 s flight cap (hmm/ball.py FLIGHT_SECONDS). The providers agree to within 0.08
+# in every bin; the unknown-kicker share is larger on IDSSE (0.07 against 0.01) because its ball is
+# knocked out. The kicker's team is 23-28 times likelier than the other team in every phase, so the
+# later phases are not weaker in the labels.
+FLIGHT_GIVEN_HOME = np.array([0.365, 0.412, 0.146, 0.016, 0.015, 0.006, 0.040])
 
 # How long a last sighting at the line is carried into a missing stretch; past this the decoder
 # relies on the transitions alone. Football reasoning: a throw-in is taken within ~10 s, a goal
