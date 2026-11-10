@@ -34,7 +34,26 @@ not observed. The gap clue stays on throughout: setting it aside in flight with 
 ball was tried, and moved the external scores by 0.001 at most.
 
 The thresholds are physical or chosen against Metrica's event data (external/touches.py), never
-on the public window.
+on the public window. FLIGHT_SPEED was chosen on the 10 external matches; picked with each match
+left out in turn, every fold still picks 0 and the held-out spellF1 is the same 0.445.
+
+Tried on the external matches and not kept, since a real interception or a missed receiving touch
+could leave the kicker's team holding a ball it had lost:
+- a weaker flight clue (its log table times 0.3 / 0.5): spellF1 0.349 / 0.382, against 0.445 at 1;
+- ending a flight once a player has stayed within 1-2 m of the ball for 3-10 frames: 0.415-0.432.
+v4 also gets more of the frames right than v3 on flights that end with the ball lost (IDSSE 0.716
+-> 0.859, Metrica 0.413 -> 0.768).
+
+Known limits on BAR-ATH:
+- It finds 7.5 touches a minute, a third of the external rate, because the ball is so often lost
+  at a player's feet.
+- 20% of its flight frames run to the FLIGHT_SECONDS cap, against 0-1% on the external matches.
+  Those 47 flights move at a median 8 m/s with a player a median 2.3 m away: mostly a carry whose
+  small touches stay under TOUCH_DV, so the carrier's team holds it, which is right for a carry.
+- The table's unknown-kicker share (0.04) comes from random ~2 s dropouts, while BAR-ATH loses the
+  ball around players, so that share fits it less well.
+- The tables come from labels (DFL, Metrica events) that may hand possession over on a first touch
+  more readily than the challenge's controlled-possession rule.
 """
 
 import numpy as np
