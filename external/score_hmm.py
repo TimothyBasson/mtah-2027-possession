@@ -1,4 +1,4 @@
-"""Score the HMM decoder (hmm/) and the smooth50 baseline on the out-of-sample matches.
+"""Score the HMM decoders (hmm/) and the smooth50 baseline on the out-of-sample matches.
 
     python external/score_hmm.py [--seen 0.59]
 
@@ -6,9 +6,10 @@
           of frames (ours: 59%). The Metrica samples already lose the ball like ours does and are
           left alone. 1.0 scores IDSSE with the ball always seen.
 
-hmm_v3's speed table is counted from the labelled external matches, so scoring it on the same
-matches would be in-sample. Here each provider is scored with the table counted on the *other*
-provider only (IDSSE with Metrica's, Metrica with IDSSE's). Prints aggregates only.
+hmm_v3's speed table and hmm_v4's flight table are counted from the labelled external matches, so
+scoring them on the same matches would be in-sample. Here each provider is scored with the tables
+counted on the *other* provider only (IDSSE with Metrica's, Metrica with IDSSE's). Prints
+aggregates only.
 """
 
 import argparse
@@ -24,6 +25,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "evaluation"))
 import possession_metrics as pm  # noqa: E402
 import hmm.decode as dec  # noqa: E402
+from hmm.ball import N_FLIGHT_CATS, flight_clue, mirror_flight  # noqa: E402
 from hmm.clues import (  # noqa: E402
     N_SPEED_BINS, ball_is_usable, ball_place_category, gap_category, median_player_speed,
     speed_category)
@@ -58,8 +60,29 @@ def speed_given_state(matches):
     return np.mean(rows, axis=0)
 
 
-def predict(d, ball, speed_table):
-    """smooth50, hmm_v2 and hmm_v3 labels for one match."""
+def flight_cats(d, ball):
+    """Flight-clue categories for a match, from the ball the model sees."""
+    d_home, d_away = nearest_by_team(d["players"], ball, d["team"])
+    return flight_clue(ball[:, 0].astype(float), ball[:, 1].astype(float), d_home, d_away,
+                       int(d["fps"]))[0]
+
+
+def flight_given_state(matches, balls):
+    """p(flight category | H, in flight), the mean over the matches' own labels. Away frames count
+    mirrored into the home row, so the table is symmetric in the teams."""
+    rows = []
+    for d, ball in zip(matches, balls):
+        cats, gt = flight_cats(d, ball), d["labels"]
+        count = lambda sel: np.bincount(cats[sel & (cats >= 0)], minlength=N_FLIGHT_CATS)  # noqa
+        home = count(gt == "H") + mirror_flight(count(gt == "A"))
+        rows.append(home / home.sum())
+    home = np.mean(rows, axis=0) + 1e-3
+    return home / home.sum()
+
+
+def predict(d, ball, speed_table, flight_table=None):
+    """smooth50, hmm_v2 and hmm_v3 labels for one match, and hmm_v4 (v3 plus the flight clue)
+    with a flight_table."""
     players, team = d["players"], d["team"]
     pitch = tuple(float(v) for v in d["pitch"])
     fps = int(d["fps"])
@@ -78,7 +101,10 @@ def predict(d, ball, speed_table):
     out["smooth50"] = np.full(len(ball), "X", dtype="<U1")
     for lo, hi in segments:
         out["smooth50"][lo:hi] = s50[lo:hi]
-    for name, clues in (("hmm_v2", v2_clues), ("hmm_v3", v3_clues)):
+    variants = [("hmm_v2", v2_clues), ("hmm_v3", v3_clues)]
+    if flight_table is not None:
+        variants.append(("hmm_v4", v3_clues + [(flight_cats(d, ball), flight_table)]))
+    for name, clues in variants:
         out[name] = dec.decode(clues, dec.transitions(), np.log(dec.START), segments, kickoffs=())
     return out
 
@@ -108,16 +134,23 @@ def main():
     by_provider = {k: [d for n, d in matches.items() if n.startswith(k)] for k in PROVIDERS}
     tables = {k: dec.speed_table(*speed_given_state(by_provider[o]))
               for k, o in zip(PROVIDERS, PROVIDERS[::-1])}
+    balls = {n: drop_ball(d["ball"], a.seen, int(d["fps"])) if n.startswith("idsse") else d["ball"]
+             for n, d in matches.items()}
+    flight_tables = {}
+    for k, o in zip(PROVIDERS, PROVIDERS[::-1]):
+        names = [n for n in matches if n.startswith(o)]
+        flight_tables[k] = dec.flight_table(flight_given_state(
+            [matches[n] for n in names], [balls[n] for n in names]))
 
     rows = {}
     for name, d in matches.items():
         provider = name.split("_")[0]
-        ball = drop_ball(d["ball"], a.seen, int(d["fps"])) if provider == "idsse" else d["ball"]
+        ball = balls[name]
         gt = d["labels"]
         graded = gt != "X"
         print("\n{}: ball seen {:.0%}, truth D {:.0%}, {} possessions".format(
             name, np.isfinite(ball[graded, 0]).mean(), np.mean(gt[graded] == "D"), possessions(gt)))
-        for model, pred in predict(d, ball, tables[provider]).items():
+        for model, pred in predict(d, ball, tables[provider], flight_tables[provider]).items():
             pred[~graded] = "X"
             r = score(gt, pred)
             rows.setdefault(model, {})[name] = r
