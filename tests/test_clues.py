@@ -10,8 +10,9 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hmm.clues import (  # noqa: E402
     IN_PLAY, MAX_SPEED, MIN_PLAYERS, MISSING_AFTER_LINE, MISSING_AFTER_PLAY, MISSING_STALE, OUTSIDE, SPEED_LAG,
-    KEEPER_ZONE, ball_is_usable, ball_place_category, gap_category, home_defends_low_x, keeper_slots,
-    line_ball, line_positions, load_distances, median_player_speed, metres_outside, nearest_by_team,
+    KEEPER_ZONE, N_DISTANCE_BINS, N_GAP_BINS, N_GAP_DISTANCE, ball_is_usable, ball_place_category,
+    gap_category, gap_distance_category, home_defends_low_x, keeper_slots, line_ball, line_positions,
+    load_distances, median_player_speed, metres_outside, mirror_gap_distance, nearest_by_team,
     read_distances, speed_category, team_by_frame)
 
 PITCH = (100.0, 50.0)
@@ -48,6 +49,26 @@ def test_gap_category_bins_away_minus_home_and_skips_frames_without_a_usable_bal
     #       gap:      -7    -2   0.5  2.5   7    3 (edge, inclusive)
     cats = gap_category(usable, d_home, d_away)
     assert cats.tolist() == [0, 1, 2, 3, 4, 3, -1, -1]
+
+
+def test_gap_distance_category_adds_how_far_the_nearest_player_is():
+    usable = np.array([True, True, True, True, True, False, True])
+    d_home = np.array([0.5, 1.0, 3.0, 9.0, 9.0, 0.5, np.nan])
+    d_away = np.array([9.0, 9.0, 9.0, 9.5, 0.2, 9.0, 2.0])
+    # gap bin:         4    4    4    2    0   (no ball) (no home player)
+    # nearest:        0.5  1.0  3.0  9.0  0.2 -> distance bins 0, 1 (edge, right-open), 2, 3, 0
+    cats = gap_distance_category(usable, d_home, d_away)
+    assert cats.tolist() == [4 * N_DISTANCE_BINS + 0, 4 * N_DISTANCE_BINS + 1,
+                             4 * N_DISTANCE_BINS + 2, 2 * N_DISTANCE_BINS + 3, 0, -1, -1]
+
+
+def test_mirror_gap_distance_swaps_the_teams_and_keeps_the_distance():
+    table = np.arange(N_GAP_DISTANCE, dtype=float)
+    mirrored = mirror_gap_distance(table).reshape(N_GAP_BINS, N_DISTANCE_BINS)
+    assert np.array_equal(mirrored, table.reshape(N_GAP_BINS, N_DISTANCE_BINS)[::-1])
+    assert np.array_equal(mirror_gap_distance(mirror_gap_distance(table)), table)
+    # home much closer with a player on the ball becomes away much closer with a player on the ball
+    assert mirror_gap_distance(table)[0] == table[(N_GAP_BINS - 1) * N_DISTANCE_BINS]
 
 
 def _write_atd(folder, lines):
