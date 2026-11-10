@@ -1,5 +1,6 @@
 """The football wiring in hmm/decode.py: frames before a kickoff are dead, and so is a ball that
-went out of play, or that went missing while the players walked."""
+went out of play, or that went missing while the players walked; and a ball in flight belongs to
+the team that kicked it."""
 
 import os
 import sys
@@ -7,9 +8,10 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from hmm.ball import N_PHASES  # noqa: E402
 from hmm.clues import IN_PLAY, N_GAP_BINS, ball_place_category, speed_category  # noqa: E402
 from hmm.decode import (  # noqa: E402
-    CARRY_SECONDS, FPS, KICKOFFS, START, decode, gap_table, graded_segments,
+    CARRY_SECONDS, FPS, KICKOFFS, START, decode, flight_table, gap_table, graded_segments,
     pin_dead_before_kickoff, place_table, speed_table, transitions)
 
 HOME_MUCH_CLOSER = N_GAP_BINS - 1
@@ -87,3 +89,35 @@ def test_players_slowing_down_while_the_ball_is_seen_is_not_enough_for_a_stoppag
     clues = _home_dominates(n) + [(speed_category(speed), speed_table())]
     labels = decode(clues, transitions(), np.log(START), segments=[(0, n)], kickoffs=())
     assert set(labels) == {"H"}
+
+
+def test_flight_table_mirrors_the_teams_and_is_neutral_for_dead():
+    table = np.exp(flight_table())
+    assert np.allclose(table.sum(axis=1), 1.0)
+    assert np.allclose(table[1, N_PHASES:2 * N_PHASES], table[0, :N_PHASES])
+    assert np.allclose(table[2], (table[0] + table[1]) / 2)
+
+
+def _clearance(with_flight):
+    """Away on the ball for 20 s, then clears it: for 3 s it flies over the home team, who are
+    much closer to it, and then home has it for 20 s."""
+    before, flying, after = 20 * FPS, 3 * FPS, 20 * FPS
+    n = before + flying + after
+    gap = np.full(n, HOME_MUCH_CLOSER, dtype=np.int8)
+    gap[:before] = 0  # away much closer
+    clues = [(gap, gap_table()), (np.full(n, IN_PLAY, dtype=np.int8), place_table()),
+             (speed_category(np.full(n, 2.2)), speed_table())]
+    if with_flight:
+        flight = np.full(n, -1, dtype=np.int8)
+        seconds = np.arange(flying) / FPS
+        flight[before:before + flying] = N_PHASES + np.digitize(seconds, [0.5, 1.5])  # away kicked
+        clues.append((flight, flight_table()))
+    labels = decode(clues, transitions(), np.log(START), segments=[(0, n)], kickoffs=())
+    return labels[before:before + flying], labels[before + flying + 2 * FPS:]
+
+
+def test_a_clearance_stays_with_the_kicker_while_it_flies():
+    flying, landed = _clearance(with_flight=True)
+    assert np.mean(flying == "A") > 0.9 and set(landed) == {"H"}
+    flying, _ = _clearance(with_flight=False)  # without the clue, home takes it at the kick
+    assert np.mean(flying == "H") > 0.5
