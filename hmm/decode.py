@@ -193,7 +193,8 @@ PLACE_FLOOR = 0.02
 # p(width category | H), away-much-wider .. home-much-wider (hmm/clues.py WIDTH_EDGES), and given D.
 # Counted on the 30 external matches' labels, each of the three sets counting once
 # (python external/score_hmm.py --tables prints them); no set's home row is further than 0.024 from
-# this one. A mirrors H, and D is counted both ways round so it cannot favour a team.
+# this one. First counted with a floor of 3 tracked players; recounted at MIN_WIDTH_PLAYERS = 6,
+# --tables prints the same rows to three decimals (within 0.001), so the constants stand. A mirrors H, and D is counted both ways round so it cannot favour a team.
 WIDTH_GIVEN_HOME = np.array([0.015, 0.025, 0.051, 0.047, 0.061, 0.083, 0.106, 0.194, 0.217, 0.202])
 WIDTH_GIVEN_DEAD = np.array([0.087, 0.100, 0.135, 0.092, 0.085, 0.085, 0.092, 0.135, 0.100, 0.087])
 # Trust exponent on the width clue. A team's shape changes over seconds, not frames, so it gets
