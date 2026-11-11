@@ -23,10 +23,12 @@ sys.path.insert(0, os.path.join(ROOT, "evaluation"))
 import possession_metrics as pm  # noqa: E402
 
 
-def drop_ball(ball, seen, fps, seed=0):
+def drop_ball(ball, seen, fps, seed=0, labels=None):
     """Two-state on/off runs with ~2 s mean gaps, so the ball vanishes in stretches, not frames.
-    Only tops up what is already missing: a match at or below `seen` is left alone."""
-    seen = seen / np.isfinite(ball[:, 0]).mean()
+    Only tops up what is already missing: a match at or below `seen` is left alone. With labels,
+    `seen` is measured on labelled frames: SkillCorner loses the ball in its unlabelled cutaways."""
+    graded = slice(None) if labels is None else labels != "X"
+    seen = seen / np.isfinite(ball[graded, 0]).mean()
     if seen >= 1:
         return ball
     rng = np.random.default_rng(seed)
@@ -80,7 +82,7 @@ def main():
         features.PITCH = model.PITCH = tuple(d["pitch"])
         model.HALVES = halves
         model.graded_mask = lambda n, m=mask: m
-        F = frames(d["players"], drop_ball(d["ball"], a.seen, model.FPS), d["team"], features)
+        F = frames(d["players"], drop_ball(d["ball"], a.seen, model.FPS, labels=d["labels"]), d["team"], features)
         pred = model.predict(F, params)
         r = pm.evaluate(pm.label_codes(d["labels"]), pm.label_codes(pred), bootstrap_n=0)
         name = os.path.basename(path)[:-4]
@@ -88,8 +90,12 @@ def main():
                      np.isfinite(F["ball"][mask, 0]).mean()))
         print(f"{name:14s} spellF1 {rows[-1][1]:.3f}  macroF1 {rows[-1][2]:.3f}  alive/dead {rows[-1][3]:.3f}"
               f"  team {rows[-1][4]:.3f}  ball seen {rows[-1][5]:.0%}", flush=True)
-    m = np.mean([r[1:] for r in rows], 0)
-    print(f"{'mean':14s} spellF1 {m[0]:.3f}  macroF1 {m[1]:.3f}  alive/dead {m[2]:.3f}  team {m[3]:.3f}")
+    # per set too, so a mean over all sets isn't compared with one taken before a set was added
+    for p in sorted({r[0].split("_")[0] for r in rows}) + [""]:
+        sel = [r[1:] for r in rows if p in ("", r[0].split("_")[0])]
+        m = np.mean(sel, 0)
+        print(f"{(p or 'all') + f' ({len(sel)})':14s} spellF1 {m[0]:.3f}  macroF1 {m[1]:.3f}  "
+              f"alive/dead {m[2]:.3f}  team {m[3]:.3f}")
 
 
 if __name__ == "__main__":

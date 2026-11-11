@@ -1,25 +1,31 @@
 # Out-of-sample matches
 
 The public 5 minutes may not be used to tune (RULES.md §2), so we validate on **other games**, which
-RULES.md allows in any amount. Ten labelled matches, in the same arrays `possession/load.py` gives
+RULES.md allows in any amount. Thirty labelled matches, in the same arrays `possession/load.py` gives
 for ours:
 
 ```bash
 uv run python external/build.py            # -> data/external/*.npz (gitignored, ~1 min/match)
 uv run python external/score.py --seen 0.59 [param=value ...]
-uv run python external/score_hmm.py --seen 0.59   # the HMM decoder in hmm/, and smooth50
+uv run python external/score_hmm.py --seen 0.59   # the HMM decoder in hmm/, and smooth50 (IDSSE + Metrica only)
 ```
 
 | set | matches | tracking | label source |
 |---|---|---|---|
 | `idsse_*` | 7 (2 Bundesliga, 5 2. Bundesliga, 2022-23) | TRACAB optical, 25 fps, ball ~always seen | DFL's per-frame `BallStatus` / `BallPossession` |
 | `metrica_*` | 3 anonymised sample games | Metrica, 25 fps, ball seen ~60% (like ours) | rebuilt from events, see `build.py` |
+| `skillcorner_*` | 20 (Australian A-League, 2024-25) | SkillCorner broadcast, 10 fps resampled to 25, ball seen ~94% of labelled live frames | phases of play + per-frame possession group |
 
 Where the raw files come from (put them under `data/external/raw/`):
 
 - IDSSE: [pysport/idsse-data](https://huggingface.co/datasets/pysport/idsse-data), CC BY 4.0,
   Bassek et al., *Scientific Data* 12, 195 (2025). The figshare originals sit behind a bot check.
 - Metrica: `git clone https://github.com/metrica-sports/sample-data` into `raw/metrica/`.
+- SkillCorner: [SkillCorner/opendata](https://github.com/SkillCorner/opendata), MIT; cite as
+  SkillCorner Open Data (A-League 2024-25). List it with the other two in the technical document. The tracking
+  files are Git LFS (~90 MB each, 2 GB in all). Put `data/matches.json` and each
+  `data/matches/<id>/` folder under `raw/skillcorner/`, fetching `*_tracking_extrapolated.jsonl`
+  from `media.githubusercontent.com` rather than `raw.githubusercontent.com`.
 
 ## What the labels are, and are not
 
@@ -31,19 +37,45 @@ here are not leaderboard predictions. Use them to compare two versions of the mo
 - **Metrica events:** dead from a ball-out, foul or shot-out until the next on-ball action. While
   alive, possession belongs to the team of the last pass, carry, shot, recovery or set piece.
   Challenges and lost balls don't change it.
+- **SkillCorner:** dead outside its phases of play, which exist only while the ball is in play.
+  Inside a phase, the team SkillCorner names in possession, held through frames where it names
+  nobody (passes, loose balls). Extrapolated ball positions are dropped. Extrapolated players are
+  kept, because our feed tracks almost everyone. Broadcast cutaways, such as replays, track nobody;
+  those frames are labelled X, so they are not graded. That is about a quarter of each match and
+  half the dead time, and it includes the hardest dead-ball stretches. A SkillCorner score is
+  therefore not comparable with a full-match score.
+- **SkillCorner timing:** labels are taken from the previous 10 fps frame, so a change of
+  possession can be up to 0.1 s late. Fine for training; don't tune boundary timing on this set.
 
 **DFL's spells are short.** A match has about 510, with a median of 3 s. Our 5 public minutes
 have 17 possessions, roughly 360 over a full match, so DFL counts some touches we would not.
-Metrica has about 315, which is closer. Expect a low spellF1 on IDSSE even when the model is right
-by the organisers' rule. That set is better for alive/dead and team accuracy.
+Metrica has about 315, and SkillCorner about 300, which is closer. Expect a low
+spellF1 on IDSSE even when the model is right by the organisers' rule. That set is better for
+alive/dead and team accuracy.
 
-## Baseline: `possession/` v0 (players only: more spread-out team, keepers left out, has it; walking = D; alive runs under 2 s, dead runs under 3 s and team runs under 2 s absorbed)
+| possessions (H/A runs) | per graded minute | mean | median | 90th pct | D share |
+|---|---|---|---|---|---|
+| IDSSE | 4.6 | 7.2 s | 3.7 s | 18.6 s | 45% |
+| Metrica | 3.6 | 11.3 s | 5.9 s | 28.9 s | 32% |
+| SkillCorner | 4.4 | 9.6 s | 5.8 s | 23.1 s | 29% |
+
+All three cut possessions shorter than the public window (17 in 5 minutes, mean 14.2 s, median
+7.6 s, D 20%), so a model fitted to them may lean towards short possessions. These are descriptive
+only: the labels are not adjusted towards the public window.
+
+## Baseline: `possession/` v0 as on main after #17, one run for every row (players only: more spread-out team, keepers left out, has it; walking = D; alive runs under 2 s, dead runs under 3 s and team runs under 2 s absorbed)
 
 | | spellF1 | macroF1 | alive/dead F1 | team acc |
 |---|---|---|---|---|
 | IDSSE mean (7) | 0.199 | 0.677 | 0.844 | 0.761 |
 | Metrica mean (3) | 0.271 | 0.679 | 0.849 | 0.794 |
 | all 10 | 0.221 | 0.677 | 0.846 | 0.771 |
+| SkillCorner mean (20) | 0.280 | 0.683 | 0.874 | 0.798 |
+| all 30 | 0.260 | 0.681 | 0.864 | 0.789 |
+
+`score.py` prints each set's mean as well as the overall one; compare like with like. SkillCorner
+is not graded on its cutaways (see above), so its row is not comparable with the others. The IDSSE
+and Metrica rows are unchanged by measuring `--seen` on labelled frames.
 
 Before the short runs were absorbed (`min_team=0 min_dead=0`): 0.187 / 0.212 / 0.194 spellF1.
 
@@ -95,7 +127,8 @@ Read the two sets differently:
   full-match spellF1 (0.04 / 0.16 / 0.23 / 0.20 against 0.05 / 0.20 / 0.24 / 0.22) and Metrica does
   not (0.10 / 0.37 / 0.43 / 0.32). So take the level from IDSSE and the direction from both.
 
-Use `--seen` on IDSSE. With the ball always visible, the model's hardest problem disappears.
+Use `--seen` on IDSSE and SkillCorner, which is measured on labelled frames. With the ball always
+visible, the model's hardest problem disappears.
 But `--seen` drops the ball at random, live or dead alike, and our match does not lose it that way.
 With the ball missing, BAR-ATH's players move at a median 1.0 m/s against 1.9 m/s with it seen,
 which is the dead-ball pattern. Metrica shows the same pattern: there the ball is missing on 92% of
