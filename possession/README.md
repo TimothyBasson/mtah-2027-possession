@@ -4,9 +4,43 @@ This model is separate from `hmm/`. The plan is to compare and combine the two a
 
 ```bash
 uv run python possession/run.py                    # -> evaluation/results/possession.csv (BAR-ATH)
-uv run python external/score.py --seen 0.59        # score on the 10 outside matches
+uv run python external/heldout.py                  # THE score: per provider, fitted without it
+uv run python external/score.py                    # every outside match, in-sample
+uv run python possession/model.py --fit            # refit DEAD_FIT on all 30 outside matches
 uv run python viz/combined/make_combined.py --match all --explain --open   # see how it works
 ```
+
+## How we judge a change
+
+1. **Held out by provider.** `external/heldout.py` picks settings, and refits anything fitted
+   (`model.fit`), on two providers, then scores the third, for each of IDSSE, Metrica and
+   SkillCorner. The mean weights the three providers equally. A change counts only if it helps
+   there: one that helps only on the provider it was tuned on is fitting that provider's labelling.
+2. **Theory decides what goes in, data decides how much.** A signal needs a football reason
+   before it is tried. Only a few weights are fitted, never per-match thresholds.
+3. **Priors from football, not from our data**, such as possession counts and stoppage lengths.
+4. **BAR-ATH is left alone.** The public 5 minutes are a final sanity check, never a target.
+5. **Every idea goes in the log below**, with its held-out score, kept or dropped.
+
+## Experiment log (held-out mean over the three providers, `external/heldout.py`)
+
+| date | idea | spellF1 | macroF1 | alive/dead | team | kept? |
+|---|---|---|---|---|---|---|
+| 2026-11-11 | v0 as on main: spread for who, median speed under 1.2 m/s for dead, short runs absorbed | 0.250 | 0.680 | 0.856 | 0.784 | baseline |
+| 2026-11-11 | same, walking cutoff and minimum runs picked held out (1.4 m/s, 5 s, 1 s, the same in all folds) | 0.261 | 0.698 | 0.859 | 0.785 | not adopted: superseded by the next row |
+| 2026-11-11 | **stoppage model**: logistic on 4 players-only speed signals (below) for dead | **0.266** | **0.712** | **0.879** | 0.790 | **yes** |
+| 2026-11-11 | stoppage model, minimum runs re-picked held out | 0.268 | 0.715 | 0.883 | 0.790 | no: +0.002, folds disagree on the settings |
+
+Stoppage model, per held-out provider (spellF1, alive/dead): IDSSE 0.199 → 0.217, 0.844 → 0.883;
+Metrica 0.271 → 0.299, 0.849 → 0.865; SkillCorner 0.280 → 0.284, 0.874 → 0.889. Frame by frame
+before any clean-up, held out, dead/live accuracy went 0.789 → 0.839 and dead F1 0.687 → 0.761.
+Nine signals were tried; each one left out of the nine cost at most 0.006 accuracy, so four with
+a clear reason were kept (0.839 against 0.841 for all nine). Tim's `hmm/clues.py` gave the
+12 m/s cap on a player's speed; its ball-based dead clues stay out of this model.
+
+On BAR-ATH, as a check only: 101 / 108 possessions per half, mean 18.1 / 16.5 s, 43% / 44% dead;
+public 5 minutes macroF1 0.814, spellF1 0.336, 8 possessions against 17. Fewer possessions and
+more dead than before: the model now merges more, which the next work on turnovers should balance.
 
 ## v0: players only, no ball
 
@@ -18,7 +52,18 @@ On each frame:
   centre, averaged over 2 s either side of the frame. The keeper, taken as the team's deepest player
   toward its own goal, is left out: he adds several metres that depend on where play is, not on who
   has the ball.
-- **Dead:** when the median player's speed, averaged over 0.5 s either side, is under 1.2 m/s.
+- **Dead:** a stoppage model reads four players-only signals and calls the frame dead above even
+  odds (`DEAD_SIGNALS`, `DEAD_FIT` in `model.py`):
+  - median player speed over 0.5 s either side: the typical player walks at a stoppage
+  - the 80th-percentile speed over the same window: in slow build-up the fastest few still run
+  - median speed over 10 s either side: stoppages last, a slow patch in play doesn't
+  - speed over the next 2 s minus the last 2 s: everyone slows into a stoppage and speeds up out
+  Its weights are a logistic regression on the 30 outside matches, each provider counted equally.
+  The fitted weights (`DEAD_FIT["w"]`, after the intercept): median +0.27, 80th percentile
+  -1.79, 10 s median -1.00, speed change -0.49. So "are the fastest few still running?" carries
+  the most. The median's small positive weight is only what it adds once the 80th percentile is
+  known (the two move together), so read the four together, not one at a time. The viewer's
+  Dead-ball model toggle shows each one's push for any frame. `dead=median` brings back the old rule (median under 1.2 m/s).
 - **No blips:** within each half, alive/dead and the team lean are cleaned separately: an alive
   run under 2 s or a dead run under 3 s flips, and so does a home or away run of the lean under
   2 s, shortest first (`absorb_short`; `uv run python possession/model.py` checks it). Without
@@ -105,7 +150,7 @@ What it gets wrong:
 - **Late changes.** Shape takes a couple of seconds to change after a turnover, and the 2 s window
   adds to that.
 - **Style.** A team keeping the ball deep looks compact, and a high press looks stretched.
-- **One number per question.** Each of who and dead uses a single signal with a fixed cutoff.
+- **One number for who.** The team call is still the spread alone, with a fixed cutoff at zero.
 
 ## Ideas to try (research, 2026-11-05)
 

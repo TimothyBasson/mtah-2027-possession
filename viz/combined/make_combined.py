@@ -167,6 +167,11 @@ def explain(match):
            # per half: first, last frame, then +1/-1 for whether home's and away's own goal is at x=0
            "own_goal": [[int(a), int(b), h, w] for (a, b), h, w in zip(model.HALVES, *features.own_goal(
                F["players"], F["team"], model.HALVES))]}
+    if x.get("dead"):  # the stoppage model's four signals, in hundredths, int16, -32768 for none
+        hundredths = lambda v: base64.b64encode(np.where(np.isfinite(v), np.clip(np.rint(np.nan_to_num(v) * 100),
+                                                -32767, 32767), -32768).astype("<i2").tobytes()).decode()
+        out["dead"] = {"signals": list(x["dead"]["signals"]), "fit": x["dead"]["fit"],
+                       "x": [hundredths(v) for v in x["dead"]["x"].T]}
     if labels is not None:
         spells = lambda l: int(1 + (l[l != "X"][1:] != l[l != "X"][:-1]).sum())
         r = pm.evaluate(pm.label_codes(labels), pm.label_codes(x["pred"]), bootstrap_n=0)
