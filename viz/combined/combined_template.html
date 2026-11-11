@@ -80,6 +80,17 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
 }
 .novideo label.tg:has(#showTrack){display:none}
 @media (max-width:900px),(max-height:480px){.novideo .stats{grid-template-columns:repeat(3,minmax(0,1fr))}.novideo #pitch{flex:none;height:auto}}
+/* Decomposition lanes: a label column with the value at the playhead, and a canvas per lane. */
+.lanes{display:grid;grid-template-columns:minmax(150px,max-content) minmax(0,1fr);gap:1px 8px;margin-top:3px;font-size:12px;align-items:center}
+.lanes .ln{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.lanes .ln b{color:var(--text);font-weight:600}
+.lanes canvas{width:100%;height:16px;display:block;cursor:grab;touch-action:none;border-radius:2px;background:var(--bg)}
+[hidden]{display:none!important}
+.seg{display:inline-flex}.seg button{font-size:12px;padding:2px 10px;border-radius:0;margin-left:-1px}
+.seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
+.seg button.on{background:var(--text);color:var(--card)}
+#scores b{color:var(--text)}
+.hk{color:var(--home)}.ak{color:var(--away)}.dk{color:var(--dead)}.lk{color:var(--line)}
 .err{margin-top:10px;color:var(--bad);font-size:14px}
 </style>
 </head>
@@ -102,6 +113,11 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
     <canvas id="whole" class="strip" width="1200" height="30" aria-label="Possession over the whole match; click to jump, drag to scrub"></canvas>
     <div class="striplabel"><span>Two minutes around the playhead</span><span id="zoomRange"></span></div>
     <canvas id="zoom" class="strip" width="1200" height="40" aria-label="Possession around the playhead; click to jump, drag to scrub"></canvas>
+    <div id="explain" hidden>
+      <div class="striplabel"><span class="seg" id="level"><button data-l="0">Simple</button><button data-l="1">Why</button><button data-l="2">Every clue</button></span><span id="scores"></span></div>
+      <div class="striplabel" id="barkey" hidden><span>Same two minutes as above · bars up lean <b class="hk">home</b> or <b class="dk">dead</b>, down lean <b class="ak">away</b> or <b class="lk">in play</b> · hover a name for what it is</span></div>
+      <div class="lanes" id="lanes"></div>
+    </div>
     <div class="controls">
       <button id="play">Play</button>
       <button id="back" title="Previous frame (←)">◀ frame</button>
@@ -109,6 +125,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
       <select id="speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option><option value="6">6×</option></select>
       <label class="tg"><input type="checkbox" id="showTrack" checked> Tracking on video</label>
       <label class="tg"><input type="checkbox" id="showIds" checked> Slot numbers</label>
+      <label class="tg" title="Each team's centre, and its average distance from it: the model's who-has-the-ball clue"><input type="checkbox" id="showSpread"> Team spread</label>
       <div class="keys" id="keys"></div>
     </div>
     <div class="err" id="err" hidden></div>
@@ -272,7 +289,7 @@ function drawVideo(f) {
 
 // ---- top-down pitch ---------------------------------------------------------------------
 const pc = $('pitch'), cx = pc.getContext('2d'), W = pc.width, PH = pc.height;
-function drawPitch(f) {
+function drawPitch(f, v) {
   cx.fillStyle = css('--grass'); cx.fillRect(0, 0, W, PH);
   cx.strokeStyle = css('--line'); cx.lineWidth = 2;
   const sx = m => m / 105 * W, sy = m => m / 68 * PH;
@@ -308,10 +325,50 @@ function drawPitch(f) {
     cx.fillStyle = est ? C[team] : CL[team]; cx.fillText(s, u, v + 0.5);
   }
   cx.textBaseline = 'alphabetic';
+  if ($('showSpread').checked) drawSpread(f, C, v);
   if (f.ball) {
     cx.fillStyle = css('--ball'); cx.strokeStyle = css('--grass'); cx.lineWidth = 2;
     cx.beginPath(); cx.arc(f.ball[0] / 1000 * W, f.ball[1] / 1000 * PH, 6, 0, Math.PI * 2); cx.fill(); cx.stroke();
   }
+}
+
+// Team spread, as possession/model.py measures it: each team's mean distance from its own centre.
+// This is the single frame; the model averages it over 2 s either side.
+function drawSpread(f, C, frame) {
+  const [L, Wm] = D.pitch, out = {};
+  // Shade the team the model says has the ball.
+  const est = D.pred && D.pred[frame], owner = !!est && 'HA'.includes(est) ? est : null;
+  for (const team of ['H', 'A']) {
+    const pts = f.slots.filter(([s]) => side(s) === team).map(([, x, y]) => [x / 1000 * L, y / 1000 * Wm]);
+    // Leave out the keeper, the deepest player toward his own goal, as the model does.
+    const half = D.explain && (D.explain.own_goal || []).find(([a, b]) => frame >= a && frame <= b);
+    let keeper = null;
+    if (half && pts.length > 1) {
+      const own = half[team === 'H' ? 2 : 3], k = pts.reduce((m, p, i) => p[0] * own < pts[m][0] * own ? i : m, 0);
+      keeper = pts.splice(k, 1)[0];
+    }
+    if (!pts.length) continue;
+    const c = [0, 1].map(i => pts.reduce((a, p) => a + p[i], 0) / pts.length);
+    const r = pts.reduce((a, p) => a + Math.hypot(p[0] - c[0], p[1] - c[1]), 0) / pts.length;
+    const u = c[0] / L * W, v = c[1] / Wm * PH;
+    cx.strokeStyle = C[team]; cx.globalAlpha = 0.35; cx.lineWidth = 1.5;
+    for (const [x, y] of pts) { cx.beginPath(); cx.moveTo(u, v); cx.lineTo(x / L * W, y / Wm * PH); cx.stroke(); }
+    if (keeper) {  // a ring marks the keeper the spread leaves out
+      cx.globalAlpha = 0.8; cx.lineWidth = 2; cx.setLineDash([3, 4]);
+      cx.beginPath(); cx.arc(keeper[0] / L * W, keeper[1] / Wm * PH, 20, 0, Math.PI * 2); cx.stroke(); cx.setLineDash([]);
+    }
+    cx.globalAlpha = 1; cx.lineWidth = 3; cx.setLineDash([8, 6]);
+    cx.beginPath(); cx.ellipse(u, v, r / L * W, r / Wm * PH, 0, 0, Math.PI * 2); cx.stroke(); cx.setLineDash([]);
+    if (team === owner) { cx.fillStyle = C[team]; cx.globalAlpha = 0.15; cx.fill(); cx.globalAlpha = 1; }
+    cx.fillStyle = C[team]; cx.beginPath(); cx.arc(u, v, 7, 0, Math.PI * 2); cx.fill();
+    cx.strokeStyle = css('--grass'); cx.lineWidth = 2; cx.stroke();
+    out[team] = r;
+  }
+  cx.font = '600 22px -apple-system,sans-serif'; cx.textAlign = 'left';
+  const txt = ['H', 'A'].filter(t => t in out).map(t => `${name[t]} ${out[t].toFixed(1)} m`);
+  const line = 'Spread: ' + txt.join(' · ');
+  cx.lineWidth = 5; cx.strokeStyle = 'rgba(0,0,0,.6)'; cx.strokeText(line, 14, 30);
+  cx.fillStyle = '#fff'; cx.fillText(line, 14, 30);
 }
 
 // ---- possession strips ------------------------------------------------------------------
@@ -347,8 +404,8 @@ function drawZoom(v) {
   $('zoomRange').textContent = videoTime(Math.max(0, a), 0) + ' – ' + videoTime(Math.min(NF - 1, b), 0);
 }
 const clickFrac = (e, el) => { const r = el.getBoundingClientRect(); return (e.clientX - r.left) / r.width; };
-// Click to jump; drag to scrub. The whole-match strip follows the pointer. The two-minute strip
-// recentres on the playhead, so dragging it pans time like a map: drag left to go forward.
+// Click to jump; drag to scrub. The whole-match strip follows the pointer. The two-minute strips
+// recentre on the playhead, so dragging them pans time like a map: drag left to go forward.
 function scrub(el, whole) {
   let x0 = null, f0 = 0, moved = false;
   el.onpointerdown = e => {
@@ -369,6 +426,89 @@ function scrub(el, whole) {
 }
 scrub(whole, true);
 scrub(zoom, false);
+
+// ---- the model's working, under the strips (make_combined.py --explain) -------------------
+// Three levels, simplest first. Simple: the scores and the mistakes over the whole match. Why: around
+// the playhead, the mistakes, whether the model saw the ball, and all clues together. Every clue:
+// each clue's own lean and the guess before smoothing. Leans are log-odds: up = home (or dead),
+// down = away (or in play).
+const X = D.explain;
+const lanes = [];
+if (X) {
+  $('explain').hidden = false;
+  if (X.scores) $('scores').innerHTML = X.scores.map(([k, v]) => k + ' <b>' + v + '</b>').join(' · ');
+  const dec = b => Int8Array.from(atob(b), c => c.charCodeAt(0));
+  const wrong = Array.from(D.pred, (p, i) => { const t = D.truth ? D.truth[i] : 'X';
+    return t === 'X' || p === 'X' ? 'X' : t === p ? 'O' : 'W'; }).join('');
+  const ask = kind => kind === 'team' ? ' · who has it' : ' · in play?';
+  if (HAS_TRUTH) lanes.push({ lvl: 0, name: 'Mistakes, whole match', str: wrong, whole: true, note: 'Red where the model disagrees with the truth. Click to jump there.' });
+  if (HAS_TRUTH) lanes.push({ lvl: 1, name: 'Mistakes here', str: wrong, note: 'Red where the model disagrees with the truth' });
+  lanes.push({ lvl: 1, name: 'Ball seen', str: X.seen, note: 'Whether the model could see the ball' + (D.match ? ', after knocking it out to 59% like our match' : '') });
+  const each = X.lanes.filter(([n]) => !n.startsWith('all ')), all = X.lanes.filter(([n]) => n.startsWith('all '));
+  all.forEach(([, kind, b]) => lanes.push({ lvl: 1, name: 'All clues' + ask(kind), kind, v: dec(b), sum: true,
+    note: 'Every clue added up and weighted: what the smoothing works from' }));
+  lanes.push({ lvl: 2, name: 'Guess before smoothing', str: X.raw, note: 'The best label for each frame on its own, before Viterbi smooths it' });
+  each.forEach(([name, kind, b]) => lanes.push({ lvl: 2, name: name + ask(kind), kind, v: dec(b), note: 'One clue on its own, before weighting' }));
+  const box = $('lanes');
+  for (const l of lanes) {
+    l.label = document.createElement('div'); l.label.className = 'ln'; l.label.title = l.note || l.name;
+    l.cv = document.createElement('canvas'); l.cv.width = 1000; l.cv.height = 16;
+    scrub(l.cv, l.whole);
+    box.append(l.label, l.cv);
+  }
+  let level = 0;
+  try { level = +localStorage.getItem('explainLevel') || 0; } catch (e) {}
+  const setLevel = n => {
+    level = n;
+    try { localStorage.setItem('explainLevel', n); } catch (e) {}
+    for (const b of $('level').children) b.classList.toggle('on', +b.dataset.l === n);
+    for (const l of lanes) l.label.hidden = l.cv.hidden = l.lvl > n;
+    $('barkey').hidden = n === 0;
+    if (cur >= 0) drawLanes(cur);
+  };
+  for (const b of $('level').children) b.onclick = () => setLevel(+b.dataset.l);
+  setLevel(level);
+}
+const LANE_COL = { H: '--home', A: '--away', D: '--dead', W: '--bad', 1: '--ball' };
+function drawLanes(v) {
+  if (!X) return;
+  const memo = {}, css = n => memo[n] || (memo[n] = getComputedStyle(document.documentElement).getPropertyValue(n).trim());
+  const a = v - ZOOM, b = v + ZOOM;
+  for (const l of lanes) {
+    if (l.cv.hidden) continue;
+    if (l.whole && l.drawn) { l.ctx.putImageData(l.drawn, 0, 0); } else {
+      const c = l.ctx = l.cv.getContext('2d'), W = l.cv.width, H = l.cv.height;
+      const [lo, hi] = l.whole ? [0, NF] : [a, b];
+      c.clearRect(0, 0, W, H);
+      for (let x = 0; x < W; x++) {
+        const f0 = Math.floor(lo + x / W * (hi - lo)), f1 = Math.max(f0 + 1, Math.floor(lo + (x + 1) / W * (hi - lo)));
+        if (f1 <= 0 || f0 >= NF) continue;
+        if (l.str) {
+          let k = l.str[Math.min(NF - 1, Math.max(0, Math.floor((f0 + f1) / 2)))];
+          if (l.whole) for (let f = Math.max(0, f0); f < Math.min(NF, f1); f++) if (l.str[f] === 'W') { k = 'W'; break; }
+          if (!LANE_COL[k]) continue;
+          c.fillStyle = css(LANE_COL[k]); c.fillRect(x, 0, 1, H);
+        } else {
+          let s = 0, n = 0;
+          for (let f = Math.max(0, f0); f < Math.min(NF, f1); f++) { s += l.v[f]; n++; }
+          const m = s / n / 10, h = Math.tanh(Math.abs(m) / (l.sum ? 1 : 2)) * (H / 2);
+          if (h < 0.3) continue;
+          c.fillStyle = css(m > 0 ? (l.kind === 'team' ? '--home' : '--dead') : (l.kind === 'team' ? '--away' : '--line'));
+          c.fillRect(x, m > 0 ? H / 2 - h : H / 2, 1, h);
+        }
+      }
+      if (l.whole) l.drawn = c.getImageData(0, 0, W, H);
+    }
+    l.ctx.fillStyle = css('--text');
+    l.ctx.fillRect(l.whole ? v / (NF - 1) * l.cv.width - 1 : l.cv.width / 2 - 1, 0, 2, l.cv.height);
+    let here = '';
+    if (l.v) {
+      const m = l.v[v] / 10, k = l.kind === 'team' ? (m > 0 ? 'home' : 'away') : (m > 0 ? 'dead' : 'in play');
+      here = Math.abs(m) < 0.05 ? 'no lean' : k + ' ' + (m > 0 ? '+' : '−') + Math.abs(m).toFixed(1);
+    } else if (!l.whole) here = l.name === 'Ball seen' ? (l.str[v] === '1' ? 'yes' : 'no') : (LABEL(l.str[v])[0] === '–' ? (l.str[v] === 'W' ? 'wrong' : l.str[v] === 'O' ? 'right' : '–') : LABEL(l.str[v])[0]);
+    l.label.innerHTML = l.name + (here ? ' <b>' + here + '</b>' : '');
+  }
+}
 
 // ---- read-outs --------------------------------------------------------------------------
 function hudRow(id, label, none) {
@@ -404,7 +544,7 @@ function readouts(v, f) {
 // ---- one clock: the video ---------------------------------------------------------------
 function render(v) {
   const f = frameData(v);
-  drawVideo(f); drawPitch(f); readouts(v, f); drawWhole(v); drawZoom(v);
+  drawVideo(f); drawPitch(f, v); readouts(v, f); drawWhole(v); drawZoom(v); drawLanes(v);
 }
 function update(mediaTime, force) {
   const v = frameOf(mediaTime);
@@ -438,6 +578,8 @@ $('back').onclick = () => step(-1);
 $('fwd').onclick = () => step(1);
 $('speed').onchange = () => video.playbackRate = parseFloat($('speed').value);
 $('showTrack').onchange = $('showIds').onchange = () => render(cur);
+try { $('showSpread').checked = localStorage.getItem('showSpread') === '1'; } catch (e) {}
+$('showSpread').onchange = () => { try { localStorage.setItem('showSpread', $('showSpread').checked ? '1' : '0'); } catch (e) {} render(cur); };
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Space') { e.preventDefault(); $('play').click(); }

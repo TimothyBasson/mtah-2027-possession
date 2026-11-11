@@ -37,16 +37,22 @@ have 17 possessions, roughly 360 over a full match, so DFL counts some touches w
 Metrica has about 315, which is closer. Expect a low spellF1 on IDSSE even when the model is right
 by the organisers' rule. That set is better for alive/dead and team accuracy.
 
-## Baseline: v3 model, `--seen 0.59`, no tags
+## Baseline: `possession/` v0 (players only: more spread-out team, keepers left out, has it; walking = D; alive runs under 2 s, dead runs under 3 s and team runs under 2 s absorbed)
 
 | | spellF1 | macroF1 | alive/dead F1 | team acc |
 |---|---|---|---|---|
-| IDSSE mean (7) | 0.369 | 0.803 | 0.881 | 0.873 |
-| Metrica mean (3) | 0.576 | 0.849 | 0.918 | 0.920 |
-| all 10 | 0.431 | 0.817 | 0.892 | 0.887 |
+| IDSSE mean (7) | 0.199 | 0.677 | 0.844 | 0.761 |
+| Metrica mean (3) | 0.271 | 0.679 | 0.849 | 0.794 |
+| all 10 | 0.221 | 0.677 | 0.846 | 0.771 |
 
-For comparison, public spellF1 is 0.594. With the ball always seen, IDSSE rises to 0.458 spellF1
-and 0.975 alive/dead.
+Before the short runs were absorbed (`min_team=0 min_dead=0`): 0.187 / 0.212 / 0.194 spellF1.
+
+It never reads the ball, so `--seen` doesn't change these. The ball-based nearest-team v0 before it
+scored 0.057 spellF1 on all 10 at `--seen 0.59`.
+
+The old v3 model these numbers used to describe (0.431 across all 10, ball-based) was never committed
+and is lost. It is still the best single-model score seen here: this v0 is a players-only lens
+meant to be combined with `hmm/`, not a replacement for it.
 
 ## The HMM decoder (`hmm/`), `score_hmm.py --seen 0.59`
 
@@ -90,4 +96,9 @@ Read the two sets differently:
   not (0.10 / 0.37 / 0.43 / 0.32). So take the level from IDSSE and the direction from both.
 
 Use `--seen` on IDSSE. With the ball always visible, the model's hardest problem disappears.
+But `--seen` drops the ball at random, live or dead alike, and our match does not lose it that way.
+With the ball missing, BAR-ATH's players move at a median 1.0 m/s against 1.9 m/s with it seen,
+which is the dead-ball pattern. Metrica shows the same pattern: there the ball is missing on 92% of
+dead frames and 12% of live ones. So IDSSE under `--seen` punishes "missing means dead" more than
+our match would.
 Scores also get no help from set-piece tags, because these matches have no Smart Tagging.

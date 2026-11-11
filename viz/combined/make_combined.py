@@ -3,6 +3,9 @@
     python viz/combined/make_combined.py --open
     python viz/combined/make_combined.py --pred evaluation/results/baseline_smooth50.csv --start 1:20:05 --open
     uv run python viz/combined/make_combined.py --match all --open
+    uv run python viz/combined/make_combined.py --match all --explain --open
+
+--explain shows possession/'s labels with how it reached them, clue by clue, under the strips.
 
 --match plays an outside match from data/external/ (external/README.md) instead, or with 'all', writes
 a page for BAR-ATH and every outside match with a dropdown to switch between them. Those matches
@@ -30,6 +33,7 @@ out of git. Do not commit it or share it: the data terms cover derived data too.
 """
 
 import argparse
+import base64
 import csv
 import glob
 import json
@@ -41,7 +45,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "viz", "replay"))
-from games import DATA_DIR, require, source_frames  # noqa: E402
+from games import DATA_DIR, GAME, GAMES, require, source_frames  # noqa: E402
 from make_replay import FPS, PUBLIC_GT, clock_spec, parse_time, read_labels, read_teams  # noqa: E402
 
 # Params
@@ -104,7 +108,7 @@ def build(pred_path=None, gt_path=PUBLIC_GT):
     n_frames = source_frames()
     slots, names = read_teams(require(["atd_meta"])[0])
     return {"teams": slots, "names": names, "n_frames": n_frames, "chunk": CHUNK,
-            "clock": clock_spec(),
+            "clock": clock_spec(), "pitch": list(GAMES[GAME]["pitch"]),
             "truth": label_string(gt_path, n_frames) if gt_path else None,
             "pred": label_string(pred_path, n_frames) if pred_path else None,
             "pred_name": os.path.basename(pred_path) if pred_path else None}
@@ -136,10 +140,41 @@ def build_external(match, pred_path=None, rebuild=False):
     halves = z["halves"].tolist()[:2]
     return {"teams": {s + 1: "HA"[t] for s, t in enumerate(z["team"].tolist())},
             "names": {"H": "Home", "A": "Away"}, "match": match, "n_frames": n_frames, "chunk": CHUNK,
+            "pitch": size.tolist(),
             "clock": {"fps": int(z["fps"]), "kickoff": [h[0] for h in halves], "end": [h[1] for h in halves]},
             "truth": "".join(labels.tolist()),
             "pred": label_string(pred_path, n_frames) if pred_path else None,
             "pred_name": os.path.basename(pred_path) if pred_path else None}, chunk_dir
+
+
+def explain(match):
+    """The possession model's output and working for a match (None = BAR-ATH), for the decomposition
+    lanes: its labels, its frame-by-frame guess before smoothing, each clue's lean as log-odds in
+    tenths (base64 int8), the ball as the model saw it, and scores where the whole match is labelled."""
+    import numpy as np
+    sys.path.insert(0, os.path.join(ROOT, "possession"))
+    import features
+    import model
+    import run
+    sys.path.insert(0, os.path.join(ROOT, "evaluation"))
+    import possession_metrics as pm
+    F, labels = run.frames(match)
+    x = model.explain(F)
+    tenths = lambda v: base64.b64encode(np.clip(np.rint(np.nan_to_num(v) * 10), -127, 127)
+                                        .astype(np.int8).tobytes()).decode()
+    out = {"raw": "".join(x["raw"]), "lanes": [[name, kind, tenths(v)] for name, kind, v in x["lanes"]],
+           "seen": "".join(np.where(F["seen"], "1", "0")),
+           # per half: first, last frame, then +1/-1 for whether home's and away's own goal is at x=0
+           "own_goal": [[int(a), int(b), h, w] for (a, b), h, w in zip(model.HALVES, *features.own_goal(
+               F["players"], F["team"], model.HALVES))]}
+    if labels is not None:
+        spells = lambda l: int(1 + (l[l != "X"][1:] != l[l != "X"][:-1]).sum())
+        r = pm.evaluate(pm.label_codes(labels), pm.label_codes(x["pred"]), bootstrap_n=0)
+        out["scores"] = [["spellF1", round(r["spell_f1_mean"], 3)], ["macroF1", round(r["macro_f1"], 3)],
+                         ["alive/dead F1", round(r["alive_dead_f1"], 3)],
+                         ["team acc", round(r["team_acc_both_alive"], 3)],
+                         ["spells (model / truth)", "{} / {}".format(spells(x["pred"]), spells(labels))]]
+    return "".join(x["pred"]), out
 
 
 def write_page(payload, out_path, video_path, chunk_dir=CHUNK_DIR):
@@ -163,6 +198,9 @@ if __name__ == '__main__':
     parser.add_argument("--match", help="an outside match in data/external/ (idsse_J03WMX, metrica_1, ...), "
                         "or 'all' for BAR-ATH and every outside match with a switcher (needs numpy)")
     parser.add_argument("--pred", help="a frame,label submission CSV to show alongside the truth")
+    parser.add_argument("--explain", action="store_true",
+                        help="show possession/'s output with its working: each clue's lean, the guess "
+                             "before smoothing, wrong frames and, on outside matches, the scores")
     parser.add_argument("--gt", default=PUBLIC_GT,
                         help="ground truth CSV (default: the public 5 minutes); 'none' to hide")
     parser.add_argument("--out", help="where to write the page (default: data/viz/...)")
@@ -172,13 +210,15 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     gt = None if args.gt.lower() == "none" else args.gt
+    if args.explain and args.pred:
+        parser.error("--explain shows the model's own labels; drop --pred")
     matches = [args.match]
     if args.match == "all":
         if args.pred or args.out:
             parser.error("--match all can't take --pred or --out: frames and paths differ per game")
         matches = [None] + sorted(os.path.basename(f)[:-4] for f in
                                   glob.glob(os.path.join(DATA_DIR, "external", "*.npz")))
-    suffix = "_" + os.path.splitext(os.path.basename(args.pred))[0] if args.pred else ""
+    suffix = "_" + os.path.splitext(os.path.basename(args.pred))[0] if args.pred else "_explain" if args.explain else ""
     outs = [args.out or os.path.join(OUT_DIR, "match" + ("_" + m if m else "") + suffix + ".html")
             for m in matches]
     games = [[m or "BAR-ATH", os.path.basename(o)] for m, o in zip(matches, outs)]
@@ -193,6 +233,9 @@ if __name__ == '__main__':
                 print("writing tracking chunks to {} (once; takes a minute)".format(CHUNK_DIR))
                 write_chunks(n_frames)
             payload, chunk_dir, video = build(args.pred, gt), CHUNK_DIR, require(["video"])[0]
+        if args.explain:
+            payload["pred"], payload["explain"] = explain(match)
+            payload["pred_name"] = "possession model"
         if len(games) > 1:
             payload["games"] = games
         write_page(payload, out, video, chunk_dir)
