@@ -10,13 +10,14 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from hmm.ball import N_PHASES  # noqa: E402
+from hmm.clues import N_WIDTH_BINS  # noqa: E402
 from hmm.clues import (  # noqa: E402
     IN_PLAY, MISSING_AFTER_PLAY, MISSING_STALE, N_DISTANCE_BINS, N_GAP_BINS, ball_place_category,
     mirror_gap_distance, speed_category)
 from hmm.decode import (  # noqa: E402
     CARRY_SECONDS, FPS, KICKOFFS, PLACE_FLOOR, START, dead_runs, decode, fit_place, flight_table,
     gap_distance_table, gap_table, graded_segments, pin_dead_before_kickoff, place_placebo,
-    place_table, speed_table, transitions)
+    place_table, speed_table, transitions, width_table, WEIGHT, WIDTH_WEIGHT)
 
 HOME_MUCH_CLOSER = N_GAP_BINS - 1
 PITCH = (105.0, 68.0)
@@ -253,3 +254,35 @@ def test_dead_runs_flags_a_stoppage_with_no_ball_and_the_same_team_either_side()
     assert runs["same_team"].tolist() == [True, False]
     assert runs["blind"].tolist() == [True, False]
     assert np.isclose(runs["into_missing"][0], 25 / FPS) and np.isnan(runs["into_missing"][1])
+
+
+def test_width_table_mirrors_the_teams_and_keeps_dead_neutral():
+    table = np.exp(width_table())
+    assert table.shape == (3, N_WIDTH_BINS) and np.allclose(table.sum(axis=1), 1.0)
+    assert np.allclose(table[1], table[0][::-1])       # away is home with the bins reversed
+    assert np.allclose(table[2], table[2][::-1])       # a stoppage favours neither team
+    assert table[0, -1] > 5 * table[0, 0]              # home much wider says home has the ball
+
+
+def test_width_names_the_team_while_the_ball_is_missing():
+    # 20 s with no ball at all: the gap, place and flight clues are silent or neutral. Home is
+    # the wider team for the first half of it, away for the second.
+    n = 500
+    silent = np.full(n, -1, dtype=np.int8)
+    running = (np.full(n, 6, dtype=np.int8), speed_table())    # players at full pace: live
+    width = np.r_[np.full(n // 2, N_WIDTH_BINS - 1), np.zeros(n // 2)].astype(np.int8)
+    labels = decode([(silent, gap_distance_table()), running], transitions(), np.log(START),
+                    segments=[(0, n)], kickoffs=(), extra=[(width, width_table(), WIDTH_WEIGHT)])
+    assert (labels[50:n // 2 - 50] == "H").all() and (labels[n // 2 + 50:n - 50] == "A").all()
+
+
+def test_width_does_not_override_a_player_on_the_ball():
+    # Away is the wider team throughout, but a home player has the ball at his feet.
+    n = 500
+    home_on_ball = (np.full(n, (N_GAP_BINS - 1) * N_DISTANCE_BINS, dtype=np.int8),
+                    gap_distance_table())
+    in_play = (np.full(n, IN_PLAY, dtype=np.int8), place_table())
+    width = np.zeros(n, dtype=np.int8)
+    labels = decode([home_on_ball, in_play], transitions(), np.log(START), segments=[(0, n)],
+                    kickoffs=(), extra=[(width, width_table(), WIDTH_WEIGHT)])
+    assert WIDTH_WEIGHT < WEIGHT and (labels[25:] == "H").all()

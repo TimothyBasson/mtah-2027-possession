@@ -13,7 +13,8 @@ from hmm.clues import (  # noqa: E402
     KEEPER_ZONE, N_DISTANCE_BINS, N_GAP_BINS, N_GAP_DISTANCE, ball_is_usable, ball_place_category,
     gap_category, gap_distance_category, home_defends_low_x, keeper_slots, line_ball, line_positions,
     load_distances, median_player_speed, metres_outside, mirror_gap_distance, nearest_by_team,
-    read_distances, speed_category, team_by_frame)
+    read_distances, speed_category, team_by_frame, team_width_difference, width_category,
+    MIN_WIDTH_PLAYERS, N_WIDTH_BINS)
 
 PITCH = (100.0, 50.0)
 FPS = 25
@@ -82,7 +83,7 @@ def test_read_distances_counts_malformed_and_missing_lines(tmp_path):
     path = _write_atd(tmp_path, ["1:NaN,NaN,NaN;0.5,0.6,2.0;NaN,NaN,NaN:0.5,0.5,0.0\n",
                                  "garbage\n",
                                  "3:NaN,NaN,NaN;0.5,0.6,2.0;NaN,NaN,NaN:NaN,NaN,NaN\n"])
-    ball_x, _, _, d_away, _, stats = read_distances(path, TEAMS, 4, PITCH, FPS)
+    ball_x, _, _, d_away, _, _, stats = read_distances(path, TEAMS, 4, PITCH, FPS)
     assert (~np.isnan(ball_x)).tolist() == [True, False, False, False]
     assert np.isclose(d_away[0], 5.0)
     assert stats == (3, 1, 2, 0, 0)  # frames 1 and 3 (0-based) have no line; no keepers
@@ -103,7 +104,7 @@ def test_cache_is_reused_only_for_the_same_inputs(tmp_path):
     first = load_distances(path, TEAMS, 1, PITCH, FPS, cache)
     again = load_distances(path, TEAMS, 1, PITCH, FPS, cache)
     assert np.allclose(first[0], again[0]) and np.allclose(first[3], again[3])
-    assert first[5] == again[5]
+    assert np.allclose(first[5], again[5], equal_nan=True) and first[6] == again[6]
     assert len(os.listdir(cache)) == 1
 
     swapped = load_distances(path, 1 - TEAMS, 1, PITCH, FPS, cache)  # home/away slot map changed
@@ -203,7 +204,7 @@ def test_read_distances_measures_how_fast_the_players_move(tmp_path):
     lines = ["{}:{:.4f},0.5,0;{}:0.5,0.5,0\n".format(
         f + 1, (0.1 * f) % 1, ";".join(["0.5,{:.4f},0".format(0.1 + 0.0008 * f)] * MIN_PLAYERS))
         for f in range(n)]
-    *_, speed, _ = read_distances(_write_atd(tmp_path, lines), teams, n, PITCH, FPS)
+    *_, speed, _, _ = read_distances(_write_atd(tmp_path, lines), teams, n, PITCH, FPS)
     assert np.allclose(speed[SPEED_LAG:2 * SPEED_LAG], 1.0)
 
 
@@ -248,7 +249,7 @@ def test_read_distances_gives_the_ball_to_the_keeper_standing_in_his_teams_goal(
     # on a 100 m pitch where home defends x = 0). The nearest home slot is otherwise 25 m away.
     line = "{}:0.3,0.5,0;0.7,0.5,0;NaN,NaN,NaN;0.05,0.5,0:0.06,0.5,0\n"  # home keeper untracked
     path = _write_atd(tmp_path, [line.format(f + 1) for f in range(2)])
-    _, _, d_home, d_away, _, stats = read_distances(path, KEEPER_TEAMS, 2, PITCH, FPS,
+    _, _, d_home, d_away, _, _, stats = read_distances(path, KEEPER_TEAMS, 2, PITCH, FPS,
                                                     keepers=KEEPERS, halves=[(0, 1)])
     assert np.isclose(d_home[0], 1.0) and np.isclose(d_away[0], 64.0)  # inside the half
     assert np.isclose(d_home[1], 24.0) and np.isclose(d_away[1], 1.0)  # outside: metadata's map
@@ -288,3 +289,45 @@ def test_halves_where_the_teams_do_not_switch_ends_warn_and_keep_the_metadata_te
     with pytest.warns(UserWarning):
         team = team_by_frame(px, KEEPER_TEAMS, KEEPERS, [(0, 1), (1, 2)], 105.0)
     assert (team == KEEPER_TEAMS).all()
+
+
+def test_width_difference_is_positive_when_home_is_spread_wider_and_ignores_x():
+    team = np.array([0, 0, 0, 1, 1, 1])
+    py = np.array([[10.0, 25.0, 40.0, 20.0, 25.0, 30.0],    # home 30 m apart, away 10 m
+                   [20.0, 25.0, 30.0, 10.0, 25.0, 40.0]])   # the other way round
+    width = team_width_difference(py, team)
+    assert width[0] > 0 and np.isclose(width[0], -width[1])
+    assert np.isclose(width[0], np.std([10.0, 25.0, 40.0]) - np.std([20.0, 25.0, 30.0]))
+
+
+def test_width_difference_needs_enough_players_of_both_teams():
+    assert MIN_WIDTH_PLAYERS == 3
+    team = np.array([0, 0, 0, 1, 1, 1])
+    py = np.array([[10.0, 25.0, 40.0, 20.0, np.nan, 30.0],   # away has two tracked
+                   [10.0, 25.0, 40.0, 20.0, 25.0, 30.0]])
+    width = team_width_difference(py, team)
+    assert np.isnan(width[0]) and np.isfinite(width[1])
+
+
+def test_width_difference_follows_a_team_map_that_changes_by_frame():
+    # Slot 2 is home on frame 0 and away on frame 1 (a keeper slot the keeper rule moved).
+    team = np.array([[0, 0, 0, 0, 1, 1, 1], [0, 0, 1, 0, 1, 1, 1]])
+    py = np.tile([10.0, 25.0, 0.0, 40.0, 20.0, 25.0, 30.0], (2, 1))
+    width = team_width_difference(py, team)
+    assert np.isclose(width[0], np.std([10.0, 25.0, 0.0, 40.0]) - np.std([20.0, 25.0, 30.0]))
+    assert np.isclose(width[1], np.std([10.0, 25.0, 40.0]) - np.std([0.0, 20.0, 25.0, 30.0]))
+
+
+def test_width_category_runs_from_away_wider_to_home_wider_and_mirrors():
+    width = np.array([-9.0, -0.5, 0.5, 9.0, np.nan])
+    cats = width_category(width)
+    assert cats.tolist() == [0, 4, 5, N_WIDTH_BINS - 1, -1]
+    # swapping the teams negates the width and reverses the bin
+    assert (width_category(-width[:4]) == N_WIDTH_BINS - 1 - cats[:4]).all()
+
+
+def test_read_distances_returns_the_width_difference(tmp_path):
+    teams = np.array([0, 0, 0, 1, 1, 1], dtype=np.int8)
+    line = "1:0.5,0.2,0;0.5,0.5,0;0.5,0.8,0;0.5,0.4,0;0.5,0.5,0;0.5,0.6,0:NaN,NaN,NaN\n"
+    *_, width, _ = read_distances(_write_atd(tmp_path, [line]), teams, 1, PITCH, FPS)
+    assert np.isclose(width[0], np.std([10.0, 25.0, 40.0]) - np.std([20.0, 25.0, 30.0]))
