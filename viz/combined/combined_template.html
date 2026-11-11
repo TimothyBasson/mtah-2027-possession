@@ -93,6 +93,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
 .picker .seg button{font-size:13px;padding:4px 10px}
 .picker .seg small{color:var(--muted);margin-left:4px}.picker .seg button.on small{color:inherit;opacity:.7}
 .picker > button{padding:4px 9px}
+#gmatch{width:8.5em}
 #gpos{font-size:12px;color:var(--muted)}
 #scores b{color:var(--text)}
 .hk{color:var(--home)}.ak{color:var(--away)}.dk{color:var(--dead)}.lk{color:var(--line)}
@@ -101,7 +102,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
 </head>
 <body>
 <main>
-<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px"><h1 id="title">Match viewer</h1><nav id="games" class="picker" aria-label="Switch game" hidden><span class="seg" id="sets"></span><button id="gprev" title="Previous match in this set">◀</button><select id="gmatch" aria-label="Match in this set"></select><button id="gnext" title="Next match in this set">▶</button><span id="gpos"></span></nav></div>
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px"><nav id="games" class="picker" aria-label="Switch game" hidden><span class="seg" id="sets"></span><button id="gprev" title="Previous match in this set">◀</button><select id="gmatch" aria-label="Match in this set"></select><button id="gnext" title="Next match in this set">▶</button><span id="gpos"></span></nav><h1 id="title">Match viewer</h1></div>
 <p class="sub" id="sub"></p>
 <div class="wrap">
   <div class="card top">
