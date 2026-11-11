@@ -185,11 +185,12 @@ def skillcorner_labels(group, alive, phase_team):
 
 
 def resample(x, n):
-    """10 fps -> 25 fps by linear interpolation along axis 0; NaN wherever a neighbour is NaN."""
+    """10 fps -> 25 fps by linear interpolation along axis 0. NaN between two samples when either is
+    NaN (no filling across gaps, like our ATD), but a sample that lands exactly is kept."""
     t = np.arange(n) * SC_FPS / FPS
     i = np.minimum(t.astype(int), len(x) - 2)
     w = (t - i).reshape((-1,) + (1,) * (x.ndim - 1)).astype(np.float32)
-    return x[i] * (1 - w) + x[i + 1] * w
+    return np.where(w == 0, x[i], x[i] * (1 - w) + x[i + 1] * w)  # NaN * 0 is NaN
 
 
 def build_skillcorner():

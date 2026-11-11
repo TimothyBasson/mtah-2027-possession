@@ -14,7 +14,7 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
 
 | option | |
 |---|---|
-| `--match` | an outside match from `data/external/` (`idsse_J03WMX`, `metrica_1`, ...; see [external/README.md](../../external/README.md)), or `all` for BAR-ATH plus every outside match, each page with a dropdown by the title to switch games. Outside matches have no video: a timer drives the page, the pitch takes the video's place, and truth is the provider's label, not the challenge rule. Their chunks go to `data/viz/match_<name>/` (~45 MB each, written once). Needs numpy: run with `uv run` |
+| `--match` | an outside match from `data/external/` (`idsse_J03WMX`, `metrica_1`, `skillcorner_2017461`, ...; see [external/README.md](../../external/README.md)), or `all` for BAR-ATH plus every outside match, each page with a dropdown by the title to switch games. Outside matches have no video: a timer drives the page, the pitch takes the video's place, and truth is the provider's label, not the challenge rule. SkillCorner's broadcast cutaways (replays, close-ups) show an empty pitch and no truth. Their chunks go to `data/viz/match_<name>/` (~45 MB each, written once). Needs numpy: run with `uv run` |
 | `--pred` | a `frame,label` submission CSV; its label is shown next to the truth |
 | `--start` | where the page opens: `7:27.4` (default, kickoff), `1:20:05`, `453.4` or `f11185`. Added to the URL as `#f<frame>`, which you can edit or share |
 | `--gt` | ground truth CSV, default the public 5 minutes; `none` to hide it |

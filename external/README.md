@@ -21,7 +21,8 @@ Where the raw files come from (put them under `data/external/raw/`):
 - IDSSE: [pysport/idsse-data](https://huggingface.co/datasets/pysport/idsse-data), CC BY 4.0,
   Bassek et al., *Scientific Data* 12, 195 (2025). The figshare originals sit behind a bot check.
 - Metrica: `git clone https://github.com/metrica-sports/sample-data` into `raw/metrica/`.
-- SkillCorner: [SkillCorner/opendata](https://github.com/SkillCorner/opendata), MIT. The tracking
+- SkillCorner: [SkillCorner/opendata](https://github.com/SkillCorner/opendata), MIT; cite as
+  SkillCorner Open Data (A-League 2024-25). List it with the other two in the technical document. The tracking
   files are Git LFS (~90 MB each, 2 GB in all). Put `data/matches.json` and each
   `data/matches/<id>/` folder under `raw/skillcorner/`, fetching `*_tracking_extrapolated.jsonl`
   from `media.githubusercontent.com` rather than `raw.githubusercontent.com`.
@@ -41,12 +42,26 @@ here are not leaderboard predictions. Use them to compare two versions of the mo
   nobody (passes, loose balls). Extrapolated ball positions are dropped. Extrapolated players are
   kept, because our feed tracks almost everyone. Broadcast cutaways, such as replays, track nobody;
   those frames are labelled X, so they are not graded. That is about a quarter of each match and
-  half the dead time.
+  half the dead time, and it includes the hardest dead-ball stretches. A SkillCorner score is
+  therefore not comparable with a full-match score.
+- **SkillCorner timing:** labels are taken from the previous 10 fps frame, so a change of
+  possession can be up to 0.1 s late. Fine for training; don't tune boundary timing on this set.
 
 **DFL's spells are short.** A match has about 510, with a median of 3 s. Our 5 public minutes
 have 17 possessions, roughly 360 over a full match, so DFL counts some touches we would not.
-Metrica has about 315, and SkillCorner about 300 (median 6 s), which is closer. Expect a low
-spellF1 on IDSSE even when the model is right by the organisers' rule. That set is better for alive/dead and team accuracy.
+Metrica has about 315, and SkillCorner about 300, which is closer. Expect a low
+spellF1 on IDSSE even when the model is right by the organisers' rule.
+
+| possessions (H/A runs) | per graded minute | mean | median | 90th pct | D share |
+|---|---|---|---|---|---|
+| IDSSE | 4.6 | 7.2 s | 3.7 s | 18.6 s | 45% |
+| Metrica | 3.6 | 11.3 s | 5.9 s | 28.9 s | 32% |
+| SkillCorner | 4.4 | 9.6 s | 5.8 s | 23.1 s | 29% |
+
+All three cut possessions shorter than the public window (17 in 5 minutes, mean 14.2 s, median 7.6 s,
+D 20%), so a
+model fitted to them may lean towards short possessions. These are descriptive only: the labels are
+not adjusted towards the public window. That set is better for alive/dead and team accuracy.
 
 ## Baseline: v3 model, `--seen 0.59`, no tags
 

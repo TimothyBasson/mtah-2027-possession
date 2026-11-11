@@ -22,6 +22,6 @@ alive = np.array([0, 1, 1, 1, 1, 1, 0, 1], bool)
 team = np.array([0, 0, 0, 0, 0, 0, 0, 1])       # the phase's team, used until a group is named
 got = "".join(skillcorner_labels(g, alive, team))
 assert got == "DHHHAADA", got
-x = resample(np.array([0., 10., np.nan], np.float32), 5)  # 10 fps -> 25 fps
-assert np.allclose(x[:3], [0, 4, 8]) and np.isnan(x[3:]).all(), x
+x = resample(np.array([0., 10., 20., np.nan], np.float32), 8)  # 10 fps -> 25 fps
+assert np.allclose(x[:6], [0, 4, 8, 12, 16, 20]) and np.isnan(x[6:]).all(), x  # 20 sits on a gap's edge
 print("ok")
