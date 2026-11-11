@@ -38,7 +38,25 @@ For comparison, the earlier nearest-player-to-ball v0 scored spellF1 0.057 and m
 Possessions now come out about the right length: 634 predicted against 614 true on idsse_J03WMX
 (median 4.8 s against 4.2 s), and 680 against 439 on metrica_1.
 
+On BAR-ATH, nothing tuned on it:
+
+| | value |
+|---|---|
+| public 5 minutes (`run_evaluation.py --bootstrap 1000`), a pipeline check only | macroF1 0.724 (best on the board), spellF1 0.293, 24 possessions of mean 9.9 s against 17 of 14.2 s |
+| full match, first / second half | 271 / 249 possessions, mean 7.2 / 7.5 s, 39% / 41% dead |
+| graded frames with no spread lean (a side untracked for the whole window) | 1,277 (0.8%); they keep the previous team |
+| graded frames with no player speed (counted as dead) | 0 |
+
+The public window has only 17 possessions, so gaps on its spellF1 under about 0.39 are noise.
+A real match has roughly 300 possessions, so the full-match count says this splits too often.
+
+This model is one half of a combined model with `hmm/`, not a replacement for the best single
+model.
+
 What it gets wrong:
+- **Too many possessions.** About 520 on BAR-ATH against roughly 300 expected, and 680 against 439
+  on metrica_1. A slow patch inside a possession flips it to dead for a moment and splits it in two,
+  because each decision is a single cutoff with no minimum length or hysteresis. Next to fix.
 - **Late changes.** Shape takes a couple of seconds to change after a turnover, and the 2 s window
   adds to that.
 - **Style.** A team keeping the ball deep looks compact, and a high press looks stretched.

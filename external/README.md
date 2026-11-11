@@ -48,7 +48,9 @@ by the organisers' rule. That set is better for alive/dead and team accuracy.
 It never reads the ball, so `--seen` doesn't change these. The ball-based nearest-team v0 before it
 scored 0.057 spellF1 on all 10 at `--seen 0.59`.
 
-The old v3 model these numbers used to describe (0.431 across all 10) was never committed and is lost.
+The old v3 model these numbers used to describe (0.431 across all 10, ball-based) was never committed
+and is lost. It is still the best single-model score seen here: this v0 is a players-only lens
+meant to be combined with `hmm/`, not a replacement for it.
 
 Use `--seen` on IDSSE. With the ball always visible, the model's hardest problem disappears.
 But `--seen` drops the ball at random, live or dead alike, and our match does not lose it that way.
