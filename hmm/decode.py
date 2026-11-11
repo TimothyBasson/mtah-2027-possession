@@ -197,9 +197,14 @@ PLACE_FLOOR = 0.02
 WIDTH_GIVEN_HOME = np.array([0.015, 0.025, 0.051, 0.047, 0.061, 0.083, 0.106, 0.194, 0.217, 0.202])
 WIDTH_GIVEN_DEAD = np.array([0.087, 0.100, 0.135, 0.092, 0.085, 0.085, 0.092, 0.135, 0.100, 0.087])
 # Trust exponent on the width clue. A team's shape changes over seconds, not frames, so it gets
-# less than the ball clues' WEIGHT. At 0.2 it overrides the ball and costs Metrica 0.061 spellF1;
-# at 0.02-0.075 all three external sets gain (IDSSE +0.017 to +0.023, Metrica +0.007 to +0.010,
-# SkillCorner +0.005 at 0.02 and +0.009 at 0.05). SkillCorner alone would take more (+0.015 at 0.1).
+# less than the ball clues' WEIGHT. This number is tuned on the external matches it is judged on:
+# spellF1 gain over v5 at 0.02 / 0.035 / 0.05 / 0.075 / 0.1 / 0.15 / 0.2 is
+#   IDSSE        +0.017 +0.020 +0.023 +0.024 +0.025 +0.015 +0.006
+#   Metrica      +0.007 +0.007 +0.010 +0.006  0.000 -0.028 -0.063
+#   SkillCorner  +0.006 +0.008 +0.010 +0.012 +0.016 +0.018 +0.018   (ball as recorded)
+# Chosen with each set left out in turn, the other two pick 0.05, 0.1 and 0.05, and the set left
+# out then gains +0.023 (IDSSE), 0.000 (Metrica, at 0.1) and +0.010 (SkillCorner): +0.011 on
+# average, which is the honest size of this clue. 0.05 is the largest weight at which no set loses.
 WIDTH_WEIGHT = 0.05
 
 # Trust exponent on each frame's clue. At 25 fps neighbouring frames repeat the same look at the

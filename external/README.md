@@ -123,6 +123,40 @@ players-only clue should do. At a weight of 0.2 the clue overrides the ball and 
 `WIDTH_GIVEN_HOME` and `WIDTH_GIVEN_DEAD` in `hmm/decode.py` to 0.001, and no single set's home
 row is further than 0.024 from it (dead row 0.031).
 
+**The width weight is tuned on these matches.** spellF1 gain over v5 by weight (SkillCorner with
+its ball as recorded):
+
+| weight | 0.02 | 0.035 | 0.05 | 0.075 | 0.1 | 0.15 | 0.2 |
+|---|---|---|---|---|---|---|---|
+| IDSSE | +0.017 | +0.020 | +0.023 | +0.024 | +0.025 | +0.015 | +0.006 |
+| Metrica | +0.007 | +0.007 | +0.010 | +0.006 | 0.000 | -0.028 | -0.063 |
+| SkillCorner | +0.006 | +0.008 | +0.010 | +0.012 | +0.016 | +0.018 | +0.018 |
+
+Chosen with each set left out in turn, the other two pick 0.05, 0.1 and 0.05, and the set left out
+then gains +0.023 (IDSSE), 0.000 (Metrica) and +0.010 (SkillCorner). That is +0.011 on average,
+and it is the fair size of this clue: below the 0.03 bar v5 was held to. v6 is kept because no
+set loses at 0.05 and the direction is the same on all three, not because the gain is large.
+
+**Does it just favour the wider team? Checked on BAR-ATH, without labels.** Home is the wider team
+on 56% of graded frames there (median difference +1.4 m and +1.1 m by half). That mixes style with
+possession: v5 gives home 64% and 57% of live frames, and the midpoint between the median width
+on v5's home frames and on its away frames is +1.1 m and +0.7 m, about half a bin. The 10 IDSSE
+and Metrica matches have per-match medians from -0.6 to +1.7 m. From v5 to v6, 6.5% of graded
+frames change: 4,012 from H to A and 3,433 from A to H, a net +0.2% towards home, and home's share
+of live frames is 64.1% and 56.2% (v5: 64.2% and 56.7%). So the changes are not piled on one team.
+Ball-missing frames change more often (8.3%) than ball-visible ones (5.2%), as intended.
+Subtracting each half's median width first changes a further 2.7% of frames, every one of them
+away from home, because the median also removes home's real share of the ball; on the external
+matches centring moved spellF1 by 0.003 at most. The clue is left uncentred.
+
+A team's width needs 6 of its players tracked (`MIN_WIDTH_PLAYERS`). On BAR-ATH 6% of graded
+frames have a team below that and the clue is silent there; the external scores are the same to
+three decimals with a floor of 3.
+
+The constants `WIDTH_GIVEN_HOME`, `WIDTH_GIVEN_DEAD` and `WIDTH_WEIGHT` are hard-coded, so the
+submission is reproducible from the repo alone, but their derivation needs the 30 outside matches.
+The technical document must list all three sources (above) as assets used.
+
 v5 beats v4 on each of the 10 (by 0.032 to 0.112). Its two changes one at a time, then the variant
 that is not the default, with the possessions predicted against the true count:
 

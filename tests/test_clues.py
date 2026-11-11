@@ -291,31 +291,33 @@ def test_halves_where_the_teams_do_not_switch_ends_warn_and_keep_the_metadata_te
     assert (team == KEEPER_TEAMS).all()
 
 
-def test_width_difference_is_positive_when_home_is_spread_wider_and_ignores_x():
-    team = np.array([0, 0, 0, 1, 1, 1])
-    py = np.array([[10.0, 25.0, 40.0, 20.0, 25.0, 30.0],    # home 30 m apart, away 10 m
-                   [20.0, 25.0, 30.0, 10.0, 25.0, 40.0]])   # the other way round
-    width = team_width_difference(py, team)
+HOME_WIDE = [5.0, 10.0, 20.0, 30.0, 40.0, 45.0]     # six players spread over 40 m
+AWAY_NARROW = [20.0, 22.0, 24.0, 26.0, 28.0, 30.0]  # six players inside 10 m
+SIX_A_SIDE = np.array([0] * 6 + [1] * 6)
+
+
+def test_width_difference_is_positive_when_home_is_spread_wider():
+    py = np.array([HOME_WIDE + AWAY_NARROW, AWAY_NARROW + HOME_WIDE])
+    width = team_width_difference(py, SIX_A_SIDE)
     assert width[0] > 0 and np.isclose(width[0], -width[1])
-    assert np.isclose(width[0], np.std([10.0, 25.0, 40.0]) - np.std([20.0, 25.0, 30.0]))
+    assert np.isclose(width[0], np.std(HOME_WIDE) - np.std(AWAY_NARROW))
 
 
 def test_width_difference_needs_enough_players_of_both_teams():
-    assert MIN_WIDTH_PLAYERS == 3
-    team = np.array([0, 0, 0, 1, 1, 1])
-    py = np.array([[10.0, 25.0, 40.0, 20.0, np.nan, 30.0],   # away has two tracked
-                   [10.0, 25.0, 40.0, 20.0, 25.0, 30.0]])
-    width = team_width_difference(py, team)
+    assert MIN_WIDTH_PLAYERS == 6
+    py = np.array([HOME_WIDE + AWAY_NARROW, HOME_WIDE + AWAY_NARROW])
+    py[0, 7] = np.nan  # away has five tracked on frame 0
+    width = team_width_difference(py, SIX_A_SIDE)
     assert np.isnan(width[0]) and np.isfinite(width[1])
 
 
 def test_width_difference_follows_a_team_map_that_changes_by_frame():
-    # Slot 2 is home on frame 0 and away on frame 1 (a keeper slot the keeper rule moved).
-    team = np.array([[0, 0, 0, 0, 1, 1, 1], [0, 0, 1, 0, 1, 1, 1]])
-    py = np.tile([10.0, 25.0, 0.0, 40.0, 20.0, 25.0, 30.0], (2, 1))
+    # The last slot is away on frame 0 and home on frame 1 (a keeper slot the keeper rule moved).
+    py = np.tile(HOME_WIDE + AWAY_NARROW + [0.0], (2, 1))
+    team = np.array([[0] * 6 + [1] * 6 + [1], [0] * 6 + [1] * 6 + [0]])
     width = team_width_difference(py, team)
-    assert np.isclose(width[0], np.std([10.0, 25.0, 0.0, 40.0]) - np.std([20.0, 25.0, 30.0]))
-    assert np.isclose(width[1], np.std([10.0, 25.0, 40.0]) - np.std([0.0, 20.0, 25.0, 30.0]))
+    assert np.isclose(width[0], np.std(HOME_WIDE) - np.std(AWAY_NARROW + [0.0]))
+    assert np.isclose(width[1], np.std(HOME_WIDE + [0.0]) - np.std(AWAY_NARROW))
 
 
 def test_width_category_runs_from_away_wider_to_home_wider_and_mirrors():
@@ -327,7 +329,7 @@ def test_width_category_runs_from_away_wider_to_home_wider_and_mirrors():
 
 
 def test_read_distances_returns_the_width_difference(tmp_path):
-    teams = np.array([0, 0, 0, 1, 1, 1], dtype=np.int8)
-    line = "1:0.5,0.2,0;0.5,0.5,0;0.5,0.8,0;0.5,0.4,0;0.5,0.5,0;0.5,0.6,0:NaN,NaN,NaN\n"
-    *_, width, _ = read_distances(_write_atd(tmp_path, [line]), teams, 1, PITCH, FPS)
-    assert np.isclose(width[0], np.std([10.0, 25.0, 40.0]) - np.std([20.0, 25.0, 30.0]))
+    slots = ";".join("0.5,{},0".format(y / PITCH[1]) for y in HOME_WIDE + AWAY_NARROW)
+    *_, width, _ = read_distances(_write_atd(tmp_path, ["1:{}:NaN,NaN,NaN\n".format(slots)]),
+                                  SIX_A_SIDE.astype(np.int8), 1, PITCH, FPS)
+    assert np.isclose(width[0], np.std(HOME_WIDE) - np.std(AWAY_NARROW), atol=1e-4)

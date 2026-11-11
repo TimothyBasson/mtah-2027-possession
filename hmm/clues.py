@@ -50,7 +50,7 @@ import numpy as np
 from starter.baseline import AWAY, FIELD_SEP, GROUP_SEP, HOME, MISSING
 
 # Bump when the parsing below changes, so an old cache is never read back as new.
-CLUES_VERSION = 7
+CLUES_VERSION = 8
 
 # Bin edges on the gap, in metres. Right-inclusive: (-inf, -3], (-3, -1], (-1, 1], (1, 3], (3, inf).
 GAP_EDGES = np.array([-3.0, -1.0, 1.0, 3.0])
@@ -104,8 +104,10 @@ KEEPER_ON_BALL = 3.0
 # the sign alone) the score moved by at most 0.003.
 WIDTH_EDGES = np.array([-5.0, -3.5, -2.0, -1.0, 0.0, 1.0, 2.0, 3.5, 5.0])
 N_WIDTH_BINS = len(WIDTH_EDGES) + 1
-# A team's width needs this many of its players tracked on the frame.
-MIN_WIDTH_PLAYERS = 3
+# A team's width needs this many of its players tracked on the frame: a spread from fewer says
+# more about who is missing than about the team's shape. On BAR-ATH 6% of graded frames have a
+# team below it (the 1st percentile is 2 tracked), and the clue is silent there.
+MIN_WIDTH_PLAYERS = 6
 
 # Frames per block when computing distances over the whole match, to bound memory.
 CHUNK = 20000
