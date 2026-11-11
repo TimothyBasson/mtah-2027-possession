@@ -63,15 +63,21 @@ All three cut possessions shorter than the public window (17 in 5 minutes, mean 
 7.6 s, D 20%), so a model fitted to them may lean towards short possessions. These are descriptive
 only: the labels are not adjusted towards the public window.
 
-## Baseline: `possession/` v0 as on main after #17, one run for every row (players only: more spread-out team, keepers left out, has it; walking = D; alive runs under 2 s, dead runs under 3 s and team runs under 2 s absorbed)
+## Baseline: `possession/` with the stoppage model (players only: more spread-out team, keepers left out, has it; a logistic model on four player-speed signals for dead; short runs absorbed)
 
-| | spellF1 | macroF1 | alive/dead F1 | team acc |
+Held out by provider (`external/heldout.py`: the stoppage weights refitted on the other two
+providers each time), the number to compare changes on:
+
+| held out | spellF1 | macroF1 | alive/dead F1 | team acc |
 |---|---|---|---|---|
-| IDSSE mean (7) | 0.199 | 0.677 | 0.844 | 0.761 |
-| Metrica mean (3) | 0.271 | 0.679 | 0.849 | 0.794 |
-| all 10 | 0.221 | 0.677 | 0.846 | 0.771 |
-| SkillCorner mean (20) | 0.280 | 0.683 | 0.874 | 0.798 |
-| all 30 | 0.260 | 0.681 | 0.864 | 0.789 |
+| IDSSE (7) | 0.217 | 0.722 | 0.883 | 0.767 |
+| Metrica (3) | 0.299 | 0.715 | 0.865 | 0.803 |
+| SkillCorner (20) | 0.284 | 0.700 | 0.889 | 0.799 |
+| mean of the three | 0.266 | 0.712 | 0.879 | 0.790 |
+
+`score.py` in-sample (weights fitted on all 30): IDSSE 0.227, Metrica 0.300, SkillCorner 0.285,
+all 30 0.273 spellF1. Before the stoppage model (median speed under 1.2 m/s): held-out mean 0.250,
+all 30 0.260. The experiment log is in `possession/README.md`.
 
 `score.py` prints each set's mean as well as the overall one; compare like with like. SkillCorner
 is not graded on its cutaways (see above), so its row is not comparable with the others. The IDSSE
