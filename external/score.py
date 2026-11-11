@@ -90,8 +90,12 @@ def main():
                      np.isfinite(F["ball"][mask, 0]).mean()))
         print(f"{name:14s} spellF1 {rows[-1][1]:.3f}  macroF1 {rows[-1][2]:.3f}  alive/dead {rows[-1][3]:.3f}"
               f"  team {rows[-1][4]:.3f}  ball seen {rows[-1][5]:.0%}", flush=True)
-    m = np.mean([r[1:] for r in rows], 0)
-    print(f"{'mean':14s} spellF1 {m[0]:.3f}  macroF1 {m[1]:.3f}  alive/dead {m[2]:.3f}  team {m[3]:.3f}")
+    # per set too, so a mean over all sets isn't compared with one taken before a set was added
+    for p in sorted({r[0].split("_")[0] for r in rows}) + [""]:
+        sel = [r[1:] for r in rows if r[0].startswith(p)]
+        m = np.mean(sel, 0)
+        print(f"{(p or 'all') + f' ({len(sel)})':14s} spellF1 {m[0]:.3f}  macroF1 {m[1]:.3f}  "
+              f"alive/dead {m[2]:.3f}  team {m[3]:.3f}")
 
 
 if __name__ == "__main__":

@@ -70,6 +70,12 @@ only: the labels are not adjusted towards the public window.
 | IDSSE mean (7) | 0.199 | 0.677 | 0.844 | 0.761 |
 | Metrica mean (3) | 0.271 | 0.679 | 0.849 | 0.794 |
 | all 10 | 0.221 | 0.677 | 0.846 | 0.771 |
+| SkillCorner mean (20) | 0.280 | 0.683 | 0.874 | 0.798 |
+| all 30 | 0.260 | 0.681 | 0.864 | 0.789 |
+
+`score.py` prints each set's mean as well as the overall one; compare like with like. SkillCorner
+is not graded on its cutaways (see above), so its row is not comparable with the others. The IDSSE
+and Metrica rows are unchanged by measuring `--seen` on labelled frames.
 
 Before the short runs were absorbed (`min_team=0 min_dead=0`): 0.187 / 0.212 / 0.194 spellF1.
 
