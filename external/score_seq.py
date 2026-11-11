@@ -5,7 +5,9 @@
 Each set (IDSSE, Metrica, SkillCorner) is scored by a scorer fitted on the other two only, the two
 counting equally. The chain's numbers and the hybrid's weight are chosen for a set without any of
 its labels: on each of the other two sets, as scored by a scorer fitted on the third set alone.
-That is six fits a run: three for the reported scores, three for the choosing. The ball is the one external/score_hmm.py gives its models (same seed),
+That is six fits a run: three for the reported scores, three for the choosing.
+The hybrid's weight keeps one weak path open: hmm_v6's own tables are counted as in score_hmm.py,
+so the emissions under the sets a weight is chosen on were counted partly from the held-out set. The ball is the one external/score_hmm.py gives its models (same seed),
 so the rows compare with that table.
 
 --drop   leave out feature groups by prefix (p_ players, b_ ball against players, k_ ball alone).

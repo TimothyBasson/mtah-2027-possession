@@ -232,7 +232,10 @@ frame and each score is held for 5 frames, so the weight is per 25 fps frame.
 
 **The chain and the weight are chosen for a set without any of its labels**: on each of the other
 two sets, as scored by a scorer fitted on the third set alone. That picks a weight of 0.05, 0.1
-and 0.05:
+and 0.05. One path is left open for the weight: the `hmm_v6` tables under the hybrid are the ones
+`score_hmm.py` uses (IDSSE's counted on Metrica and the reverse, width on the other sets), so the
+emissions a set's weight is chosen on were counted partly from that set's labels. It is one
+weight among five, and the same tables sit under the `hmm_v6` column:
 
 | spellF1 | hmm_v6 | seq alone | hybrid | hybrid - hmm_v6, paired (standard error) | worst match | matches up |
 |---|---|---|---|---|---|---|
