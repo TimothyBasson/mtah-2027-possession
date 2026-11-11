@@ -216,3 +216,41 @@ which is the dead-ball pattern. Metrica shows the same pattern: there the ball i
 dead frames and 12% of live ones. So IDSSE under `--seen` punishes "missing means dead" more than
 our match would.
 Scores also get no help from set-piece tags, because these matches have no Smart Tagging.
+
+## The learned labeller (`seq/`), `score_seq.py --seen 0.59`
+
+Boosted trees score each frame H / A / D from team-level features, and a chain decodes the half
+(`seq/model.py`, after Kim et al., KDD 2023, and PathCRF, arXiv 2602.12080). Each set is scored by a
+scorer fitted on the other two sets only, the two counting equally. Needs scikit-learn; one run
+is three fits and takes about 20 minutes, cached under `data/cache/seq/`.
+
+"hybrid" is `hmm_v6` with the labeller's per-frame log-probabilities added to its clues at a
+weight, chosen for each set on the other two (0.1, 0.2 and 0.2). At weight 0 it reproduces the
+`hmm_v6` row above exactly.
+
+| spellF1 | hmm_v6 | seq alone | hybrid | hybrid - hmm_v6, paired (standard error) | matches up |
+|---|---|---|---|---|---|
+| IDSSE mean (7) | 0.441 | 0.471 | 0.524 | +0.083 (0.004) | 7 of 7 |
+| Metrica mean (3) | 0.753 | 0.655 | 0.777 | +0.024 (0.010) | 3 of 3 |
+| SkillCorner mean (20) | 0.354 | 0.407 | 0.408 | +0.055 (0.004) | 20 of 20 |
+
+Most of the hybrid's gain is in alive/dead (IDSSE 0.903 to 0.949, SkillCorner 0.903 to 0.936);
+team accuracy moves by about 0.01 or less. The chain's own settings move seq alone by 0.01-0.02
+and not consistently, so the per-frame scorer is its limit.
+
+**The ball-alone features (`k_`) are left out by default.** With them in (`--drop "" --tag all`):
+
+| spellF1 | seq alone, with k_ | seq alone, without | hybrid, with k_ | hybrid, without |
+|---|---|---|---|---|
+| IDSSE | 0.474 | 0.471 | 0.534 | 0.524 |
+| Metrica | 0.721 | 0.655 | 0.799 | 0.777 |
+| SkillCorner | 0.352 | 0.407 | 0.361 | 0.408 |
+
+A scorer fitted on IDSSE and Metrica learns that a still or missing ball means a stoppage, which
+is how those two providers record one (above), and held-out SkillCorner pays for it. Metrica
+gains from them because its labels and its ball come from the same events. Players only
+(`--drop b_,k_ --tag players`) scores 0.406 / 0.524 / 0.389 alone.
+
+Not settled: the feature groups were compared on all three sets, the hybrid weight is picked from
+four values, and `b_touch_since` still reads a ball that IDSSE freezes. Nothing in `seq/` has
+tests yet, and no script in the repo fits on all 30 matches and labels BAR-ATH.
