@@ -50,7 +50,8 @@ here are not leaderboard predictions. Use them to compare two versions of the mo
 **DFL's spells are short.** A match has about 510, with a median of 3 s. Our 5 public minutes
 have 17 possessions, roughly 360 over a full match, so DFL counts some touches we would not.
 Metrica has about 315, and SkillCorner about 300, which is closer. Expect a low
-spellF1 on IDSSE even when the model is right by the organisers' rule.
+spellF1 on IDSSE even when the model is right by the organisers' rule. That set is better for
+alive/dead and team accuracy.
 
 | possessions (H/A runs) | per graded minute | mean | median | 90th pct | D share |
 |---|---|---|---|---|---|
@@ -58,10 +59,9 @@ spellF1 on IDSSE even when the model is right by the organisers' rule.
 | Metrica | 3.6 | 11.3 s | 5.9 s | 28.9 s | 32% |
 | SkillCorner | 4.4 | 9.6 s | 5.8 s | 23.1 s | 29% |
 
-All three cut possessions shorter than the public window (17 in 5 minutes, mean 14.2 s, median 7.6 s,
-D 20%), so a
-model fitted to them may lean towards short possessions. These are descriptive only: the labels are
-not adjusted towards the public window. That set is better for alive/dead and team accuracy.
+All three cut possessions shorter than the public window (17 in 5 minutes, mean 14.2 s, median
+7.6 s, D 20%), so a model fitted to them may lean towards short possessions. These are descriptive
+only: the labels are not adjusted towards the public window.
 
 ## Baseline: v3 model, `--seen 0.59`, no tags
 
