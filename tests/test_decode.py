@@ -14,9 +14,9 @@ from hmm.clues import (  # noqa: E402
     IN_PLAY, MISSING_AFTER_PLAY, MISSING_STALE, N_DISTANCE_BINS, N_GAP_BINS, ball_place_category,
     mirror_gap_distance, speed_category)
 from hmm.decode import (  # noqa: E402
-    CARRY_SECONDS, FPS, KICKOFFS, PLACE_FLOOR, START, decode, fit_place, flight_table,
-    gap_distance_table, gap_table, graded_segments, pin_dead_before_kickoff, place_table,
-    speed_table, transitions)
+    CARRY_SECONDS, FPS, KICKOFFS, PLACE_FLOOR, START, dead_runs, decode, fit_place, flight_table,
+    gap_distance_table, gap_table, graded_segments, pin_dead_before_kickoff, place_placebo,
+    place_table, speed_table, transitions)
 
 HOME_MUCH_CLOSER = N_GAP_BINS - 1
 PITCH = (105.0, 68.0)
@@ -158,20 +158,22 @@ def test_being_nearer_a_ball_nobody_is_near_is_not_a_possession():
     assert set(_away_nearer_for(3, distance_bin=N_DISTANCE_BINS - 1)) == {"H"}
 
 
-def _match_where_the_ball(goes_missing_when_dead):
+def _match_where_the_ball(goes_missing_when_dead, speeds=(2.6, 0.4), gap_seconds=1):
     """60 s of play (home on the ball, players running) then 60 s of stoppage (nobody near the
-    ball, players standing), three times over. Returns (place, the other clues)."""
+    ball, players standing), three times over. speeds are the players' in play and in a stoppage;
+    a ball lost at random is missing every other gap_seconds. Returns (place, the other clues)."""
     block = 60 * FPS
     live = np.tile(np.r_[np.ones(block, bool), np.zeros(block, bool)], 3)
     n = len(live)
     home_on_ball, nobody_near = (N_GAP_BINS - 1) * N_DISTANCE_BINS, 2 * N_DISTANCE_BINS + 3
     gap = np.where(live, home_on_ball, nobody_near).astype(np.int8)
-    speed = speed_category(np.where(live, 2.6, 0.4))
+    speed = speed_category(np.where(live, *speeds))
     if goes_missing_when_dead:
         place = np.where(live, IN_PLAY, MISSING_AFTER_PLAY).astype(np.int8)
-        gap[~live] = -1  # no ball, no gap
-    else:  # missing every other second, live or dead
-        place = np.where(np.arange(n) // FPS % 2 == 0, IN_PLAY, MISSING_AFTER_PLAY).astype(np.int8)
+    else:  # live or dead alike
+        place = np.where(np.arange(n) // (gap_seconds * FPS) % 2 == 0, IN_PLAY,
+                         MISSING_AFTER_PLAY).astype(np.int8)
+    gap[place != IN_PLAY] = -1  # no ball, no gap: as load_observations has it
     return place, [(gap, gap_distance_table()), (speed, speed_table())]
 
 
@@ -188,6 +190,34 @@ def test_fit_place_learns_nothing_from_a_ball_lost_at_random():
     live, dead = fit_place(place, others, transitions(), np.log(START), [(0, len(place))],
                            kickoffs=())
     assert abs(live[IN_PLAY] - dead[IN_PLAY]) < 0.05
+
+
+def test_fit_place_leans_only_a_little_towards_missing_means_dead_on_a_ball_lost_at_random():
+    # The gap clue pushes a frame with the ball in view towards live, and a frame without it has
+    # only the players' speed. With speeds that separate play from a stoppage less sharply (a slow
+    # run against a walk) and 4 s gaps, the live row comes out a few points more "seen" than the
+    # dead row, where the truth is equal. This bounds that bias; fit_place's docstring has the
+    # worst case and what it comes to on BAR-ATH.
+    place, others = _match_where_the_ball(goes_missing_when_dead=False, speeds=(1.7, 1.0),
+                                          gap_seconds=4)
+    live, dead = fit_place(place, others, transitions(), np.log(START), [(0, len(place))],
+                           kickoffs=())
+    assert 0 < live[IN_PLAY] - dead[IN_PLAY] < 0.1
+
+
+def test_place_placebo_finds_no_link_once_the_ball_is_shifted_against_play():
+    # the ball is missing exactly in the stoppages: fitted, the two rows are far apart; shifted by
+    # half a play-stoppage cycle against the other clues, they are not
+    place, others = _match_where_the_ball(goes_missing_when_dead=True)
+    (gap, _), (speed, _) = others
+    live, dead = fit_place(place, others, transitions(), np.log(START), [(0, len(place))],
+                           kickoffs=())
+    assert live[IN_PLAY] - dead[IN_PLAY] > 0.8
+    flight = np.full(len(place), -1, dtype=np.int8)
+    [(_, seen_live, seen_dead)] = place_placebo(gap, place, speed, flight, transitions(),
+                                                np.log(START), [(0, len(place))], kickoffs=(),
+                                                minutes=(0.5,))
+    assert abs(seen_live - seen_dead) < 0.2
 
 
 def test_fit_place_never_lets_one_category_rule_a_state_out():
@@ -211,3 +241,15 @@ def test_fit_place_counts_the_frames_before_a_kickoff_as_dead():
     assert dead[MISSING_STALE] > 0.85 and live[MISSING_STALE] < 2 * PLACE_FLOOR
     live, _ = fit_place(place, others, transitions(), np.log(START), [(0, n)], kickoffs=())
     assert live[MISSING_STALE] > 0.3
+
+
+def test_dead_runs_flags_a_stoppage_with_no_ball_and_the_same_team_either_side():
+    #         H x100 | D x50 (ball missing from 25 frames before it) | H x100 | D x50 seen | A x100
+    labels = np.array(list("H" * 100 + "D" * 50 + "H" * 100 + "D" * 50 + "A" * 100))
+    place = np.full(len(labels), IN_PLAY, dtype=np.int8)
+    place[75:150] = MISSING_AFTER_PLAY
+    runs = dead_runs(labels, place, [(0, len(labels))])
+    assert runs["start"].tolist() == [100, 250] and runs["stop"].tolist() == [150, 300]
+    assert runs["same_team"].tolist() == [True, False]
+    assert runs["blind"].tolist() == [True, False]
+    assert np.isclose(runs["into_missing"][0], 25 / FPS) and np.isnan(runs["into_missing"][1])

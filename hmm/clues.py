@@ -57,7 +57,8 @@ GAP_EDGES = np.array([-3.0, -1.0, 1.0, 3.0])
 N_GAP_BINS = len(GAP_EDGES) + 1
 # Bin edges on the distance from the ball to the nearest player of either team, in metres: on the
 # ball, within a stride or two, close by, nobody near. Right-open: [0, 1), [1, 2.5), [2.5, 5),
-# [5, inf). Football reasoning, not swept.
+# [5, inf). Football reasoning, set once. Checked afterwards on the external matches: with edges
+# from (0.5, 1.5, 3) to (2, 4, 8) spellF1 over all 10 stays within 0.521-0.524.
 DISTANCE_EDGES = np.array([1.0, 2.5, 5.0])
 N_DISTANCE_BINS = len(DISTANCE_EDGES) + 1
 N_GAP_DISTANCE = N_GAP_BINS * N_DISTANCE_BINS

@@ -15,6 +15,11 @@ provider is scored with the tables counted on the *other* provider only (IDSSE w
 Metrica with IDSSE's). hmm_v5's ball-place table is fitted on each match from its own tracking,
 without labels, as on ours (hmm/decode.py fit_place). hmm_v2 to v4 are scored at the emission
 weight they were built with (0.1), hmm_v5 at the decoder's. Prints aggregates only.
+
+Two steps between v4 and v5 are scored as well, so that v5's three changes can be told apart:
+    hmm_v4w    v4 at v5's emission weight
+    hmm_v4wg   that, with the gap read together with the distance (hand-set place table)
+    hmm_v5     that, with the place table fitted on the match
 """
 
 import argparse
@@ -137,6 +142,9 @@ def predict(d, ball, speed_table, flight_table=None, gap_distance_table=None):
     if flight_table is not None and gap_distance_table is not None:
         others = [(gap_distance_category(usable, d_home, d_away), gap_distance_table),
                   (speed_cats(d), speed_table), (flight, flight_table)]
+        out["hmm_v4w"] = dec.decode(variants[-1][1], trans, start, segments, kickoffs=())
+        out["hmm_v4wg"] = dec.decode(others + [(place, dec.place_table())], trans, start,
+                                     segments, kickoffs=())
         live, dead = dec.fit_place(place, others, trans, start, segments, kickoffs=())
         out["hmm_v5"] = dec.decode(others + [(place, dec.place_table(live, dead))], trans, start,
                                    segments, kickoffs=())
@@ -208,7 +216,9 @@ def main():
 
     for group in PROVIDERS + ("",):
         names = [n for n in matches if n.startswith(group)]
-        print("\nmean over {} ({} matches):".format(group or "all", len(names)))
+        truth = np.mean([possessions(matches[n]["labels"]) for n in names])
+        print("\nmean over {} ({} matches, {:.0f} true possessions):".format(
+            group or "all", len(names), truth))
         for model, by_match in rows.items():
             m = np.mean([by_match[n] for n in names], axis=0)
             print("  {:9s} ".format(model) + "  ".join(

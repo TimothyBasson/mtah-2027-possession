@@ -58,7 +58,17 @@ Each provider is scored with the tables counted on the other provider.
 | Metrica mean (3) | 0.426 | 0.390 | 0.443 | 0.650 | 0.774 |
 | all 10 | 0.287 | 0.245 | 0.289 | 0.443 | 0.522 |
 
-v5 beats v4 on each of the 10 (by 0.032 to 0.137). Read the two sets differently:
+v5 beats v4 on each of the 10 (by 0.032 to 0.137). Its three changes one at a time, with the
+possessions predicted against the true count:
+
+| spellF1 (possessions) | v4 | + weight 0.2 (`hmm_v4w`) | + gap-distance (`hmm_v4wg`) | + fitted place (v5) | truth |
+|---|---|---|---|---|---|
+| IDSSE mean (7) | 0.354 (197) | 0.394 (262) | 0.418 (253) | 0.414 (248) | (437) |
+| Metrica mean (3) | 0.650 (219) | 0.701 (273) | 0.742 (274) | 0.774 (286) | (347) |
+
+The weight and the gap-distance clue help on both providers. The fitted place table helps only on
+the Metrica samples and is neutral on IDSSE, whose ball is knocked out at random and has nothing to
+fit. Read the two sets differently:
 
 - **IDSSE's knocked-out ball is not how ours goes missing.** The knockout makes 12 short gaps a
   minute (median 1.4 s), in play and out alike. BAR-ATH has 1.4 a minute with a median of 10.7 s.
