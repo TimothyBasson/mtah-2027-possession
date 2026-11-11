@@ -37,13 +37,15 @@ have 17 possessions, roughly 360 over a full match, so DFL counts some touches w
 Metrica has about 315, which is closer. Expect a low spellF1 on IDSSE even when the model is right
 by the organisers' rule. That set is better for alive/dead and team accuracy.
 
-## Baseline: `possession/` v0 (players only: more spread-out team, keepers left out, has it; walking = D)
+## Baseline: `possession/` v0 (players only: more spread-out team, keepers left out, has it; walking = D; runs under 2 s (H/A) or 3 s (D) absorbed)
 
 | | spellF1 | macroF1 | alive/dead F1 | team acc |
 |---|---|---|---|---|
-| IDSSE mean (7) | 0.187 | 0.667 | 0.831 | 0.760 |
-| Metrica mean (3) | 0.212 | 0.660 | 0.829 | 0.794 |
-| all 10 | 0.194 | 0.665 | 0.830 | 0.771 |
+| IDSSE mean (7) | 0.200 | 0.677 | 0.844 | 0.761 |
+| Metrica mean (3) | 0.272 | 0.678 | 0.849 | 0.792 |
+| all 10 | 0.222 | 0.677 | 0.846 | 0.771 |
+
+Before the short runs were absorbed (`min_team=0 min_dead=0`): 0.187 / 0.212 / 0.194 spellF1.
 
 It never reads the ball, so `--seen` doesn't change these. The ball-based nearest-team v0 before it
 scored 0.057 spellF1 on all 10 at `--seen 0.59`.

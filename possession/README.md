@@ -19,15 +19,26 @@ On each frame:
   toward its own goal, is left out: he adds several metres that depend on where play is, not on who
   has the ball.
 - **Dead:** when the median player's speed, averaged over 0.5 s either side, is under 1.2 m/s.
+- **No blips:** within each half, any H/A run under 2 s or D run under 3 s is relabelled as its
+  longer neighbour, shortest first (`absorb_short`; `uv run python possession/model.py` checks it).
+  Without this, a moment of walking inside a possession turned it D and split it in two.
 - Graded frames before each kickoff are D on BAR-ATH.
 
 Windows look forward as well as back (the task is offline) and stop at the edge of each half.
 
 | outside matches | spellF1 | macroF1 | alive/dead | team |
 |---|---|---|---|---|
-| IDSSE (7) | 0.187 | 0.667 | 0.831 | 0.760 |
-| Metrica (3) | 0.212 | 0.660 | 0.829 | 0.794 |
-| all 10 | 0.194 | 0.665 | 0.830 | 0.771 |
+| IDSSE (7) | 0.200 | 0.677 | 0.844 | 0.761 |
+| Metrica (3) | 0.272 | 0.678 | 0.849 | 0.792 |
+| all 10 | 0.222 | 0.677 | 0.846 | 0.771 |
+| all 10, before absorbing short runs | 0.194 | 0.665 | 0.830 | 0.771 |
+
+Absorbing short runs raised spellF1 on 7 of the 10 matches; the 3 that fell are IDSSE (by up to
+0.008), whose DFL spells are short (`external/README.md`). The cutoffs were picked on the 10
+outside matches: spellF1 is flat at 0.221-0.222 for H/A 1-2 s and D 3-5 s.
+Hysteresis was tried instead and did not help: a dead band on the team lean (0.25-1 m) or on the
+walking cutoff (symmetric or one-sided, 0.1-0.6 m/s) scored 0.142-0.205 alone and no better than
+0.217 on top of absorbing.
 
 With the keepers counted (`external/score.py keepers=1`) it was 0.182 / 0.655 / 0.830 / 0.752.
 Leaving them out raised team accuracy on 9 of the 10 matches.
@@ -35,28 +46,38 @@ Leaving them out raised team accuracy on 9 of the 10 matches.
 For comparison, the earlier nearest-player-to-ball v0 scored spellF1 0.057 and macroF1 0.532 on all
 10 (`--seen 0.59`). `--seen` does nothing here, because the ball is never read.
 
-Possessions now come out about the right length: 634 predicted against 614 true on idsse_J03WMX
-(median 4.8 s against 4.2 s), and 680 against 439 on metrica_1.
+Possessions (H/A spells as the metric counts them), predicted against true:
+
+| match | true | before | now |
+|---|---|---|---|
+| idsse_J03WMX | 511 | 378 | 206 |
+| metrica_1 | 351 | 408 | 224 |
+| metrica_3 | 375 | 434 | 215 |
+
+So on the outside matches it now makes about half as many possessions as the truth, yet scores
+higher. Absorbing helps Metrica (over-split before) far more than IDSSE (already under).
 
 On BAR-ATH, nothing tuned on it:
 
 | | value |
 |---|---|
-| public 5 minutes (`run_evaluation.py --bootstrap 1000`), a pipeline check only | macroF1 0.724 (best on the board), spellF1 0.293, 24 possessions of mean 9.9 s against 17 of 14.2 s |
-| full match, first / second half | 271 / 249 possessions, mean 7.2 / 7.5 s, 39% / 41% dead |
+| public 5 minutes (`run_evaluation.py --bootstrap 1000`), a pipeline check only | macroF1 0.772 (best on the board), spellF1 0.372 (5-95% 0.19-0.57), 12 possessions of mean 20.2 s against 17 of 14.2 s; before absorbing: 0.724, 0.293, 24 of 9.9 s |
+| full match, first / second half | 120 / 125 possessions, mean 17.0 / 15.4 s, 36% / 39% dead; before absorbing: 271 / 249, 7.2 / 7.5 s |
 | graded frames with no spread lean (a side untracked for the whole window) | 1,277 (0.8%); they keep the previous team |
 | graded frames with no player speed (counted as dead) | 0 |
 
 The public window has only 17 possessions, so gaps on its spellF1 under about 0.39 are noise.
-A real match has roughly 300 possessions, so the full-match count says this splits too often.
+A real match has roughly 300 possessions, so 245 is now slightly too few, where 520 was far too
+many.
 
 This model is one half of a combined model with `hmm/`, not a replacement for the best single
 model.
 
 What it gets wrong:
-- **Too many possessions.** About 520 on BAR-ATH against roughly 300 expected, and 680 against 439
-  on metrica_1. A slow patch inside a possession flips it to dead for a moment and splits it in two,
-  because each decision is a single cutoff with no minimum length or hysteresis. Next to fix.
+- **Spell edges are crude.** Absorbing short runs fixed the over-splitting (520 possessions on
+  BAR-ATH down to 245), but it merges blindly: a real short possession is lost as easily as a
+  false one, and on the outside matches it now makes about half the true count. Next: choose whole
+  spells with a length prior (idea 1 below) instead of fixed minimums.
 - **Late changes.** Shape takes a couple of seconds to change after a turnover, and the 2 s window
   adds to that.
 - **Style.** A team keeping the ball deep looks compact, and a high press looks stretched.
