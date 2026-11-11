@@ -1,5 +1,5 @@
-"""Sticky HMM v4: nearest-player gap + where the ball is + how fast the players move + who kicked
-the ball in flight, decoded with Viterbi, one path per half.
+"""Sticky HMM v5: nearest-player gap and distance + where the ball is + how fast the players move +
+who kicked the ball in flight, decoded with Viterbi, one path per half.
 
 v2 added a ball that goes out of play: a missing ball on its own is close to neutral, and D comes
 from the ball being seen past a line, or lost at or past one. v3 adds the players' speed. When the
@@ -14,21 +14,44 @@ kick instead of at the landing. Now every touch the ball's velocity shows starts
 toucher's team is the clue until the next touch. On the external matches this lifts spellF1 on all
 10 (external/score_hmm.py).
 
+v5 changes two things, each measured on the external matches (external/score_hmm.py), where each
+helps on both providers and together they lift spellF1 on all 10:
+- The trust in each frame's clues doubles (WEIGHT 0.1 -> 0.2). v4 found about 200 possessions in
+  every match, whatever the labels said (315-511), and almost none of those under 4 s.
+- The gap is read together with the distance from the ball to the nearest player
+  (hmm/clues.py gap_distance_category), with a table counted from the external labels like the
+  speed and flight tables. A gap with a player on the ball says more than the same gap with
+  nobody within 5 m, and nobody near the ball is itself a sign of a stoppage.
+A third change was built and is kept behind --fit-place, not in the default: counting the
+ball-place table on the match being decoded, from what the other three clues say about each frame
+(fit_place), instead of setting it by hand. What a missing ball means depends on the tracking, and
+on this match the fit finds the ball seen on 85% of live frames and 27% of dead ones. But against
+the hand-set table it is +0.007 spellF1 over the 10 external matches with an interval that spans
+zero (up on the 3 Metrica samples, slightly down on 6 of the 7 IDSSE matches), and nothing we may
+use on BAR-ATH confirms its dead row. With no evidence to separate them, the default is the one
+with fewer assumptions. fit_place's docstring has the numbers.
+
 The gap clue counts a goalkeeper slot near a goal for the team defending that goal, not the team
 the metadata gives the slot: the tracker sometimes carries one keeper under the other keeper's
 slot (hmm/clues.py).
 
-    python -m hmm.decode                    # writes evaluation/results/hmm_v4.csv
+    python -m hmm.decode                    # writes evaluation/results/hmm_v5.csv
+    python -m hmm.decode --weight 0.1 --hand-gap   # v4 again; either flag alone takes that one
+                                            # change back out, to tell them apart
+    python -m hmm.decode --fit-place        # with the place table counted on the match
+    python -m hmm.decode --placebo          # also checks fit_place against a shifted ball
     python -m hmm.decode --baum-welch       # also prints what unsupervised EM would change
-    python -m hmm.decode --baum-welch --bw-weight 0.1   # ... with the decoder's tempered emissions
+    python -m hmm.decode --baum-welch --bw-weight 0.2   # ... with the decoder's tempered emissions
 
 No number below is tuned on the public window -- EVALUATION.md shows that tuning there picks the
 wrong setting. Most are set by hand; where one was checked against this match, the data was
 label-free: summaries of its own tracking (how often the ball is missing, where it was last seen)
-and Smart Tagging, which is Metrica's automatic output, not ground truth. The speed table is the
-one exception to "by hand", with the flight table: they are counted from the labelled external
-matches (external/, other games, which RULES.md allows). Each comment below says which. Baum-Welch
-on the full match (no labels) is run only as a check on these numbers, and does not overwrite them.
+and Smart Tagging, which is Metrica's automatic output, not ground truth. The gap-distance, speed
+and flight tables are the exceptions to "by hand": they are counted from the labelled external
+matches (external/, other games, which RULES.md allows), and WEIGHT was chosen there. (With
+--fit-place the place table is counted on this match without labels, which RULES.md allows as
+learning without human labels.) Each comment below says which. Baum-Welch on the full match (no
+labels) is run only as a check on these numbers, and does not overwrite them.
 
 numpy only, like starter/baseline.py, so it runs in the scorer's environment.
 """
@@ -44,25 +67,68 @@ sys.path.insert(0, ROOT)
 from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
 from hmm.ball import flight_clue, mirror_flight  # noqa: E402
 from hmm.clues import (  # noqa: E402
-    KEEPER_ON_BALL, N_GAP_BINS, ball_is_usable, ball_place_category, gap_category, keeper_slots,
-    load_distances, speed_category)
+    KEEPER_ON_BALL, MISSING_AFTER_LINE, N_DISTANCE_BINS, N_GAP_BINS, N_PLACES, ball_is_usable,
+    ball_place_category, gap_distance_category, keeper_slots, load_distances, mirror_gap_distance,
+    speed_category)
 from hmm.model import (  # noqa: E402
-    A, D, H, STATES, baum_welch, build_log_emit, rate_log_trans, viterbi)
+    A, D, H, STATES, baum_welch, build_log_emit, forward_backward, rate_log_trans, viterbi)
 from starter.baseline import RESULTS_DIR, team_of_each_track, write_submission  # noqa: E402
 from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES  # noqa: E402
+from starter.load_smart_tagging import load as load_smart_tagging  # noqa: E402
 
 FPS = GAMES[GAME]["fps"]
 
 # p(gap bin | H), bins from "away much closer" to "home much closer" (see hmm/clues.py), on
 # frames with a usable ball. The team in possession is usually, not always, nearest -- a pass in
 # flight or a tackle puts the other side closer. A mirrors H. During a stoppage the gap says
-# nothing about the state: flat.
+# nothing about the state: flat. Set by hand for v1-v4, which external/score_hmm.py still scores;
+# v5 reads the gap-distance table below instead. (Counted from the external labels the H row comes
+# out close to this one, and using it moved spellF1 by 0.006 at most.)
 GAP_GIVEN_HOME = np.array([0.05, 0.10, 0.20, 0.30, 0.35])
 GAP_GIVEN_DEAD = np.full(N_GAP_BINS, 1.0 / N_GAP_BINS)
 
-# p(ball place | state), columns IN_PLAY, OUTSIDE, MISSING_AFTER_LINE, MISSING_AFTER_PLAY,
-# MISSING_STALE (hmm/clues.py). The ball is missing on 41% of graded frames, in live play and
-# stoppages alike, so missing in itself is near neutral (40% live, 55% dead). What separates them:
+# p(gap bin, distance bin | state), on frames with a usable ball. Rows are the gap bins, from "away
+# much closer" to "home much closer"; columns the distance from the ball to the nearest player of
+# either team, <1, <2.5, <5, >=5 m (hmm/clues.py DISTANCE_EDGES). Counted on the labelled external
+# matches like the speed table: the mean over the 7 IDSSE matches (ball knocked out to 59%) and the
+# mean over the 3 Metrica samples, averaged so each provider counts once
+# (python external/score_hmm.py --tables prints them). A mirrors H, and the D rows are counted
+# with the teams swapped as well, so D never favours a team.
+# What it holds that the hand-set gap table did not: with a home player within 1 m of the ball
+# and away more than 3 m further off, H is 37 times likelier than A (the hand-set table: 7); with
+# the nearest player 5 m or more away the same gap makes it 2.2; and with nobody within 5 m, D is
+# likelier than either team. The providers differ in the home-much-closer row: on the Metrica
+# samples, whose ball sits on the players, the nearest player is within 1 m on 0.36 of H frames
+# and 1-2.5 m away on 0.06; on IDSSE 0.23 and 0.12. Elsewhere they agree to within 0.02.
+GAP_DISTANCE_GIVEN_HOME = np.array([
+    [0.008, 0.016, 0.022, 0.013],
+    [0.009, 0.022, 0.032, 0.020],
+    [0.049, 0.050, 0.054, 0.033],
+    [0.107, 0.045, 0.038, 0.022],
+    [0.294, 0.088, 0.050, 0.029],
+])
+GAP_DISTANCE_GIVEN_DEAD = np.array([
+    [0.023, 0.050, 0.072, 0.120],
+    [0.019, 0.020, 0.037, 0.053],
+    [0.045, 0.030, 0.064, 0.072],
+    [0.019, 0.020, 0.037, 0.053],
+    [0.023, 0.050, 0.072, 0.120],
+])
+
+# p(ball place | state), set by hand, as v2-v5 have it.
+#
+# Its central assumption is the doubtful part: "the ball is missing in live play and stoppages
+# alike" holds for a ball knocked out at random, as on the IDSSE matches, but probably not for
+# this provider. On its three sample matches the ball is seen on 90% of live frames and 3% of dead
+# ones, and on BAR-ATH the ball goes missing in runs of a median 10.7 s, 1.4 a minute, with the
+# players walking on 64% of those frames against 20% of the frames with the ball in view. The
+# speed clue already carries much of that (missing while the players walk leans D). fit_place,
+# below, counts this table on the match instead; it is not the default because the external
+# matches cannot tell the two apart and nothing we may use on BAR-ATH confirms the fitted one.
+#
+# Columns IN_PLAY, OUTSIDE, MISSING_AFTER_LINE, MISSING_AFTER_PLAY, MISSING_STALE (hmm/clues.py).
+# The ball is missing on 41% of graded frames, and this table takes missing in itself as near
+# neutral (40% live, 55% dead). What separates them:
 # - OUTSIDE: in play the tracked ball crosses a line only by noise or for an instant; when it has
 #   gone out it is often seen past the line, before the tracker drops it or while it is fetched.
 # - MISSING_AFTER_LINE: in play the ball is within 2 m of a line on ~9% of frames, so few dropouts
@@ -109,9 +175,22 @@ FLIGHT_GIVEN_HOME = np.array([0.365, 0.412, 0.146, 0.016, 0.015, 0.006, 0.040])
 # the whole stretch catch no more -- they only stretch the longest stoppages.
 CARRY_SECONDS = 30
 
+# The lowest share fit_place leaves any ball-place category in either row. Without it a category
+# the other clues never saw in live play (a stale ball, on some matches) would rule live play out
+# on its own; with it no single frame's place is worth more than a factor of 1 / PLACE_FLOOR.
+# Not tuned: on the external matches spellF1 over all 10 is 0.521-0.522 for any floor from 0.001
+# to 0.1.
+PLACE_FLOOR = 0.02
+
 # Trust exponent on each frame's clue. At 25 fps neighbouring frames repeat the same look at the
-# ball; 0.1 counts ~10 frames (0.4 s) as one independent observation.
-WEIGHT = 0.1
+# ball; 0.2 counts 5 frames (0.2 s) as one independent observation. v1-v4 used 0.1. Chosen on the
+# 10 external matches, where spellF1 with the v4 clues is 0.443 at 0.1, 0.477 at 0.15, 0.486 at
+# 0.2, 0.489 at 0.3 and 0.474 at 0.5, with both providers peaking between 0.2 and 0.3. 0.2 is the
+# cautious end of that: BAR-ATH's flight clue is noisier than the external one (hmm/ball.py), and
+# a higher weight trusts it more.
+WEIGHT = 0.2
+# What v2-v4 were built and reported with; external/score_hmm.py scores them at it.
+WEIGHT_V4 = 0.1
 
 # Mean possession and stoppage length, and the share of possessions that end in a stoppage
 # rather than going straight to the other team.
@@ -143,9 +222,16 @@ def gap_table():
     return np.log(np.array([GAP_GIVEN_HOME, GAP_GIVEN_HOME[::-1], GAP_GIVEN_DEAD]))
 
 
-def place_table():
-    """log p(ball place | state), states x ball-place categories."""
-    return np.log(np.array([PLACE_GIVEN_LIVE, PLACE_GIVEN_LIVE, PLACE_GIVEN_DEAD]))
+def gap_distance_table(home=GAP_DISTANCE_GIVEN_HOME, dead=GAP_DISTANCE_GIVEN_DEAD):
+    """log p(gap bin, distance bin | state), states x gap-distance categories. A mirrors H."""
+    home = np.ravel(home) / np.sum(home)  # the rounded constants do not sum to exactly 1
+    dead = np.ravel(dead) / np.sum(dead)
+    return np.log(np.array([home, mirror_gap_distance(home), dead]))
+
+
+def place_table(live=PLACE_GIVEN_LIVE, dead=PLACE_GIVEN_DEAD):
+    """log p(ball place | state), states x ball-place categories. H and A share the live row."""
+    return np.log(np.array([live, live, dead]))
 
 
 def speed_table(live=SPEED_GIVEN_LIVE, dead=SPEED_GIVEN_DEAD):
@@ -178,20 +264,102 @@ def pin_dead_before_kickoff(log_emit, lo, hi, kickoffs):
     return log_emit
 
 
-def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS):
+def fit_place(place, other_clues, log_trans, log_start, segments, kickoffs=KICKOFFS,
+              weight=WEIGHT):
+    """(live, dead) p(ball place | state) for one match, counted on the match itself, no labels.
+
+    The other clues -- gap and distance, player speed, flights -- give each frame a probability of
+    being live or dead (forward-backward, with the decoder's transitions and weight). The place
+    categories are then counted with those probabilities as weights. The place clue takes no part
+    in its own labelling and the count is made once, not iterated, so it cannot talk itself into
+    "dead means the ball is missing": it only records how the ball's place lines up with what the
+    players and the ball's motion already say. Each share is at least PLACE_FLOOR.
+
+    Every share quoted here is "ball seen": the in-play and outside categories together, live
+    row against dead row. (main() prints the five categories; in play alone is 2 points lower in
+    each row on BAR-ATH, 83% and 25%.)
+
+    Checked on the external matches, where it is fitted on each match in the same way and the
+    labels give the true shares. On IDSSE, where the ball is knocked out at random, it finds 59%
+    against 56% (true: 59% and 59%), close to the old hand-set table, and the scores do not move.
+    On the Metrica samples it finds 91% against 14% (true: 90% and 3%), and spellF1 rises
+    (0.742 -> 0.774). So where the truth is known the live row is right and the dead row errs
+    towards neutral. On BAR-ATH it finds 85% against 27%.
+
+    Its known bias. On a frame with the ball in view the gap clue pushes towards live; on a frame
+    without it only the players' speed speaks, and at a jog (1.2-1.5 m/s) that leans slightly
+    towards dead. So even a ball lost at random comes out a little more seen in the live row:
+    3 points on IDSSE, and in the worst synthetic case, everyone jogging through gaps of 10 s, 81%
+    against 35% (tests/test_decode.py bounds the ordinary case). How much of BAR-ATH's 85% / 27%
+    is that bias is measured by place_placebo: with the ball's missing pattern shifted in time, so
+    that it keeps its run lengths but no longer lines up with play, the fit returns 58-62% against
+    55-59%.
+
+    What that does and does not show. The placebo shows the table is not made by the fit: on this
+    match the ball really is missing where the other clues say dead. It does not show that those
+    frames are dead. On a frame without the ball the gap and flight clues are silent, so "dead"
+    there means the players are slow and the neighbouring frames agree; if this tracking loses the
+    ball in slow live play, the fit will learn that as dead. The one labelled check does not
+    settle it: in the public window the ball is seen on 93.5% of the 6,031 live frames and 64.6% of
+    the 1,469 dead ones (four stoppages), against 85% and 27% fitted over the match. The window's
+    ball is missing on 12% of frames and the match's on 41%, so the dead row must be lower over
+    the match than in the window, but how much lower depends on the match's true dead share, which
+    we do not have. On the external matches the fitted table, against the hand-set one, is +0.032
+    spellF1 on the Metrica samples (3 of 3 up) and -0.004 on IDSSE (1 of 7 up): +0.007 over all
+    10, with a 5-95% interval over matches of -0.002 to +0.016. On BAR-ATH it finds 3 fewer of
+    the 58 tagged restarts (50 against 53) and 23 blind same-team stoppages against 5. So it is
+    not the default; --fit-place decodes with it.
+    """
+    counts = np.zeros((2, N_PLACES))
+    for lo, hi in segments:
+        log_emit = build_log_emit([(obs[lo:hi], table, weight) for obs, table in other_clues])
+        pin_dead_before_kickoff(log_emit, lo, hi, kickoffs)
+        post, _, _ = forward_backward(log_emit, log_trans, log_start)
+        np.add.at(counts[0], place[lo:hi], post[:, H] + post[:, A])
+        np.add.at(counts[1], place[lo:hi], post[:, D])
+    shares = np.maximum(counts / counts.sum(axis=1, keepdims=True), PLACE_FLOOR)
+    shares /= shares.sum(axis=1, keepdims=True)
+    return shares[0], shares[1]
+
+
+def place_placebo(gap, place, speed, flight, log_trans, log_start, segments, kickoffs=KICKOFFS,
+                  minutes=(3, 7, 13, 21, 29)):
+    """[(minutes, seen given live, seen given dead)]: fit_place with the ball's place shifted by
+    that many minutes inside each half, wrapping round. A shifted ball goes missing in runs as
+    long as the real one's but at moments unrelated to play, so any gap between the two shares is
+    fit_place's bias on this match, not something about its tracking. The gap and flight clues are
+    hidden wherever the shifted ball is missing, as they would be. Each half is taken from its
+    kickoff, so the frames pinned dead before one are left out. (On a frame where the shifted ball
+    is seen and the real one was not, there is no gap to read, so the live push is a little weaker
+    than in the real fit and the bias is, if anything, understated.)"""
+    play = [(max([lo] + [k for k in kickoffs if lo < k < hi]), hi) for lo, hi in segments]
+    out = []
+    for shift in minutes:
+        moved = place.copy()
+        for lo, hi in play:
+            moved[lo:hi] = np.roll(place[lo:hi], int(round(shift * 60 * FPS)))
+        missing = moved >= MISSING_AFTER_LINE
+        others = [(np.where(missing, -1, gap), gap_distance_table()), (speed, speed_table()),
+                  (np.where(missing, -1, flight), flight_table())]
+        live, dead = fit_place(moved, others, log_trans, log_start, play, kickoffs=())
+        out.append((shift, live[:MISSING_AFTER_LINE].sum(), dead[:MISSING_AFTER_LINE].sum()))
+    return out
+
+
+def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIGHT):
     """Labels for every video frame: one Viterbi path per half, X everywhere else.
 
     clues is a list of (obs, log_table), each obs covering every video frame."""
     labels = np.full(len(clues[0][0]), "X", dtype="<U1")
     for lo, hi in segments:
-        log_emit = build_log_emit([(obs[lo:hi], table, WEIGHT) for obs, table in clues])
+        log_emit = build_log_emit([(obs[lo:hi], table, weight) for obs, table in clues])
         pin_dead_before_kickoff(log_emit, lo, hi, kickoffs)
         labels[lo:hi] = STATES[viterbi(log_emit, log_trans, log_start)]
     return labels
 
 
 def load_observations(game=GAME, data_dir=None):
-    """(gap, place, speed, flight) categories for every video frame."""
+    """(gap-distance, place, speed, flight) categories for every video frame."""
     meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
     n_frames = source_frames("tactical", game)
     print("reading {} (cached after the first run) ...".format(os.path.basename(raw_path)))
@@ -211,7 +379,7 @@ def load_observations(game=GAME, data_dir=None):
         print("WARNING: the keeper rule moved no frames -- it fell back to the metadata's teams. "
               "Check the keeper slots and that the teams switch ends.", file=sys.stderr)
     usable = ball_is_usable(ball_x, ball_y, pitch)
-    gap = gap_category(usable, d_home, d_away)
+    gap = gap_distance_category(usable, d_home, d_away)
     place = ball_place_category(ball_x, ball_y, pitch, CARRY_SECONDS * FPS)
     # the flights use the same usable ball as the gap clue: a spare ball far outside is no flight
     flight, touches = flight_clue(np.where(usable, ball_x, np.nan),
@@ -227,8 +395,8 @@ FLIGHT_NAMES = ["H<0.5s", "H<1.5s", "H>=1.5s", "A<0.5s", "A<1.5s", "A>=1.5s", "u
 
 
 def report_shares(obs, names, what, segments):
-    """Share of each category over the graded frames: label-free, a check on the PLACE_GIVEN_* and
-    SPEED_GIVEN_* tables (mixed at the decoded D share they should land near these)."""
+    """Share of each category over the graded frames: label-free, a check on the fitted place
+    table and on SPEED_GIVEN_* (mixed at the decoded D share they should land near these)."""
     graded = np.concatenate([obs[lo:hi] for lo, hi in segments])
     print("{} on graded frames: ".format(what) + "  ".join(
         "{} {:.1%}".format(name, np.mean(graded == k)) for k, name in enumerate(names)))
@@ -249,9 +417,76 @@ def summarise(labels, segments):
         for name, spells in (("possessions", possessions), ("stoppages", stoppages)):
             if len(spells):
                 print("  {:>4} {:<11} median {:5.1f} s  mean {:5.1f} s  p90 {:5.1f} s  "
-                      "max {:5.0f} s".format(len(spells), name, *(np.array(
-                          [np.median(spells), spells.mean(), np.percentile(spells, 90),
-                           spells.max()]) / FPS)))
+                      "max {:5.0f} s  under 2 s {:.0%}  under 4 s {:.0%}".format(
+                          len(spells), name, *(np.array(
+                              [np.median(spells), spells.mean(), np.percentile(spells, 90),
+                               spells.max()]) / FPS),
+                          np.mean(spells < 2 * FPS), np.mean(spells < 4 * FPS)))
+
+
+def dead_runs(labels, place, segments):
+    """Every decoded stoppage inside the halves, as a dict of per-stoppage arrays:
+
+    start, stop     frames, stop exclusive
+    same_team       the same team has the ball just before and just after it
+    blind           the ball is missing on every frame of it
+    into_missing    seconds between the ball going missing and the stoppage starting; NaN if the
+                    ball is in view on its first frame
+
+    A blind stoppage with the same team on both sides is where a wrong "missing means dead" would
+    show: one possession cut in two by a ball lost in play. It is also what a real stoppage with
+    the ball out of view looks like when the same team restarts (a free kick, a goal kick after a
+    back-pass), so the count is an upper bound on the splits, not a count of errors."""
+    missing = place >= MISSING_AFTER_LINE
+    frames = np.arange(len(labels))
+    seen_before = np.maximum.accumulate(np.where(missing, -1, frames))  # last frame with the ball
+    out = {k: [] for k in ("start", "stop", "same_team", "blind", "into_missing")}
+    for lo, hi in segments:
+        seg = labels[lo:hi]
+        edges = np.concatenate(([0], np.flatnonzero(seg[1:] != seg[:-1]) + 1, [len(seg)]))
+        for a, b in zip(edges[:-1], edges[1:]):
+            if seg[a] != "D":
+                continue
+            before = seg[a - 1] if a > 0 else ""
+            after = seg[b] if b < len(seg) else ""
+            out["start"].append(lo + a)
+            out["stop"].append(lo + b)
+            out["same_team"].append(before == after and before in ("H", "A"))
+            out["blind"].append(bool(missing[lo + a:lo + b].all()))
+            out["into_missing"].append((lo + a - seen_before[lo + a] - 1) / FPS
+                                       if missing[lo + a] else np.nan)
+    return {k: np.array(v) for k, v in out.items()}
+
+
+def report_dead_runs(labels, place, segments, tags=None):
+    """Label-free checks on the decoded stoppages (dead_runs), and against the Smart Tagging set
+    pieces if given: Metrica's automatic tags, not ground truth, and they miss about half of a
+    match's restarts, so a stoppage without one is not thereby wrong."""
+    runs = dead_runs(labels, place, segments)
+    n = len(runs["start"])
+    split = runs["blind"] & runs["same_team"]
+    with np.errstate(invalid="ignore"):
+        late = runs["into_missing"] > 2
+    print("{} stoppages: {} blind (ball missing throughout), {} same team before and after, "
+          "{} both; {} start more than 2 s into a missing ball".format(
+              n, int(runs["blind"].sum()), int(runs["same_team"].sum()), int(split.sum()),
+              int(late.sum())))
+    if not tags:
+        return
+    graded = np.zeros(len(labels), dtype=bool)
+    for lo, hi in segments:
+        graded[lo:hi] = True
+    pieces = [(t["start_frame"], t["end_frame"]) for t in tags if t["code"].lower() == "set pieces"
+              and graded[min(t["start_frame"], len(graded) - 1)]]
+    restarts = runs["stop"]  # the first live frame after each stoppage
+    found = sum(bool(np.any((restarts >= a - 2 * FPS) & (restarts <= b + 2 * FPS)))
+                for a, b in pieces)
+    tagged = np.array([any(a - 5 * FPS <= r <= b + 5 * FPS for a, b in pieces) for r in restarts])
+    print("Smart Tagging: a decoded restart within 2 s of {} of the {} tagged set pieces. "
+          "No tagged set piece within 5 s of their end: {} of all {} stoppages, {} of the {} "
+          "that start more than 2 s into a missing ball, {} of the {} blind same-team ones".format(
+              found, len(pieces), int(np.sum(~tagged)), n, int(np.sum(late & ~tagged)),
+              int(late.sum()), int(np.sum(split & ~tagged)), int(split.sum())))
 
 
 def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
@@ -265,7 +500,7 @@ def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
                                                 weight=weight, segments=segments)
     print("\nBaum-Welch, {} iterations, emission weight {}, log-likelihood {:.0f} -> {:.0f}".format(
         n_iter, weight, history[0], history[-1]))
-    gap_names = ["gap{}".format(i) for i in range(N_GAP_BINS)]
+    gap_names = ["g{}d{}".format(g, d) for g in range(N_GAP_BINS) for d in range(N_DISTANCE_BINS)]
     for names, (_, log_table), fit_table in zip((gap_names, PLACE_NAMES, SPEED_NAMES,
                                                  FLIGHT_NAMES), clues,
                                                 fit_tables):
@@ -286,7 +521,17 @@ def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", default=os.path.join(RESULTS_DIR, "hmm_v4.csv"))
+    parser.add_argument("--out", help="default evaluation/results/hmm_v5.csv, with the "
+                        "variant flags in the name if any is set")
+    parser.add_argument("--weight", type=float, default=WEIGHT,
+                        help="emission weight (v5: {}, v4: {})".format(WEIGHT, WEIGHT_V4))
+    parser.add_argument("--hand-gap", action="store_true",
+                        help="ablation: v4's hand-set gap table, without the distance")
+    parser.add_argument("--fit-place", action="store_true",
+                        help="count the ball-place table on the match (fit_place) instead of "
+                             "using the hand-set one")
+    parser.add_argument("--placebo", action="store_true",
+                        help="also fit the place table to a ball shifted in time (place_placebo)")
     parser.add_argument("--baum-welch", type=int, nargs="?", const=20, default=0,
                         metavar="N_ITER", help="also run unsupervised EM as a check")
     parser.add_argument("--bw-weight", type=float, default=1.0, metavar="W",
@@ -299,14 +544,38 @@ def main():
     report_shares(place, PLACE_NAMES, "ball place", segments)
     report_shares(speed, SPEED_NAMES, "player speed (m/s)", segments)
     report_shares(flight, FLIGHT_NAMES, "flight", segments)
-    clues = [(gap, gap_table()), (place, place_table()), (speed, speed_table()),
-             (flight, flight_table())]
     log_trans = transitions()
+    gap_clue = (gap, gap_distance_table())
+    if args.hand_gap:  # the gap bin alone is the category's row in the gap x distance grid
+        gap_clue = (np.where(gap >= 0, gap // N_DISTANCE_BINS, -1).astype(np.int8), gap_table())
+    others = [gap_clue, (speed, speed_table()), (flight, flight_table())]
+    live, dead = PLACE_GIVEN_LIVE, PLACE_GIVEN_DEAD
+    if args.fit_place or args.placebo:
+        fitted = fit_place(place, others, log_trans, np.log(START), segments, weight=args.weight)
+        if args.fit_place:
+            live, dead = fitted
+    for name, row in (("live", live), ("dead", dead)):
+        print("ball place given {}, {}: ".format(name, "fitted" if args.fit_place else "by hand")
+              + "  ".join("{} {:.1%}".format(n, p) for n, p in zip(PLACE_NAMES, row)))
+    # gap, place, speed, flight: the order report_baum_welch names them in
+    clues = [others[0], (place, place_table(live, dead))] + others[1:]
 
-    labels = decode(clues, log_trans, np.log(START), segments)
-    path = write_submission(args.out, labels)
+    labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight)
+    ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),
+                                           ("_handgap", args.hand_gap),
+                                           ("_fitplace", args.fit_place)) if on)
+    path = write_submission(
+        args.out or os.path.join(RESULTS_DIR, "hmm_v5{}.csv".format(ablation)), labels)
     print("-> {}".format(os.path.relpath(path, ROOT)))
     summarise(labels, segments)
+    report_dead_runs(labels, place, segments, load_smart_tagging())
+
+    if args.placebo:
+        print("ball seen given live / dead, fitted: {:.1%} / {:.1%}; with the ball shifted "
+              "by".format(*(row[:MISSING_AFTER_LINE].sum() for row in fitted)))
+        for shift, seen_live, seen_dead in place_placebo(gap, place, speed, flight, log_trans,
+                                                         np.log(START), segments):
+            print("  {:2d} min: {:.1%} / {:.1%}".format(shift, seen_live, seen_dead))
 
     if args.baum_welch:
         report_baum_welch(clues, log_trans, segments, args.baum_welch, args.bw_weight)

@@ -1,5 +1,6 @@
-"""Per-frame clues from the raw ATD. Three of them, each an int category per frame, -1 for "nothing
-observed" (which the emission model skips):
+"""Per-frame clues from the raw ATD. Three of them (the fourth, the ball's flights, is in
+hmm/ball.py), each an int category per frame, -1 for "nothing observed" (which the emission model
+skips):
 
 1. The nearest-player gap, for who has the ball:
 
@@ -16,6 +17,11 @@ observed" (which the emission model skips):
    slots stand on average over the half. "Near" is within KEEPER_ZONE of the goal line: a keeper
    further out (sweeping, up for a late corner), or a keeper slot carried onto an outfield player,
    keeps the metadata's team.
+
+   Since v5 the decoder reads the gap together with how far the nearer of those two players is
+   from the ball (gap_distance_category). The same gap says more when a player is on the ball than
+   when the nearest one is 6 m away, and a ball with nobody near it is itself a sign of a
+   stoppage.
 
 2. Where the ball is, for whether it is in play. A ball seen clearly past a line is out of play.
    A missing ball is not evidence on its own -- the tracking loses it in open play all the time --
@@ -49,6 +55,13 @@ CLUES_VERSION = 6
 # Bin edges on the gap, in metres. Right-inclusive: (-inf, -3], (-3, -1], (-1, 1], (1, 3], (3, inf).
 GAP_EDGES = np.array([-3.0, -1.0, 1.0, 3.0])
 N_GAP_BINS = len(GAP_EDGES) + 1
+# Bin edges on the distance from the ball to the nearest player of either team, in metres: on the
+# ball, within a stride or two, close by, nobody near. Right-open: [0, 1), [1, 2.5), [2.5, 5),
+# [5, inf). Football reasoning, set once. Checked afterwards on the external matches: with edges
+# from (0.5, 1.5, 3) to (2, 4, 8) spellF1 over all 10 stays within 0.521-0.524.
+DISTANCE_EDGES = np.array([1.0, 2.5, 5.0])
+N_DISTANCE_BINS = len(DISTANCE_EDGES) + 1
+N_GAP_DISTANCE = N_GAP_BINS * N_DISTANCE_BINS
 
 # Ball-place categories.
 IN_PLAY = 0             # seen, on the pitch or within OUT_MARGIN of a line
@@ -281,6 +294,25 @@ def gap_category(usable, d_home, d_away):
     cats = np.digitize(np.nan_to_num(gap), GAP_EDGES, right=True).astype(np.int8)
     cats[np.isnan(gap) | ~usable] = -1
     return cats
+
+
+def gap_distance_category(usable, d_home, d_away):
+    """Category per frame: gap bin * N_DISTANCE_BINS + distance bin, where the distance is from the
+    ball to the nearest player of either team. -1 wherever gap_category is."""
+    gap = gap_category(usable, d_home, d_away)
+    nearest = np.fmin(d_home, d_away)
+    cats = gap.astype(np.int8) * N_DISTANCE_BINS + np.digitize(np.nan_to_num(nearest),
+                                                              DISTANCE_EDGES).astype(np.int8)
+    cats[gap < 0] = -1
+    return cats
+
+
+def mirror_gap_distance(table):
+    """The same categories with home and away swapped: the gap bins reversed, the distance bins
+    kept. Works on the last axis, for a table or for counts."""
+    table = np.asarray(table)
+    by_gap = table.reshape(table.shape[:-1] + (N_GAP_BINS, N_DISTANCE_BINS))
+    return by_gap[..., ::-1, :].reshape(table.shape)
 
 
 def ball_place_category(ball_x, ball_y, pitch, carry_frames):
