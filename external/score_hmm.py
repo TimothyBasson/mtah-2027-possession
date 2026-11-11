@@ -1,19 +1,33 @@
 """Score the HMM decoders (hmm/) and the smooth50 baseline on the out-of-sample matches.
 
-    python external/score_hmm.py [--seen 0.59] [--tables]
+    python external/score_hmm.py [--seen 0.59] [--tables] [--sets idsse,metrica,skillcorner]
 
 --seen    as in score.py: knock the IDSSE ball out in random ~2 s runs until it is seen this share
           of frames (ours: 59%). The Metrica samples already lose the ball like ours does and are
-          left alone. 1.0 scores IDSSE with the ball always seen.
+          left alone. 1.0 scores IDSSE with the ball always seen. SkillCorner's ball is topped up
+          the same way, with the share measured on its labelled frames (about 80% as recorded), so
+          1.0 scores it as recorded too.
 
---tables  also print the gap-distance table counted over both providers, each counting once: the
-          constants in hmm/decode.py.
+--tables  also print the gap-distance table counted over IDSSE and Metrica, each counting once,
+          and the width table counted over all three sets, each counting once: the constants in
+          hmm/decode.py.
+
+--sets    score only these sets. The tables are counted the same way whichever sets are scored.
 
 hmm_v3's speed table, hmm_v4's flight table and hmm_v5's gap-distance table are counted from the
 labelled external matches, so scoring them on the same matches would be in-sample. Here each
 provider is scored with the tables counted on the *other* provider only (IDSSE with Metrica's,
 Metrica with IDSSE's). hmm_v2 to v4 are scored at the emission weight they were built with (0.1),
 hmm_v5 at the decoder's. Prints aggregates only.
+
+hmm_v6 is hmm_v5 plus the width clue at the decoder's WIDTH_WEIGHT. Its width table is counted on
+the labels of the other sets only, each of them counting once.
+
+SkillCorner is a held-out set. Its speed, flight and gap-distance tables are the decoder's shipped
+constants, which were counted on IDSSE and Metrica only, and its width table is counted on IDSSE
+and Metrica. It is never used to count the speed, flight or gap-distance tables of the other two.
+It is not graded on broadcast cutaways, so its level is not comparable with theirs and the means
+are printed per set.
 
 The step between v4 and v5 is scored as well, so that v5's two changes can be told apart, and so
 is the variant that is not the default:
@@ -39,11 +53,14 @@ import hmm.decode as dec  # noqa: E402
 from hmm.ball import N_FLIGHT_CATS, flight_clue, mirror_flight  # noqa: E402
 from hmm.clues import (  # noqa: E402
     N_DISTANCE_BINS, N_GAP_BINS, N_GAP_DISTANCE, N_SPEED_BINS, ball_is_usable, ball_place_category,
-    gap_category, gap_distance_category, median_player_speed, mirror_gap_distance, speed_category)
+    N_WIDTH_BINS, gap_category, gap_distance_category, median_player_speed, mirror_gap_distance,
+    speed_category, team_width_difference, width_category)
 from score import drop_ball  # noqa: E402
 from starter.baseline import smooth  # noqa: E402
 
-PROVIDERS = ("idsse", "metrica")
+PROVIDERS = ("idsse", "metrica")  # each scored with the other's speed, flight and gap tables
+HELD_OUT = "skillcorner"          # scored with the decoder's shipped constants
+SETS = PROVIDERS + (HELD_OUT,)
 
 
 def nearest_by_team(players, ball, team):
@@ -111,9 +128,35 @@ def gap_distance_given_state(matches, balls):
     return home / home.sum(), dead / dead.sum()
 
 
-def predict(d, ball, speed_table, flight_table=None, gap_distance_table=None):
+def width_cats(d):
+    """Width-clue categories for a match. They read the players only, never the ball."""
+    return width_category(team_width_difference(d["players"][:, :, 1], d["team"]))
+
+
+def width_given_state(d):
+    """(home, dead) p(width category | state) on one match's own labels. Away frames count
+    mirrored into the home row (bins reversed), and dead frames count both ways round, so neither
+    row favours a team."""
+    cats, gt = width_cats(d), d["labels"]
+    count = lambda sel: np.bincount(cats[sel & (cats >= 0)],  # noqa: E731
+                                    minlength=N_WIDTH_BINS).astype(float)
+    home = count(gt == "H") + count(gt == "A")[::-1]
+    dead = count(gt == "D") + count(gt == "D")[::-1]
+    return home / home.sum(), dead / dead.sum()
+
+
+def width_over_sets(shares, sets):
+    """(home, dead) rows over these sets, each set counting once: the mean of its matches' shares,
+    then the mean over the sets."""
+    home, dead = np.mean([np.mean([s for n, s in shares.items() if n.startswith(k)], axis=0)
+                          for k in sets], axis=0) + 1e-3
+    return home / home.sum(), dead / dead.sum()
+
+
+def predict(d, ball, speed_table, flight_table=None, gap_distance_table=None, width_table=None):
     """smooth50, hmm_v2 and hmm_v3 labels for one match, hmm_v4 (v3 plus the flight clue) with a
-    flight_table, and hmm_v4w, hmm_v5 and hmm_v5fit with a gap_distance_table as well."""
+    flight_table, hmm_v4w, hmm_v5 and hmm_v5fit with a gap_distance_table as well, and hmm_v6 (v5
+    plus the width clue) with a width_table on top of those."""
     players, team = d["players"], d["team"]
     pitch = tuple(float(v) for v in d["pitch"])
     fps = int(d["fps"])
@@ -146,6 +189,10 @@ def predict(d, ball, speed_table, flight_table=None, gap_distance_table=None):
         out["hmm_v4w"] = dec.decode(variants[-1][1], trans, start, segments, kickoffs=())
         out["hmm_v5"] = dec.decode(others + [(place, dec.place_table())], trans, start, segments,
                                    kickoffs=())
+        if width_table is not None:
+            out["hmm_v6"] = dec.decode(others + [(place, dec.place_table())], trans, start,
+                                       segments, kickoffs=(),
+                                       extra=[(width_cats(d), width_table, dec.WIDTH_WEIGHT)])
         live, dead = dec.fit_place(place, others, trans, start, segments, kickoffs=())
         out["hmm_v5fit"] = dec.decode(others + [(place, dec.place_table(live, dead))], trans,
                                       start, segments, kickoffs=())
@@ -168,20 +215,45 @@ def score(gt, pred):
 COLUMNS = "spellF1 macroF1 alive/dead team_acc D_F1 pred_D possessions".split()
 
 
+def print_table(rows, n_columns):
+    for line in np.reshape(rows, (-1, n_columns)):
+        print("    [" + ", ".join("{:.3f}".format(p) for p in line) + "],")
+
+
+def load(path):
+    return dict(np.load(path))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--seen", type=float, default=0.59)
     ap.add_argument("--tables", action="store_true",
-                    help="print the gap-distance table counted over both providers")
+                    help="print the gap-distance and width tables behind the decoder's constants")
+    ap.add_argument("--sets", default=",".join(SETS), help="comma-separated sets to score")
     a = ap.parse_args()
-    paths = [p for p in sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
-             if os.path.basename(p).startswith(PROVIDERS)]  # cross-provider tables need a pair
-    matches = {os.path.basename(p)[:-4]: dict(np.load(p)) for p in paths}
+    scored = tuple(k for k in SETS if k in a.sets.split(","))
+    paths = {os.path.basename(p)[:-4]: p
+             for p in sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
+             if os.path.basename(p).startswith(SETS)}
+
+    def ball_of(name, d):
+        if name.startswith("idsse"):
+            return drop_ball(d["ball"], a.seen, int(d["fps"]))
+        if name.startswith(HELD_OUT):  # seen share measured on labelled frames, as in score.py
+            return drop_ball(d["ball"], a.seen, int(d["fps"]), labels=d["labels"])
+        return d["ball"]
+
+    # The held-out matches are not kept in memory: only their width shares are, for the others.
+    matches, width_shares = {}, {}
+    for name, path in paths.items():
+        d = load(path)
+        width_shares[name] = width_given_state(d)
+        if name.startswith(PROVIDERS):
+            matches[name] = d
     by_provider = {k: [d for n, d in matches.items() if n.startswith(k)] for k in PROVIDERS}
     tables = {k: dec.speed_table(*speed_given_state(by_provider[o]))
               for k, o in zip(PROVIDERS, PROVIDERS[::-1])}
-    balls = {n: drop_ball(d["ball"], a.seen, int(d["fps"])) if n.startswith("idsse") else d["ball"]
-             for n, d in matches.items()}
+    balls = {n: ball_of(n, d) for n, d in matches.items()}
     flight_tables, gap_distance, gap_distance_tables = {}, {}, {}
     for k, o in zip(PROVIDERS, PROVIDERS[::-1]):
         names = [n for n in matches if n.startswith(o)]
@@ -190,25 +262,44 @@ def main():
         gap_distance[o] = gap_distance_given_state(
             [matches[n] for n in names], [balls[n] for n in names])
         gap_distance_tables[k] = dec.gap_distance_table(*gap_distance[o])
+    tables[HELD_OUT] = dec.speed_table()
+    flight_tables[HELD_OUT] = dec.flight_table()
+    gap_distance_tables[HELD_OUT] = dec.gap_distance_table()
+    # Width: never counted on the set being scored.
+    width_tables = {k: dec.width_table(*width_over_sets(width_shares, [o for o in SETS if o != k]))
+                    for k in SETS}
     if a.tables:
         for row, name in enumerate(("H", "D")):
             both = np.mean([gap_distance[k][row] for k in PROVIDERS], axis=0)
             print("p(gap bin, distance bin | {}), each provider counting once; the providers "
                   "differ by at most {:.3f}:".format(name, np.max(np.abs(
                       gap_distance[PROVIDERS[0]][row] - gap_distance[PROVIDERS[1]][row]))))
-            for line in both.reshape(N_GAP_BINS, N_DISTANCE_BINS):
-                print("    [" + ", ".join("{:.3f}".format(p) for p in line) + "],")
+            print_table(both, N_DISTANCE_BINS)
+        every = width_over_sets(width_shares, SETS)
+        per_set = [width_over_sets(width_shares, [k]) for k in SETS]
+        for row, (name, shipped) in enumerate((("H", dec.WIDTH_GIVEN_HOME),
+                                               ("D", dec.WIDTH_GIVEN_DEAD))):
+            print("p(width bin | {}), each of the {} sets counting once; no set is further than "
+                  "{:.3f} from it, and hmm/decode.py's constants are within {:.3f}:".format(
+                      name, len(SETS), max(np.max(np.abs(s[row] - every[row])) for s in per_set),
+                      np.max(np.abs(every[row] - shipped / shipped.sum()))))
+            print_table(every[row], N_WIDTH_BINS)
 
-    rows = {}
-    for name, d in matches.items():
+    rows, truth = {}, {}
+    for name, path in paths.items():
         provider = name.split("_")[0]
-        ball = balls[name]
+        if provider not in scored:
+            continue
+        d = matches.get(name) or load(path)
+        ball = balls[name] if name in balls else ball_of(name, d)
         gt = d["labels"]
         graded = gt != "X"
+        truth[name] = possessions(gt)
         print("\n{}: ball seen {:.0%}, truth D {:.0%}, {} possessions".format(
-            name, np.isfinite(ball[graded, 0]).mean(), np.mean(gt[graded] == "D"), possessions(gt)))
+            name, np.isfinite(ball[graded, 0]).mean(), np.mean(gt[graded] == "D"), truth[name]),
+            flush=True)
         for model, pred in predict(d, ball, tables[provider], flight_tables[provider],
-                                   gap_distance_tables[provider]).items():
+                                   gap_distance_tables[provider], width_tables[provider]).items():
             pred[~graded] = "X"
             r = score(gt, pred)
             rows.setdefault(model, {})[name] = r
@@ -216,16 +307,27 @@ def main():
                 "{} {:.3f}".format(c, v) for c, v in zip(COLUMNS[:5], r[:5]))
                 + "  pred D {:.0%}  possessions {}".format(r[5], r[6]))
 
-    for group in PROVIDERS + ("",):
-        names = [n for n in matches if n.startswith(group)]
-        truth = np.mean([possessions(matches[n]["labels"]) for n in names])
+    # One mean per set. SkillCorner is not graded on cutaways, so it is never pooled with the rest.
+    groups = [(k, (k,)) for k in scored]
+    if all(k in scored for k in PROVIDERS):
+        groups.append((" + ".join(PROVIDERS), PROVIDERS))
+    for title, sets in groups:
+        names = [n for n in truth if n.startswith(sets)]
         print("\nmean over {} ({} matches, {:.0f} true possessions):".format(
-            group or "all", len(names), truth))
+            title, len(names), np.mean([truth[n] for n in names])))
         for model, by_match in rows.items():
             m = np.mean([by_match[n] for n in names], axis=0)
             print("  {:9s} ".format(model) + "  ".join(
                 "{} {:.3f}".format(c, v) for c, v in zip(COLUMNS[:5], m[:5]))
                 + "  pred D {:.0%}  possessions {:.0f}".format(m[5], m[6]))
+
+    print("\nhmm_v6 - hmm_v5 in spellF1, paired by match:")
+    for k in scored:
+        names = [n for n in truth if n.startswith(k)]
+        diff = np.array([rows["hmm_v6"][n][0] - rows["hmm_v5"][n][0] for n in names])
+        print("  {:11s} mean {:+.3f}  standard error {:.3f}  worst match {:+.3f}  up on {} of {}"
+              .format(k, diff.mean(), diff.std(ddof=1) / np.sqrt(len(diff)), diff.min(),
+                      int(np.sum(diff > 0)), len(diff)))
 
 
 if __name__ == "__main__":
