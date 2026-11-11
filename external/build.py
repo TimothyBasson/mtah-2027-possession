@@ -163,7 +163,96 @@ def subtype(r):
     return "-".join(x["name"] for x in s) if isinstance(s, list) else s["name"]
 
 
+# -- SkillCorner open data (A-League 2024-25, broadcast tracking, 10 fps) ---------------------
+
+SC_FPS, FPS = 10, 25
+
+
+def skillcorner_labels(group, alive, phase_team):
+    """Per source frame. Dead outside a phase of play. Inside, the possession group, held through
+    frames where SkillCorner names nobody (passes, loose balls); the phase's team until one is named.
+    group, phase_team: 0 home, 1 away, -1 none."""
+    labels = np.full(len(group), "D", "<U1")
+    last = -1
+    for i in range(len(group)):
+        if not alive[i]:
+            last = -1
+            continue
+        if group[i] >= 0:
+            last = group[i]
+        labels[i] = "HA"[last if last >= 0 else phase_team[i]]
+    return labels
+
+
+def resample(x, n):
+    """10 fps -> 25 fps by linear interpolation along axis 0; NaN wherever a neighbour is NaN."""
+    t = np.arange(n) * SC_FPS / FPS
+    i = np.minimum(t.astype(int), len(x) - 2)
+    w = (t - i).reshape((-1,) + (1,) * (x.ndim - 1)).astype(np.float32)
+    return x[i] * (1 - w) + x[i + 1] * w
+
+
+def build_skillcorner():
+    base = os.path.join(RAW, "skillcorner")
+    for mid in sorted(json.load(open(os.path.join(base, "matches.json"))), key=lambda m: m["id"]):
+        mid = str(mid["id"])
+        d = os.path.join(base, mid)
+        info = json.load(open(os.path.join(d, f"{mid}_match.json")))
+        home = info["home_team"]["id"]
+        pitch = np.array([info["pitch_length"], info["pitch_width"]], float)
+        roster = sorted(info["players"], key=lambda p: (p["team_id"] != home, p["id"]))
+        col = {p["id"]: k for k, p in enumerate(roster)}
+        team = np.array([p["team_id"] != home for p in roster], np.int8)
+
+        rows = [json.loads(line) for line in open(os.path.join(d, f"{mid}_tracking_extrapolated.jsonl"))]
+        n = rows[-1]["frame"] + 1
+        assert [r["frame"] for r in rows] == list(range(n)), f"{mid}: frames not contiguous"
+        xy = np.full((n, len(roster), 2), np.nan, np.float32)
+        ball = np.full((n, 2), np.nan, np.float32)
+        period = np.zeros(n, int)
+        group = np.full(n, -1, np.int8)
+        for f, r in enumerate(rows):
+            period[f] = r["period"] or 0
+            group[f] = {"home team": 0, "away team": 1}.get(r["possession"]["group"], -1)
+            b = r["ball_data"]
+            if b.get("is_detected") and b["x"] is not None:  # extrapolated ball is a guess: our ATD has none
+                ball[f] = b["x"], b["y"]
+            for p in r["player_data"] or ():  # off-camera players are extrapolated; ours are ~always tracked
+                if p["x"] is not None:
+                    xy[f, col[p["player_id"]]] = p["x"], p["y"]
+        xy += pitch / 2  # centre origin -> corner
+        ball += pitch / 2
+
+        ph = pd.read_csv(os.path.join(d, f"{mid}_phases_of_play.csv"))
+        alive = np.zeros(n, bool)
+        phase_team = np.zeros(n, np.int8)
+        for s, e, t in zip(ph.frame_start, ph.frame_end, ph.team_in_possession_id):
+            alive[s:e + 1] = True
+            phase_team[s:e + 1] = t != home
+        lab10 = skillcorner_labels(group, alive, phase_team)
+
+        parts, halves, start = [], [], 0
+        for k in (1, 2):
+            sel = np.flatnonzero(period == k)
+            sel = np.arange(sel[0], sel[-1] + 1)
+            m = (len(sel) - 1) * FPS // SC_FPS + 1
+            parts.append((resample(xy[sel], m), resample(ball[sel], m),
+                          lab10[sel][np.arange(m) * SC_FPS // FPS]))
+            halves.append((start, start + m - 1))
+            start += m
+        pxy, bxy, labels = (np.concatenate(p) for p in zip(*parts))
+        # Broadcast cutaways (replays, close-ups) track nobody: ~half the dead frames. Our tactical
+        # feed never goes blank, so these are ungraded, not free dead-ball points.
+        labels[~np.isfinite(pxy[..., 0]).any(1)] = "X"
+        players = np.concatenate([pxy, speed(pxy, FPS)[..., None]], -1)
+        ball = np.concatenate([bxy, speed(bxy, FPS)[:, None]], -1)
+        # halves are stacked back to back, so the 5-frame speed lag reaches across the join
+        for s, _ in halves[1:]:
+            players[s:s + 5, :, 2] = ball[s:s + 5, 2] = np.nan
+        save(f"skillcorner_{mid}", players, ball, team, labels, np.array(halves), pitch, FPS)
+
+
 if __name__ == "__main__":
-    which = sys.argv[1:] or ["idsse", "metrica"]
+    which = sys.argv[1:] or ["idsse", "metrica", "skillcorner"]
     for w in which:
-        {"idsse": build_idsse, "metrica": build_metrica}[w]()
+        {"idsse": build_idsse, "metrica": build_metrica, "skillcorner": build_skillcorner}[w]()

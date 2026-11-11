@@ -129,7 +129,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--seen", type=float, default=0.59)
     a = ap.parse_args()
-    paths = sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
+    paths = [p for p in sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
+             if os.path.basename(p).startswith(PROVIDERS)]  # cross-provider tables need a pair
     matches = {os.path.basename(p)[:-4]: dict(np.load(p)) for p in paths}
     by_provider = {k: [d for n, d in matches.items() if n.startswith(k)] for k in PROVIDERS}
     tables = {k: dec.speed_table(*speed_given_state(by_provider[o]))

@@ -23,10 +23,12 @@ sys.path.insert(0, os.path.join(ROOT, "evaluation"))
 import possession_metrics as pm  # noqa: E402
 
 
-def drop_ball(ball, seen, fps, seed=0):
+def drop_ball(ball, seen, fps, seed=0, labels=None):
     """Two-state on/off runs with ~2 s mean gaps, so the ball vanishes in stretches, not frames.
-    Only tops up what is already missing: a match at or below `seen` is left alone."""
-    seen = seen / np.isfinite(ball[:, 0]).mean()
+    Only tops up what is already missing: a match at or below `seen` is left alone. With labels,
+    `seen` is measured on labelled frames: SkillCorner loses the ball in its unlabelled cutaways."""
+    graded = slice(None) if labels is None else labels != "X"
+    seen = seen / np.isfinite(ball[graded, 0]).mean()
     if seen >= 1:
         return ball
     rng = np.random.default_rng(seed)
@@ -80,7 +82,7 @@ def main():
         features.PITCH = model.PITCH = tuple(d["pitch"])
         model.HALVES = halves
         model.graded_mask = lambda n, m=mask: m
-        F = frames(d["players"], drop_ball(d["ball"], a.seen, model.FPS), d["team"], features)
+        F = frames(d["players"], drop_ball(d["ball"], a.seen, model.FPS, labels=d["labels"]), d["team"], features)
         pred = model.predict(F, params)
         r = pm.evaluate(pm.label_codes(d["labels"]), pm.label_codes(pred), bootstrap_n=0)
         name = os.path.basename(path)[:-4]

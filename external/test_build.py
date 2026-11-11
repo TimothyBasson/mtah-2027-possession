@@ -13,3 +13,15 @@ ev = [  # (team, type, subtype, start, end)
 got = "".join(metrica_labels(ev, {f: f for f in range(13)}, [(1, 12)]))
 assert got == "XDHHHHAADDDHH", got
 print("ok")
+
+from build import resample, skillcorner_labels
+import numpy as np
+
+g = np.array([-1, 0, -1, -1, 1, -1, -1, -1])   # who SkillCorner names per frame
+alive = np.array([0, 1, 1, 1, 1, 1, 0, 1], bool)
+team = np.array([0, 0, 0, 0, 0, 0, 0, 1])       # the phase's team, used until a group is named
+got = "".join(skillcorner_labels(g, alive, team))
+assert got == "DHHHAADA", got
+x = resample(np.array([0., 10., np.nan], np.float32), 5)  # 10 fps -> 25 fps
+assert np.allclose(x[:3], [0, 4, 8]) and np.isnan(x[3:]).all(), x
+print("ok")
