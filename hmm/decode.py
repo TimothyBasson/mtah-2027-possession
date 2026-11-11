@@ -280,7 +280,20 @@ def fit_place(place, other_clues, log_trans, log_start, segments, kickoffs=KICKO
     10 s, 80% against 34% (tests/test_decode.py bounds the ordinary case). How much of BAR-ATH's
     83% / 25% is that bias is measured by place_placebo: with the ball's missing pattern shifted
     in time, so that it keeps its run lengths but no longer lines up with play, the fit returns
-    58-62% against 55-59%. The rest is the tracking.
+    58-62% against 55-59%.
+
+    What that does and does not show. The placebo shows the table is not made by the fit: on this
+    match the ball really is missing where the other clues say dead. It does not show that those
+    frames are dead. On a frame without the ball the gap and flight clues are silent, so "dead"
+    there means the players are slow and the neighbouring frames agree; if this tracking loses the
+    ball in slow live play, the fit will learn that as dead. The one labelled check does not
+    settle it: in the public window the ball is seen on 93.5% of the 6,031 live frames and 64.6% of
+    the 1,469 dead ones (four stoppages), against 85% and 27% fitted over the match. The window's
+    ball is missing on 12% of frames and the match's on 41%, so the dead row must be lower over
+    the match than in the window, but how much lower depends on the match's true dead share, which
+    we do not have. On the external matches the fitted table, against the hand-set one, is +0.032
+    spellF1 on the Metrica samples (3 of 3 up) and -0.004 on IDSSE (1 of 7 up): +0.007 over all
+    10, with a 5-95% interval over matches of -0.002 to +0.016. --hand-place decodes without it.
     """
     counts = np.zeros((2, N_PLACES))
     for lo, hi in segments:

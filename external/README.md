@@ -67,8 +67,17 @@ possessions predicted against the true count:
 | Metrica mean (3) | 0.650 (219) | 0.701 (273) | 0.742 (274) | 0.774 (286) | (347) |
 
 The weight and the gap-distance clue help on both providers. The fitted place table helps only on
-the Metrica samples and is neutral on IDSSE, whose ball is knocked out at random and has nothing to
-fit. Read the two sets differently:
+the Metrica samples (+0.032, 3 of 3 matches up) and costs a little on IDSSE (-0.004, 1 of 7 up),
+whose ball is knocked out at random and has nothing to fit. Over all 10 that is +0.007, with a
+5-95% interval over matches of -0.002 to +0.016.
+
+**Where both still go wrong: the team either side of a stoppage.** The truth has the same team
+before and after 27% of its stoppages (IDSSE 29%, Metrica 21%); `hmm_v4wg` and `hmm_v5` have it at
+49% and 47%. Few of those are stoppages that are not there (5 to 8 a match). Most are real
+stoppages where the model has the wrong team on one side: 51 same-team of the 97 it shares with
+the truth on IDSSE, where the truth has 28.
+
+Read the two sets differently:
 
 - **IDSSE's knocked-out ball is not how ours goes missing.** The knockout makes 12 short gaps a
   minute (median 1.4 s), in play and out alike. BAR-ATH has 1.4 a minute with a median of 10.7 s.
