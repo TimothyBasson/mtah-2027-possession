@@ -51,7 +51,8 @@ def smooth(x, seconds):
 
 def absorb_short(labels, min_len):
     """Relabel runs shorter than min_len[label] frames as a neighbour, shortest first, so one
-    brief flip doesn't split a possession in two. Takes the longer neighbour."""
+    brief flip doesn't split a possession in two. Takes the longer neighbour; the model only
+    passes two-valued labels, where both neighbours are the same."""
     runs = [[k, len(list(g))] for k, g in itertools.groupby(labels)]
     while len(runs) > 1:
         short = [i for i, (k, n) in enumerate(runs) if n < min_len.get(k, 0)]
@@ -88,13 +89,16 @@ def explain(F, params=None):
         if len(ok):
             last = ok[np.clip(np.searchsorted(ok, np.arange(b + 1 - a), "right") - 1, 0, None)]
             pred[a:b + 1] = pred[a:b + 1][last]
-    pred[~(pace >= p["walking"])] = "D"  # NaN pace counts as dead
-    raw = pred.copy()
-    min_len = {"H": p["min_team"] * FPS, "A": p["min_team"] * FPS, "D": p["min_dead"] * FPS}
-    for a, b in HALVES:
-        pred[a:b + 1] = absorb_short(pred[a:b + 1], min_len)
+    alive = pace >= p["walking"]  # NaN pace counts as dead
     if "dead" in F:  # graded frames before a kickoff
-        pred[F["dead"]] = "D"
+        alive[F["dead"]] = False
+    raw = np.where(alive, pred, "D")
+    # Blips: absorb short runs in alive/dead and in the team lean separately, so a dead blip can't
+    # move a turnover: the team changes where the lean does.
+    for a, b in HALVES:
+        alive[a:b + 1] = absorb_short(alive[a:b + 1], {True: p["min_team"] * FPS, False: p["min_dead"] * FPS})
+        pred[a:b + 1] = absorb_short(pred[a:b + 1], {"H": p["min_team"] * FPS, "A": p["min_team"] * FPS})
+    pred[~alive] = "D"
     pred[~graded_mask(len(pred))] = raw[~graded_mask(len(pred))] = "X"
     return dict(pred=pred, raw=raw, lanes=[("spread, home minus away, metres", "team", lean),
                                             ("median player speed minus walking, m/s", "dead", pace - p["walking"])])
@@ -109,4 +113,6 @@ if __name__ == "__main__":  # uv run python possession/model.py: check the run m
     assert f("HHHDDAAAA") == "HHHDDAAAA"          # long enough runs are left alone
     assert f("AHHHH") == "HHHHH"                  # a run at the edge has one neighbour
     assert f("HA") == "AA" or f("HA") == "HH"     # everything short still ends as one run
+    alive = absorb_short(np.array([1, 1, 1, 0, 1, 1, 0, 0, 0], bool), {True: 3, False: 2})
+    assert alive.tolist() == [True] * 6 + [False] * 3  # two-valued, as the model calls it
     print("ok")
