@@ -114,7 +114,7 @@ GAP_DISTANCE_GIVEN_DEAD = np.array([
 # it. v5 counts the table on the match itself (fit_place, below), because the central assumption
 # here turned out to depend on the tracking: "the ball is missing in live play and stoppages
 # alike" holds for a ball knocked out at random, as on the IDSSE matches, but not for this
-# provider. On its three sample matches the ball is seen on 88% of live frames and 4% of dead
+# provider. On its three sample matches the ball is seen on 90% of live frames and 3% of dead
 # ones, and on BAR-ATH the ball goes missing in runs of a median 10.7 s, 1.4 a minute, with the
 # players walking on 64% of those frames against 20% of the frames with the ball in view.
 #
@@ -267,20 +267,25 @@ def fit_place(place, other_clues, log_trans, log_start, segments, kickoffs=KICKO
     "dead means the ball is missing": it only records how the ball's place lines up with what the
     players and the ball's motion already say. Each share is at least PLACE_FLOOR.
 
-    Checked on the external matches, where it is fitted on each match in the same way: on IDSSE,
-    where the ball is knocked out at random, it comes out close to the old hand-set table (ball
-    seen on 60% of live frames and 49% of dead ones) and the scores do not move; on the Metrica
-    samples it finds the ball seen on 91% of live frames and 15% of dead ones, and spellF1 rises
-    (0.742 -> 0.774). On BAR-ATH it finds 83% and 25%; main() prints both rows on every run.
+    Every share quoted here is "ball seen": the in-play and outside categories together, live
+    row against dead row. (main() prints the five categories; in play alone is 2 points lower in
+    each row on BAR-ATH, 83% and 25%.)
+
+    Checked on the external matches, where it is fitted on each match in the same way and the
+    labels give the true shares. On IDSSE, where the ball is knocked out at random, it finds 59%
+    against 56% (true: 59% and 59%), close to the old hand-set table, and the scores do not move.
+    On the Metrica samples it finds 91% against 14% (true: 90% and 3%), and spellF1 rises
+    (0.742 -> 0.774). So where the truth is known the live row is right and the dead row errs
+    towards neutral. On BAR-ATH it finds 85% against 27%.
 
     Its known bias. On a frame with the ball in view the gap clue pushes towards live; on a frame
     without it only the players' speed speaks, and at a jog (1.2-1.5 m/s) that leans slightly
-    towards dead. So even a ball lost at random comes out a little more "seen" in the live row:
-    60% against 49% on IDSSE, and in the worst synthetic case, everyone jogging through gaps of
-    10 s, 80% against 34% (tests/test_decode.py bounds the ordinary case). How much of BAR-ATH's
-    83% / 25% is that bias is measured by place_placebo: with the ball's missing pattern shifted
-    in time, so that it keeps its run lengths but no longer lines up with play, the fit returns
-    58-62% against 55-59%.
+    towards dead. So even a ball lost at random comes out a little more seen in the live row:
+    3 points on IDSSE, and in the worst synthetic case, everyone jogging through gaps of 10 s, 81%
+    against 35% (tests/test_decode.py bounds the ordinary case). How much of BAR-ATH's 85% / 27%
+    is that bias is measured by place_placebo: with the ball's missing pattern shifted in time, so
+    that it keeps its run lengths but no longer lines up with play, the fit returns 58-62% against
+    55-59%.
 
     What that does and does not show. The placebo shows the table is not made by the fit: on this
     match the ball really is missing where the other clues say dead. It does not show that those
