@@ -30,6 +30,8 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-11 | same, walking cutoff and minimum runs picked held out (1.4 m/s, 5 s, 1 s, the same in all folds) | 0.261 | 0.698 | 0.859 | 0.785 | not adopted: superseded by the next row |
 | 2026-11-11 | **stoppage model**: logistic on 4 players-only speed signals (below) for dead | **0.266** | **0.712** | **0.879** | 0.790 | **yes** |
 | 2026-11-11 | stoppage model, minimum runs re-picked held out | 0.268 | 0.715 | 0.883 | 0.790 | no: +0.002, folds disagree on the settings |
+| 2026-11-11 | **+ acceleration**: 80th percentile of players' \|change of speed\|, ±3 s, as a fifth stoppage signal | **0.282** | **0.735** | **0.898** | 0.790 | **yes** |
+| 2026-11-11 | a missing stoppage signal adds nothing instead of forcing dead (review of #22) | 0.282 | 0.735 | 0.898 | 0.790 | yes: same mean, the principled rule |
 
 Stoppage model, per held-out provider (spellF1, alive/dead): IDSSE 0.199 → 0.217, 0.844 → 0.883;
 Metrica 0.271 → 0.299, 0.849 → 0.865; SkillCorner 0.280 → 0.284, 0.874 → 0.889. Frame by frame
@@ -38,7 +40,32 @@ Nine signals were tried; each one left out of the nine cost at most 0.006 accura
 a clear reason were kept (0.839 against 0.841 for all nine). Tim's `hmm/clues.py` gave the
 12 m/s cap on a player's speed; its ball-based dead clues stay out of this model.
 
-On BAR-ATH, as a check only: 101 / 108 possessions per half, mean 18.1 / 16.5 s, 43% / 44% dead;
+**Acceleration** (Jaedon's idea: the fastest 20% carried the most weight, so look at how they
+change pace too). In play players keep changing pace as they react to the ball; at a stoppage
+they jog or walk steadily. Held out, frame by frame, added to the four speed signals:
+
+| added | accuracy | dead F1 |
+|---|---|---|
+| nothing | 0.835 | 0.752 |
+| change in the 80th-percentile speed, 2 s after minus before | 0.836 | 0.754 |
+| fastest 20% of players: signed acceleration | 0.835 | 0.752 |
+| fastest 20% of players: \|acceleration\| | 0.855 | 0.780 |
+| 80th percentile \|acceleration\|, ±0.5 s | 0.861 | 0.789 |
+| **80th percentile \|acceleration\|, ±3 s (kept)** | **0.864** | **0.793** |
+| all ten | 0.866 | 0.794 |
+
+How hard players change pace matters, not which way. Held-out spellF1 per provider: IDSSE
+0.217 → 0.234, Metrica 0.299 → 0.311, SkillCorner 0.284 → 0.299. With it, all five weights point
+the same way (faster or livelier means in play), and acceleration carries the most (−1.35).
+On BAR-ATH (check only): 101 / 111 possessions per half, 38% / 42% dead (was 43% / 44%); public 5
+minutes macroF1 0.820, 15% dead against 20% true.
+
+**Not every choice was made held out.** The weights are refitted per held-out provider, but which
+signals to use (4 of 9 speed signals, then 1 of 6 acceleration signals) and their window lengths
+were chosen on all 30 matches. The ablations say those choices move held-out accuracy by under
+0.01; the technical document should still say so.
+
+Before the acceleration signal, on BAR-ATH, as a check only: 101 / 108 possessions per half, mean 18.1 / 16.5 s, 43% / 44% dead;
 public 5 minutes macroF1 0.814, spellF1 0.336, 8 possessions against 17. Fewer possessions and
 more dead than before: the model now merges more, which the next work on turnovers should balance.
 
@@ -58,12 +85,13 @@ On each frame:
   - the 80th-percentile speed over the same window: in slow build-up the fastest few still run
   - median speed over 10 s either side: stoppages last, a slow patch in play doesn't
   - speed over the next 2 s minus the last 2 s: everyone slows into a stoppage and speeds up out
+  - the 80th percentile of players' |change of speed| over 3 s either side: in play players keep
+    changing pace as they react to the ball; at a stoppage they jog or walk steadily
   Its weights are a logistic regression on the 30 outside matches, each provider counted equally.
-  The fitted weights (`DEAD_FIT["w"]`, after the intercept): median +0.27, 80th percentile
-  -1.79, 10 s median -1.00, speed change -0.49. So "are the fastest few still running?" carries
-  the most. The median's small positive weight is only what it adds once the 80th percentile is
-  known (the two move together), so read the four together, not one at a time. The viewer's
-  Dead-ball model toggle shows each one's push for any frame. `dead=median` brings back the old rule (median under 1.2 m/s).
+  The fitted weights (`DEAD_FIT["w"]`, after the intercept): median −0.58, 80th percentile
+  −0.67, 10 s median −0.40, speed change −0.50, acceleration −1.35. All point the same way, and
+  acceleration carries the most. A missing signal adds nothing either way. The viewer's Dead-ball
+  model toggle shows each one's push for any frame. `dead=median` brings back the old rule (median under 1.2 m/s).
 - **No blips:** within each half, alive/dead and the team lean are cleaned separately: an alive
   run under 2 s or a dead run under 3 s flips, and so does a home or away run of the lean under
   2 s, shortest first (`absorb_short`; `uv run python possession/model.py` checks it). Without

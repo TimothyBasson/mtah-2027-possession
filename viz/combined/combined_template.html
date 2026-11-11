@@ -366,8 +366,8 @@ function drawPitch(f, v) {
 const DEADM = D.explain && D.explain.dead && (() => {
   const m = D.explain.dead, x = m.x.map(b => new Int16Array(Uint8Array.from(atob(b), c => c.charCodeAt(0)).buffer));
   const parts = f => x.map((col, i) => col[f] === -32768 ? null : col[f] / 100);
-  const prob = f => { const v = parts(f); if (v.some(a => a === null)) return null;
-    const z = m.fit.w[0] + v.reduce((a, xi, i) => a + m.fit.w[i + 1] * (xi - m.fit.mu[i]) / m.fit.sd[i], 0);
+  const prob = f => { const v = parts(f);
+    const z = m.fit.w[0] + v.reduce((a, xi, i) => xi === null ? a : a + m.fit.w[i + 1] * (xi - m.fit.mu[i]) / m.fit.sd[i], 0);
     return 1 / (1 + Math.exp(-z)); };
   return { ...m, parts, prob };
 })();
@@ -391,9 +391,9 @@ function drawDead(frame) {
     }
     cx.fillStyle = '#fff'; cx.fillRect(mid - 1, y + 5, 2, 28);
   };
-  const short = ['median speed', 'fastest 20%', 'median, ±10 s', 'speed change'];
+  const short = ['median speed', 'fastest 20%', 'median, ±10 s', 'speed change', 'acceleration, ±3 s'];
   v.forEach((xi, i) => bar(y0 + 56 + i * rh, xi === null ? null : m.fit.w[i + 1] * (xi - m.fit.mu[i]) / m.fit.sd[i],
-    short[i] || m.signals[i], xi === null ? '–' : (i === 3 && xi > 0 ? '+' : '') + xi.toFixed(2) + ' m/s'));
+    short[i] || m.signals[i], xi === null ? '–' : (i === 3 && xi > 0 ? '+' : '') + xi.toFixed(2) + (i === 4 ? ' m/s²' : ' m/s')));
   bar(y0 + 56 + v.length * rh, m.fit.w[0], 'starting lean');
   // probability against the 0.5 line
   const py = y0 + 56 + (v.length + 1) * rh + 10, px = x0 + 16, pw = bw - 32;
