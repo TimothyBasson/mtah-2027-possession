@@ -89,6 +89,12 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
 .seg{display:inline-flex}.seg button{font-size:12px;padding:2px 10px;border-radius:0;margin-left:-1px}
 .seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
 .seg button.on{background:var(--text);color:var(--card)}
+.picker{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.picker .seg button{font-size:13px;padding:4px 10px}
+.picker .seg small{color:var(--muted);margin-left:4px}.picker .seg button.on small{color:inherit;opacity:.7}
+.picker > button{padding:4px 9px}
+#gmatch{width:8.5em}
+#gpos{font-size:12px;color:var(--muted)}
 #scores b{color:var(--text)}
 .hk{color:var(--home)}.ak{color:var(--away)}.dk{color:var(--dead)}.lk{color:var(--line)}
 .err{margin-top:10px;color:var(--bad);font-size:14px}
@@ -96,7 +102,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
 </head>
 <body>
 <main>
-<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px"><h1 id="title">Match viewer</h1><select id="games" aria-label="Switch game" hidden></select></div>
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px"><nav id="games" class="picker" aria-label="Switch game" hidden><span class="seg" id="sets"></span><button id="gprev" title="Previous match in this set">◀</button><select id="gmatch" aria-label="Match in this set"></select><button id="gnext" title="Next match in this set">▶</button><span id="gpos"></span></nav><h1 id="title">Match viewer</h1></div>
 <p class="sub" id="sub"></p>
 <div class="wrap">
   <div class="card top">
@@ -177,10 +183,29 @@ function gameClock(v) {
 
 const NOVIDEO = !D.video;
 if (NOVIDEO) document.body.classList.add('novideo');
+// Game picker: one button per set of matches, then the matches of the current set, with arrows.
 if (D.games) {
-  const g = $('games'), here = decodeURIComponent(location.pathname.split('/').pop());
-  g.innerHTML = D.games.map(([l, f]) => '<option value="' + f + '"' + (f === here ? ' selected' : '') + '>' + l + '</option>').join('');
-  g.hidden = false; g.onchange = () => { location.href = g.value; };
+  const here = decodeURIComponent(location.pathname.split('/').pop());
+  const sets = new Map(), SET_NAME = { idsse: 'IDSSE', metrica: 'Metrica', skillcorner: 'SkillCorner' };
+  for (const [label, file] of D.games) {
+    const i = label.indexOf('_'), set = i < 0 ? label : label.slice(0, i);
+    if (!sets.has(set)) sets.set(set, []);
+    sets.get(set).push({ file, short: i < 0 ? label : label.slice(i + 1) });
+  }
+  const mine = [...sets].find(([, ms]) => ms.some(m => m.file === here)) || [...sets][0];
+  const [curSet, ms] = mine, at = Math.max(0, ms.findIndex(m => m.file === here));
+  const go = f => { location.href = f; };
+  $('sets').innerHTML = [...sets].map(([set, list]) => '<button data-set="' + set + '"' + (set === curSet ? ' class="on"' : '') + '>'
+    + (SET_NAME[set] || set) + (list.length > 1 ? '<small>' + list.length + '</small>' : '') + '</button>').join('');
+  for (const b of $('sets').children) b.onclick = () => { if (b.dataset.set !== curSet) go(sets.get(b.dataset.set)[0].file); };
+  const many = ms.length > 1;
+  $('gmatch').innerHTML = ms.map((m, i) => '<option value="' + m.file + '"' + (i === at ? ' selected' : '') + '>' + m.short + '</option>').join('');
+  $('gmatch').onchange = () => go($('gmatch').value);
+  $('gprev').onclick = () => go(ms[(at - 1 + ms.length) % ms.length].file);
+  $('gnext').onclick = () => go(ms[(at + 1) % ms.length].file);
+  for (const id of ['gmatch', 'gprev', 'gnext', 'gpos']) $(id).hidden = !many;
+  $('gpos').textContent = (at + 1) + ' of ' + ms.length;
+  $('games').hidden = false;
 }
 $('title').textContent = (D.match || name.H + ' vs ' + name.A) + ' — match viewer';
 $('sub').title = $('sub').textContent = NOVIDEO
