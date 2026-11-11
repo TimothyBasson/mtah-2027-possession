@@ -132,6 +132,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
       <label class="tg"><input type="checkbox" id="showTrack" checked> Tracking on video</label>
       <label class="tg"><input type="checkbox" id="showIds" checked> Slot numbers</label>
       <label class="tg" title="Each team's centre, and its average distance from it: the model's who-has-the-ball clue"><input type="checkbox" id="showSpread"> Team spread</label>
+      <label class="tg" id="deadToggle" hidden title="The stoppage model: four player-speed signals, each pushing towards dead or in play, added into a probability; above 0.5 the frame is dead"><input type="checkbox" id="showDead"> Dead-ball model</label>
       <div class="keys" id="keys"></div>
     </div>
     <div class="err" id="err" hidden></div>
@@ -351,6 +352,7 @@ function drawPitch(f, v) {
   }
   cx.textBaseline = 'alphabetic';
   if ($('showSpread').checked) drawSpread(f, C, v);
+  if (DEADM && $('showDead').checked) drawDead(v);
   if (f.ball) {
     cx.fillStyle = css('--ball'); cx.strokeStyle = css('--grass'); cx.lineWidth = 2;
     cx.beginPath(); cx.arc(f.ball[0] / 1000 * W, f.ball[1] / 1000 * PH, 6, 0, Math.PI * 2); cx.fill(); cx.stroke();
@@ -359,6 +361,67 @@ function drawPitch(f, v) {
 
 // Team spread, as possession/model.py measures it: each team's mean distance from its own centre.
 // This is the single frame; the model averages it over 2 s either side.
+// The stoppage model (possession/model.py) for this frame: each signal, how far it pushes towards
+// dead (right) or in play (left), the probability they add up to, and the last 30 s either side.
+const DEADM = D.explain && D.explain.dead && (() => {
+  const m = D.explain.dead, x = m.x.map(b => new Int16Array(Uint8Array.from(atob(b), c => c.charCodeAt(0)).buffer));
+  const parts = f => x.map((col, i) => col[f] === -32768 ? null : col[f] / 100);
+  const prob = f => { const v = parts(f); if (v.some(a => a === null)) return null;
+    const z = m.fit.w[0] + v.reduce((a, xi, i) => a + m.fit.w[i + 1] * (xi - m.fit.mu[i]) / m.fit.sd[i], 0);
+    return 1 / (1 + Math.exp(-z)); };
+  return { ...m, parts, prob };
+})();
+function drawDead(frame) {
+  const m = DEADM, v = m.parts(frame), p = m.prob(frame);
+  const bw = 600, x0 = W - bw - 14, y0 = 14, rh = 40, bh = 58 + rh * (v.length + 1) + 140;
+  cx.fillStyle = 'rgba(0,0,0,.72)'; cx.beginPath(); cx.roundRect(x0, y0, bw, bh, 10); cx.fill();
+  cx.fillStyle = '#fff'; cx.font = '600 26px -apple-system,sans-serif'; cx.textAlign = 'left';
+  cx.fillText('Dead-ball model', x0 + 16, y0 + 38);
+  cx.font = '18px -apple-system,sans-serif'; cx.fillStyle = '#cfcdc6'; cx.textAlign = 'right';
+  cx.fillText('← in play · dead →', x0 + bw - 16, y0 + 38);
+  const mid = x0 + 440, half = 140, scale = half / 3;  // bar: one unit of log-odds = scale px
+  const bar = (y, z, label, value) => {
+    cx.textAlign = 'left'; cx.fillStyle = '#fff'; cx.font = '20px -apple-system,sans-serif';
+    cx.fillText(label, x0 + 16, y + 25);
+    if (value !== undefined) { cx.textAlign = 'right'; cx.fillStyle = '#cfcdc6'; cx.fillText(value, mid - half - 12, y + 25); }
+    cx.fillStyle = 'rgba(255,255,255,.15)'; cx.fillRect(mid - half, y + 9, 2 * half, 20);
+    if (z !== null) {
+      const w = Math.max(-half, Math.min(half, z * scale));
+      cx.fillStyle = z > 0 ? css('--dead') : '#7FD18B'; cx.fillRect(w > 0 ? mid : mid + w, y + 9, Math.abs(w), 20);
+    }
+    cx.fillStyle = '#fff'; cx.fillRect(mid - 1, y + 5, 2, 28);
+  };
+  const short = ['median speed', 'fastest 20%', 'median, ±10 s', 'speed change'];
+  v.forEach((xi, i) => bar(y0 + 56 + i * rh, xi === null ? null : m.fit.w[i + 1] * (xi - m.fit.mu[i]) / m.fit.sd[i],
+    short[i] || m.signals[i], xi === null ? '–' : (i === 3 && xi > 0 ? '+' : '') + xi.toFixed(2) + ' m/s'));
+  bar(y0 + 56 + v.length * rh, m.fit.w[0], 'starting lean');
+  // probability against the 0.5 line
+  const py = y0 + 56 + (v.length + 1) * rh + 10, px = x0 + 16, pw = bw - 32;
+  cx.fillStyle = 'rgba(255,255,255,.15)'; cx.fillRect(px, py, pw, 22);
+  if (p !== null) { cx.fillStyle = p > 0.5 ? css('--dead') : '#7FD18B'; cx.fillRect(px, py, pw * p, 22); }
+  cx.fillStyle = '#fff'; cx.fillRect(px + pw / 2 - 1, py - 5, 2, 32);
+  cx.font = '600 21px -apple-system,sans-serif'; cx.textAlign = 'left';
+  const after = D.pred && D.pred[frame], afterTxt = after === 'D' ? 'dead' : 'HA'.includes(after) ? 'in play' : '–';
+  cx.fillText(p === null ? 'P(dead) –  nobody tracked → dead' : `P(dead) ${p.toFixed(2)} → ${p > 0.5 ? 'dead' : 'in play'}`
+    + `   ·   after clean-up: ${afterTxt}`, px, py + 50);
+  // P(dead) over the last and next 30 s, with the 0.5 line
+  const sy = py + 64, sh = 48, span = 30 * FPS;
+  cx.fillStyle = 'rgba(255,255,255,.08)'; cx.fillRect(px, sy, pw, sh);
+  cx.strokeStyle = 'rgba(255,255,255,.4)'; cx.setLineDash([4, 4]); cx.lineWidth = 1;
+  cx.beginPath(); cx.moveTo(px, sy + sh / 2); cx.lineTo(px + pw, sy + sh / 2); cx.stroke(); cx.setLineDash([]);
+  cx.strokeStyle = css('--dead'); cx.lineWidth = 2; cx.beginPath(); let pen = false;
+  for (let i = 0; i <= pw; i += 2) {
+    const f = Math.round(frame - span + i / pw * 2 * span), q = f >= 0 && f < NF ? m.prob(f) : null;
+    if (q === null) { pen = false; continue; }
+    const yy = sy + sh - q * sh; pen ? cx.lineTo(px + i, yy) : cx.moveTo(px + i, yy); pen = true;
+  }
+  cx.stroke();
+  cx.fillStyle = '#fff'; cx.fillRect(px + pw / 2 - 1, sy, 2, sh);
+  cx.font = '16px -apple-system,sans-serif'; cx.fillStyle = '#cfcdc6'; cx.textAlign = 'left';
+  cx.fillText('−30 s', px, sy + sh + 20); cx.textAlign = 'center'; cx.fillText('P(dead) over time, 0.5 dashed', px + pw / 2, sy + sh + 20);
+  cx.textAlign = 'right'; cx.fillText('+30 s', px + pw, sy + sh + 20);
+}
+
 function drawSpread(f, C, frame) {
   const [L, Wm] = D.pitch, out = {};
   // Shade the team the model says has the ball.
@@ -604,6 +667,9 @@ $('fwd').onclick = () => step(1);
 $('speed').onchange = () => video.playbackRate = parseFloat($('speed').value);
 $('showTrack').onchange = $('showIds').onchange = () => render(cur);
 try { $('showSpread').checked = localStorage.getItem('showSpread') === '1'; } catch (e) {}
+if (DEADM) $('deadToggle').hidden = false;
+try { $('showDead').checked = localStorage.getItem('showDead') === '1'; } catch (e) {}
+$('showDead').onchange = () => { try { localStorage.setItem('showDead', $('showDead').checked ? '1' : '0'); } catch (e) {} render(cur); };
 $('showSpread').onchange = () => { try { localStorage.setItem('showSpread', $('showSpread').checked ? '1' : '0'); } catch (e) {} render(cur); };
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;

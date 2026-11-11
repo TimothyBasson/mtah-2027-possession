@@ -171,7 +171,8 @@ def explain(F, params=None):
             last = ok[np.clip(np.searchsorted(ok, np.arange(b + 1 - a), "right") - 1, 0, None)]
             pred[a:b + 1] = pred[a:b + 1][last]
     if p["dead"] == "logit":
-        dead_p = dead_prob(dead_signals(F["players"]), p["dead_fit"])
+        dead_x = dead_signals(F["players"])
+        dead_p = dead_prob(dead_x, p["dead_fit"])
         alive = dead_p < 0.5  # NaN (nobody tracked) counts as dead
     else:
         alive = pace >= p["walking"]  # NaN pace counts as dead
@@ -185,7 +186,9 @@ def explain(F, params=None):
         pred[a:b + 1] = absorb_short(pred[a:b + 1], {"H": p["min_team"] * FPS, "A": p["min_team"] * FPS})
     pred[~alive] = "D"
     pred[~graded_mask(len(pred))] = raw[~graded_mask(len(pred))] = "X"
-    return dict(pred=pred, raw=raw, lanes=[("spread, home minus away, metres", "team", lean),
+    return dict(pred=pred, raw=raw,
+                dead=dict(signals=DEAD_SIGNALS, fit=p["dead_fit"], x=dead_x) if p["dead"] == "logit" else None,
+                lanes=[("spread, home minus away, metres", "team", lean),
                                             ("median player speed minus walking, m/s", "dead", pace - p["walking"])]
                 + ([("stoppage model, log-odds of dead", "dead", np.log(dead_p / (1 - dead_p)))] if p["dead"] == "logit" else []))
 

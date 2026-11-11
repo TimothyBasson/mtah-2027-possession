@@ -59,8 +59,11 @@ On each frame:
   - median speed over 10 s either side: stoppages last, a slow patch in play doesn't
   - speed over the next 2 s minus the last 2 s: everyone slows into a stoppage and speeds up out
   Its weights are a logistic regression on the 30 outside matches, each provider counted equally.
-  The 80th percentile ends up with a small positive weight: it overlaps the median, so read the
-  four together, not one at a time. `dead=median` brings back the old rule (median under 1.2 m/s).
+  The fitted weights (`DEAD_FIT["w"]`, after the intercept): median +0.27, 80th percentile
+  -1.79, 10 s median -1.00, speed change -0.49. So "are the fastest few still running?" carries
+  the most. The median's small positive weight is only what it adds once the 80th percentile is
+  known (the two move together), so read the four together, not one at a time. The viewer's
+  Dead-ball model toggle shows each one's push for any frame. `dead=median` brings back the old rule (median under 1.2 m/s).
 - **No blips:** within each half, alive/dead and the team lean are cleaned separately: an alive
   run under 2 s or a dead run under 3 s flips, and so does a home or away run of the lean under
   2 s, shortest first (`absorb_short`; `uv run python possession/model.py` checks it). Without
