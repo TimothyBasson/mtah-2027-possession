@@ -92,7 +92,7 @@ def main():
               f"  team {rows[-1][4]:.3f}  ball seen {rows[-1][5]:.0%}", flush=True)
     # per set too, so a mean over all sets isn't compared with one taken before a set was added
     for p in sorted({r[0].split("_")[0] for r in rows}) + [""]:
-        sel = [r[1:] for r in rows if r[0].startswith(p)]
+        sel = [r[1:] for r in rows if p in ("", r[0].split("_")[0])]
         m = np.mean(sel, 0)
         print(f"{(p or 'all') + f' ({len(sel)})':14s} spellF1 {m[0]:.3f}  macroF1 {m[1]:.3f}  "
               f"alive/dead {m[2]:.3f}  team {m[3]:.3f}")

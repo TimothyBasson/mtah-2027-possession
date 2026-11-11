@@ -63,7 +63,7 @@ All three cut possessions shorter than the public window (17 in 5 minutes, mean 
 7.6 s, D 20%), so a model fitted to them may lean towards short possessions. These are descriptive
 only: the labels are not adjusted towards the public window.
 
-## Baseline: `possession/` v0 (players only: more spread-out team, keepers left out, has it; walking = D; alive runs under 2 s, dead runs under 3 s and team runs under 2 s absorbed)
+## Baseline: `possession/` v0 as on main after #17, one run for every row (players only: more spread-out team, keepers left out, has it; walking = D; alive runs under 2 s, dead runs under 3 s and team runs under 2 s absorbed)
 
 | | spellF1 | macroF1 | alive/dead F1 | team acc |
 |---|---|---|---|---|
