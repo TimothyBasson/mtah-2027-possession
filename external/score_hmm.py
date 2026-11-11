@@ -12,14 +12,15 @@
 hmm_v3's speed table, hmm_v4's flight table and hmm_v5's gap-distance table are counted from the
 labelled external matches, so scoring them on the same matches would be in-sample. Here each
 provider is scored with the tables counted on the *other* provider only (IDSSE with Metrica's,
-Metrica with IDSSE's). hmm_v5's ball-place table is fitted on each match from its own tracking,
-without labels, as on ours (hmm/decode.py fit_place). hmm_v2 to v4 are scored at the emission
-weight they were built with (0.1), hmm_v5 at the decoder's. Prints aggregates only.
+Metrica with IDSSE's). hmm_v2 to v4 are scored at the emission weight they were built with (0.1),
+hmm_v5 at the decoder's. Prints aggregates only.
 
-Two steps between v4 and v5 are scored as well, so that v5's three changes can be told apart:
+The step between v4 and v5 is scored as well, so that v5's two changes can be told apart, and so
+is the variant that is not the default:
     hmm_v4w    v4 at v5's emission weight
-    hmm_v4wg   that, with the gap read together with the distance (hand-set place table)
-    hmm_v5     that, with the place table fitted on the match
+    hmm_v5     that, with the gap read together with the distance
+    hmm_v5fit  v5 with the ball-place table fitted on each match from its own tracking, without
+               labels (hmm/decode.py fit_place; python -m hmm.decode --fit-place)
 """
 
 import argparse
@@ -112,7 +113,7 @@ def gap_distance_given_state(matches, balls):
 
 def predict(d, ball, speed_table, flight_table=None, gap_distance_table=None):
     """smooth50, hmm_v2 and hmm_v3 labels for one match, hmm_v4 (v3 plus the flight clue) with a
-    flight_table, and hmm_v5 with a gap_distance_table as well."""
+    flight_table, and hmm_v4w, hmm_v5 and hmm_v5fit with a gap_distance_table as well."""
     players, team = d["players"], d["team"]
     pitch = tuple(float(v) for v in d["pitch"])
     fps = int(d["fps"])
@@ -143,11 +144,11 @@ def predict(d, ball, speed_table, flight_table=None, gap_distance_table=None):
         others = [(gap_distance_category(usable, d_home, d_away), gap_distance_table),
                   (speed_cats(d), speed_table), (flight, flight_table)]
         out["hmm_v4w"] = dec.decode(variants[-1][1], trans, start, segments, kickoffs=())
-        out["hmm_v4wg"] = dec.decode(others + [(place, dec.place_table())], trans, start,
-                                     segments, kickoffs=())
+        out["hmm_v5"] = dec.decode(others + [(place, dec.place_table())], trans, start, segments,
+                                   kickoffs=())
         live, dead = dec.fit_place(place, others, trans, start, segments, kickoffs=())
-        out["hmm_v5"] = dec.decode(others + [(place, dec.place_table(live, dead))], trans, start,
-                                   segments, kickoffs=())
+        out["hmm_v5fit"] = dec.decode(others + [(place, dec.place_table(live, dead))], trans,
+                                      start, segments, kickoffs=())
     return out
 
 

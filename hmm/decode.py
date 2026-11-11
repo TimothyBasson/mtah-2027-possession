@@ -14,26 +14,31 @@ kick instead of at the landing. Now every touch the ball's velocity shows starts
 toucher's team is the clue until the next touch. On the external matches this lifts spellF1 on all
 10 (external/score_hmm.py).
 
-v5 changes three things, each measured on the external matches (external/score_hmm.py), where
-together they lift spellF1 on all 10:
+v5 changes two things, each measured on the external matches (external/score_hmm.py), where each
+helps on both providers and together they lift spellF1 on all 10:
 - The trust in each frame's clues doubles (WEIGHT 0.1 -> 0.2). v4 found about 200 possessions in
   every match, whatever the labels said (315-511), and almost none of those under 4 s.
 - The gap is read together with the distance from the ball to the nearest player
   (hmm/clues.py gap_distance_category), with a table counted from the external labels like the
   speed and flight tables. A gap with a player on the ball says more than the same gap with
   nobody within 5 m, and nobody near the ball is itself a sign of a stoppage.
-- The ball-place table is no longer set by hand. What a missing ball means depends on the
-  tracking: this provider loses the ball mostly in stoppages, while a ball knocked out at random
-  says nothing. So the table is counted on the match being decoded, from what the other three
-  clues say about each frame (fit_place) -- no labels, and the same code on every match.
+A third change was built and is kept behind --fit-place, not in the default: counting the
+ball-place table on the match being decoded, from what the other three clues say about each frame
+(fit_place), instead of setting it by hand. What a missing ball means depends on the tracking, and
+on this match the fit finds the ball seen on 85% of live frames and 27% of dead ones. But against
+the hand-set table it is +0.007 spellF1 over the 10 external matches with an interval that spans
+zero (up on the 3 Metrica samples, slightly down on 6 of the 7 IDSSE matches), and nothing we may
+use on BAR-ATH confirms its dead row. With no evidence to separate them, the default is the one
+with fewer assumptions. fit_place's docstring has the numbers.
 
 The gap clue counts a goalkeeper slot near a goal for the team defending that goal, not the team
 the metadata gives the slot: the tracker sometimes carries one keeper under the other keeper's
 slot (hmm/clues.py).
 
     python -m hmm.decode                    # writes evaluation/results/hmm_v5.csv
-    python -m hmm.decode --weight 0.1 --hand-gap --hand-place   # v4 again; any subset of the three
-                                            # flags takes that change back out, to tell them apart
+    python -m hmm.decode --weight 0.1 --hand-gap   # v4 again; either flag alone takes that one
+                                            # change back out, to tell them apart
+    python -m hmm.decode --fit-place        # with the place table counted on the match
     python -m hmm.decode --placebo          # also checks fit_place against a shifted ball
     python -m hmm.decode --baum-welch       # also prints what unsupervised EM would change
     python -m hmm.decode --baum-welch --bw-weight 0.2   # ... with the decoder's tempered emissions
@@ -43,10 +48,10 @@ wrong setting. Most are set by hand; where one was checked against this match, t
 label-free: summaries of its own tracking (how often the ball is missing, where it was last seen)
 and Smart Tagging, which is Metrica's automatic output, not ground truth. The gap-distance, speed
 and flight tables are the exceptions to "by hand": they are counted from the labelled external
-matches (external/, other games, which RULES.md allows), and WEIGHT was chosen there. The place
-table is counted on this match without labels (fit_place), which RULES.md allows as learning
-without human labels. Each comment below says which. Baum-Welch on the full match (no labels) is
-run only as a check on these numbers, and does not overwrite them.
+matches (external/, other games, which RULES.md allows), and WEIGHT was chosen there. (With
+--fit-place the place table is counted on this match without labels, which RULES.md allows as
+learning without human labels.) Each comment below says which. Baum-Welch on the full match (no
+labels) is run only as a check on these numbers, and does not overwrite them.
 
 numpy only, like starter/baseline.py, so it runs in the scorer's environment.
 """
@@ -110,17 +115,20 @@ GAP_DISTANCE_GIVEN_DEAD = np.array([
     [0.023, 0.050, 0.072, 0.120],
 ])
 
-# p(ball place | state) as v2-v4 had it, set by hand; external/score_hmm.py still scores them with
-# it. v5 counts the table on the match itself (fit_place, below), because the central assumption
-# here turned out to depend on the tracking: "the ball is missing in live play and stoppages
-# alike" holds for a ball knocked out at random, as on the IDSSE matches, but not for this
-# provider. On its three sample matches the ball is seen on 90% of live frames and 3% of dead
+# p(ball place | state), set by hand, as v2-v5 have it.
+#
+# Its central assumption is the doubtful part: "the ball is missing in live play and stoppages
+# alike" holds for a ball knocked out at random, as on the IDSSE matches, but probably not for
+# this provider. On its three sample matches the ball is seen on 90% of live frames and 3% of dead
 # ones, and on BAR-ATH the ball goes missing in runs of a median 10.7 s, 1.4 a minute, with the
-# players walking on 64% of those frames against 20% of the frames with the ball in view.
+# players walking on 64% of those frames against 20% of the frames with the ball in view. The
+# speed clue already carries much of that (missing while the players walk leans D). fit_place,
+# below, counts this table on the match instead; it is not the default because the external
+# matches cannot tell the two apart and nothing we may use on BAR-ATH confirms the fitted one.
 #
 # Columns IN_PLAY, OUTSIDE, MISSING_AFTER_LINE, MISSING_AFTER_PLAY, MISSING_STALE (hmm/clues.py).
-# The ball is missing on 41% of graded frames, and v2-v4 took missing in itself as near neutral
-# (40% live, 55% dead). What separates them:
+# The ball is missing on 41% of graded frames, and this table takes missing in itself as near
+# neutral (40% live, 55% dead). What separates them:
 # - OUTSIDE: in play the tracked ball crosses a line only by noise or for an instant; when it has
 #   gone out it is often seen past the line, before the tracker drops it or while it is fetched.
 # - MISSING_AFTER_LINE: in play the ball is within 2 m of a line on ~9% of frames, so few dropouts
@@ -298,7 +306,9 @@ def fit_place(place, other_clues, log_trans, log_start, segments, kickoffs=KICKO
     the match than in the window, but how much lower depends on the match's true dead share, which
     we do not have. On the external matches the fitted table, against the hand-set one, is +0.032
     spellF1 on the Metrica samples (3 of 3 up) and -0.004 on IDSSE (1 of 7 up): +0.007 over all
-    10, with a 5-95% interval over matches of -0.002 to +0.016. --hand-place decodes without it.
+    10, with a 5-95% interval over matches of -0.002 to +0.016. On BAR-ATH it finds 3 fewer of
+    the 58 tagged restarts (50 against 53) and 23 blind same-team stoppages against 5. So it is
+    not the default; --fit-place decodes with it.
     """
     counts = np.zeros((2, N_PLACES))
     for lo, hi in segments:
@@ -512,13 +522,14 @@ def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", help="default evaluation/results/hmm_v5.csv, with the "
-                        "ablation flags in the name if any is set")
+                        "variant flags in the name if any is set")
     parser.add_argument("--weight", type=float, default=WEIGHT,
                         help="emission weight (v5: {}, v4: {})".format(WEIGHT, WEIGHT_V4))
     parser.add_argument("--hand-gap", action="store_true",
                         help="ablation: v4's hand-set gap table, without the distance")
-    parser.add_argument("--hand-place", action="store_true",
-                        help="ablation: v4's hand-set ball-place table instead of fit_place")
+    parser.add_argument("--fit-place", action="store_true",
+                        help="count the ball-place table on the match (fit_place) instead of "
+                             "using the hand-set one")
     parser.add_argument("--placebo", action="store_true",
                         help="also fit the place table to a ball shifted in time (place_placebo)")
     parser.add_argument("--baum-welch", type=int, nargs="?", const=20, default=0,
@@ -539,11 +550,12 @@ def main():
         gap_clue = (np.where(gap >= 0, gap // N_DISTANCE_BINS, -1).astype(np.int8), gap_table())
     others = [gap_clue, (speed, speed_table()), (flight, flight_table())]
     live, dead = PLACE_GIVEN_LIVE, PLACE_GIVEN_DEAD
-    if not args.hand_place:
-        live, dead = fit_place(place, others, log_trans, np.log(START), segments,
-                               weight=args.weight)
+    if args.fit_place or args.placebo:
+        fitted = fit_place(place, others, log_trans, np.log(START), segments, weight=args.weight)
+        if args.fit_place:
+            live, dead = fitted
     for name, row in (("live", live), ("dead", dead)):
-        print("ball place given {}, {}: ".format(name, "by hand" if args.hand_place else "fitted")
+        print("ball place given {}, {}: ".format(name, "fitted" if args.fit_place else "by hand")
               + "  ".join("{} {:.1%}".format(n, p) for n, p in zip(PLACE_NAMES, row)))
     # gap, place, speed, flight: the order report_baum_welch names them in
     clues = [others[0], (place, place_table(live, dead))] + others[1:]
@@ -551,7 +563,7 @@ def main():
     labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight)
     ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),
                                            ("_handgap", args.hand_gap),
-                                           ("_handplace", args.hand_place)) if on)
+                                           ("_fitplace", args.fit_place)) if on)
     path = write_submission(
         args.out or os.path.join(RESULTS_DIR, "hmm_v5{}.csv".format(ablation)), labels)
     print("-> {}".format(os.path.relpath(path, ROOT)))
@@ -560,7 +572,7 @@ def main():
 
     if args.placebo:
         print("ball seen given live / dead, fitted: {:.1%} / {:.1%}; with the ball shifted "
-              "by".format(live[:MISSING_AFTER_LINE].sum(), dead[:MISSING_AFTER_LINE].sum()))
+              "by".format(*(row[:MISSING_AFTER_LINE].sum() for row in fitted)))
         for shift, seen_live, seen_dead in place_placebo(gap, place, speed, flight, log_trans,
                                                          np.log(START), segments):
             print("  {:2d} min: {:.1%} / {:.1%}".format(shift, seen_live, seen_dead))
