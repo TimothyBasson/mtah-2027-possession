@@ -50,7 +50,7 @@ import numpy as np
 from starter.baseline import AWAY, FIELD_SEP, GROUP_SEP, HOME, MISSING
 
 # Bump when the parsing below changes, so an old cache is never read back as new.
-CLUES_VERSION = 6
+CLUES_VERSION = 8
 
 # Bin edges on the gap, in metres. Right-inclusive: (-inf, -3], (-3, -1], (-1, 1], (1, 3], (3, inf).
 GAP_EDGES = np.array([-3.0, -1.0, 1.0, 3.0])
@@ -96,6 +96,18 @@ N_SPEED_BINS = len(SPEED_EDGES) + 1
 KEEPER_ZONE = 25.0
 # Metres: a keeper this close to the ball is on it or about to be, for the count in read_distances.
 KEEPER_ON_BALL = 3.0
+
+# Width clue: how far each team is spread across the pitch (the standard deviation of its tracked
+# players' y, metres), home minus away. The team with the ball spreads out and the team without it
+# closes up, so the sign alone names the team in possession on 79-81% of live frames on all three
+# external sets. It reads no ball. Edges in metres; varied on the external matches (four bins, or
+# the sign alone) the score moved by at most 0.003.
+WIDTH_EDGES = np.array([-5.0, -3.5, -2.0, -1.0, 0.0, 1.0, 2.0, 3.5, 5.0])
+N_WIDTH_BINS = len(WIDTH_EDGES) + 1
+# A team's width needs this many of its players tracked on the frame: a spread from fewer says
+# more about who is missing than about the team's shape. On BAR-ATH 6% of graded frames have a
+# team below it (the 1st percentile is 2 tracked), and the clue is silent there.
+MIN_WIDTH_PLAYERS = 6
 
 # Frames per block when computing distances over the whole match, to bound memory.
 CHUNK = 20000
@@ -233,12 +245,42 @@ def speed_category(speed):
     return cats
 
 
+def team_width_difference(py, team):
+    """Home width minus away width per frame, metres: each team's width is the standard deviation
+    of its tracked players' y. NaN where either team has fewer than MIN_WIDTH_PLAYERS tracked.
+
+    py is (frames, slots); team is (slots,) or (frames, slots), as team_by_frame gives it, so a
+    keeper counts for the team whose goal he stands in."""
+    py = np.asarray(py, dtype=float)
+    team = np.broadcast_to(np.asarray(team), py.shape)
+    out = np.full(len(py), np.nan)
+    for lo in range(0, len(py), CHUNK):
+        hi = lo + CHUNK
+        widths = []
+        for side in (HOME, AWAY):
+            y = np.where(team[lo:hi] == side, py[lo:hi], np.nan)
+            n = np.isfinite(y).sum(axis=1)
+            mean = np.nansum(y, axis=1) / np.maximum(n, 1)
+            var = np.nansum((y - mean[:, None]) ** 2, axis=1) / np.maximum(n, 1)
+            widths.append(np.where(n >= MIN_WIDTH_PLAYERS, np.sqrt(var), np.nan))
+        out[lo:hi] = widths[0] - widths[1]
+    return out
+
+
+def width_category(width):
+    """Category per frame: 0..N_WIDTH_BINS-1 from away much wider to home much wider, -1 where the
+    width difference is unmeasured."""
+    cats = np.digitize(np.nan_to_num(width), WIDTH_EDGES).astype(np.int8)
+    cats[np.isnan(width)] = -1
+    return cats
+
+
 def read_distances(raw_path, team_of_track, n_frames, pitch, fps, keepers=(), halves=()):
     """Stream the raw ATD once. Frames with no tracking line count as ball missing.
 
-    Returns (ball_x, ball_y, d_home, d_away, speed, stats): metres, NaN where not seen, and the
-    median player speed in m/s. stats is (lines read, malformed lines skipped, frames with no
-    line, keeper frames moved to the other team, and how many of those have that keeper within
+    Returns (ball_x, ball_y, d_home, d_away, speed, width, stats): metres, NaN where not seen,
+    the median player speed in m/s and team_width_difference. stats is (lines read, malformed
+    lines skipped, frames with no line, keeper frames moved to the other team, and how many of those have that keeper within
     KEEPER_ON_BALL of the ball), reported so that a broken file does not pass for a long stretch of
     missing ball. A frame outside 0..n_frames-1 is an error, not something to index around.
     keepers are goalkeeper slots and halves (start, stop) frame slices; a keeper slot near a goal
@@ -270,7 +312,8 @@ def read_distances(raw_path, team_of_track, n_frames, pitch, fps, keepers=(), ha
         on_ball = np.hypot(px - ball_x[:, None], py - ball_y[:, None]) < KEEPER_ON_BALL
     d_home, d_away = nearest_by_team(px, py, ball_x, ball_y, team)
     speed = median_player_speed(px.astype(float), py.astype(float), fps)
-    return ball_x, ball_y, d_home, d_away, speed, (
+    width = team_width_difference(py, team)
+    return ball_x, ball_y, d_home, d_away, speed, width, (
         n_lines, n_malformed, int(np.sum(~has_line)), int(np.sum(moved)),
         int(np.sum(moved & on_ball)))
 
@@ -364,11 +407,11 @@ def load_distances(raw_path, team_of_track, n_frames, pitch, fps, cache_dir, kee
         if os.path.exists(cache_path):
             cached = np.load(cache_path)
             return (cached["ball_x"], cached["ball_y"], cached["d_home"], cached["d_away"],
-                    cached["speed"], tuple(int(x) for x in cached["stats"]))
-    ball_x, ball_y, d_home, d_away, speed, stats = read_distances(
+                    cached["speed"], cached["width"], tuple(int(x) for x in cached["stats"]))
+    ball_x, ball_y, d_home, d_away, speed, width, stats = read_distances(
         raw_path, team_of_track, n_frames, pitch, fps, keepers, halves)
     if cache_path:
         os.makedirs(cache_dir, exist_ok=True)
         np.savez_compressed(cache_path, ball_x=ball_x, ball_y=ball_y, d_home=d_home,
-                            d_away=d_away, speed=speed, stats=np.array(stats))
-    return ball_x, ball_y, d_home, d_away, speed, stats
+                            d_away=d_away, speed=speed, width=width, stats=np.array(stats))
+    return ball_x, ball_y, d_home, d_away, speed, width, stats

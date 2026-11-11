@@ -7,7 +7,7 @@ for ours:
 ```bash
 uv run python external/build.py            # -> data/external/*.npz (gitignored, ~1 min/match)
 uv run python external/score.py --seen 0.59 [param=value ...]
-uv run python external/score_hmm.py --seen 0.59   # the HMM decoder in hmm/, and smooth50 (IDSSE + Metrica only)
+uv run python external/score_hmm.py --seen 0.59   # the HMM decoder in hmm/, and smooth50 (all three sets)
 ```
 
 | set | matches | tracking | label source |
@@ -94,13 +94,74 @@ meant to be combined with `hmm/`, not a replacement for it.
 
 ## The HMM decoder (`hmm/`), `score_hmm.py --seen 0.59`
 
-Each provider is scored with the tables counted on the other provider.
+IDSSE and Metrica are each scored with the speed, flight and gap-distance tables counted on the
+other one. SkillCorner is held out: it is scored with the decoder's shipped constants, which were
+counted on IDSSE and Metrica only, and it is never used to count those tables. `hmm_v6`'s width
+table is counted, for every set, on the labels of the other sets, each counting once.
 
-| spellF1 | smooth50 | hmm_v2 | hmm_v3 | hmm_v4 | hmm_v5 |
-|---|---|---|---|---|---|
-| IDSSE mean (7) | 0.227 | 0.183 | 0.223 | 0.354 | 0.418 |
-| Metrica mean (3) | 0.426 | 0.390 | 0.443 | 0.650 | 0.742 |
-| all 10 | 0.287 | 0.245 | 0.289 | 0.443 | 0.516 |
+| spellF1 | smooth50 | hmm_v2 | hmm_v3 | hmm_v4 | hmm_v5 | hmm_v6 |
+|---|---|---|---|---|---|---|
+| IDSSE mean (7) | 0.227 | 0.183 | 0.223 | 0.354 | 0.418 | 0.441 |
+| Metrica mean (3) | 0.426 | 0.390 | 0.443 | 0.650 | 0.742 | 0.753 |
+| all 10 | 0.287 | 0.245 | 0.289 | 0.443 | 0.516 | 0.535 |
+| SkillCorner mean (20), `--seen 0.59` | 0.226 | 0.285 | 0.298 | 0.337 | 0.333 | 0.354 |
+| SkillCorner mean (20), ball as recorded (`--seen 1.0 --sets skillcorner`) | 0.264 | 0.320 | 0.328 | 0.374 | 0.359 | 0.369 |
+
+SkillCorner is not graded on its cutaways (see above), so its rows are not comparable with the
+others and are not pooled with them. Its ball is seen on about 80% of labelled frames as recorded;
+`--seen 0.59` knocks it down to ours, measured on labelled frames.
+
+**v6 is v5 plus the width clue** (`hmm.clues.team_width_difference`: the team spread wider across
+the pitch has the ball), at a quarter of the other clues' weight (`WIDTH_WEIGHT = 0.05`). It reads
+the players only. `hmm_v6 - hmm_v5` in spellF1, paired by match:
+
+| | mean | standard error | worst match | matches up |
+|---|---|---|---|---|
+| IDSSE | +0.023 | 0.003 | +0.014 | 7 of 7 |
+| Metrica | +0.011 | 0.005 | +0.002 | 3 of 3 |
+| SkillCorner, `--seen 0.59` | +0.021 | 0.003 | +0.003 | 20 of 20 |
+| SkillCorner, ball as recorded | +0.009 | 0.002 | -0.012 | 18 of 20 |
+
+The gain is in team accuracy (IDSSE 0.855 to 0.874, SkillCorner 0.805 to 0.831 at `--seen 0.59`);
+alive/dead does not move. It is larger where the ball is missing more, which is what a
+players-only clue should do. At a weight of 0.2 the clue overrides the ball and costs Metrica
+0.061. `--tables` prints the width table counted on all three sets, each counting once; it matches
+`WIDTH_GIVEN_HOME` and `WIDTH_GIVEN_DEAD` in `hmm/decode.py` to 0.001, and no single set's home
+row is further than 0.024 from it (dead row 0.031).
+
+**The width weight is tuned on these matches.** spellF1 gain over v5 by weight (SkillCorner with
+its ball as recorded):
+
+| weight | 0.02 | 0.035 | 0.05 | 0.075 | 0.1 | 0.15 | 0.2 |
+|---|---|---|---|---|---|---|---|
+| IDSSE | +0.017 | +0.020 | +0.023 | +0.024 | +0.025 | +0.015 | +0.006 |
+| Metrica | +0.007 | +0.007 | +0.010 | +0.006 | 0.000 | -0.028 | -0.063 |
+| SkillCorner | +0.006 | +0.008 | +0.010 | +0.012 | +0.016 | +0.018 | +0.018 |
+
+Chosen with each set left out in turn, the other two pick 0.05, 0.1 and 0.05, and the set left out
+then gains +0.023 (IDSSE), 0.000 (Metrica) and +0.010 (SkillCorner). That is +0.011 on average,
+and it is the fair size of this clue: below the 0.03 bar v5 was held to. v6 is kept because no
+set loses at 0.05 and the direction is the same on all three, not because the gain is large.
+
+**Does it just favour the wider team? Checked on BAR-ATH, without labels.** Home is the wider team
+on 56% of graded frames there (median difference +1.4 m and +1.1 m by half). That mixes style with
+possession: v5 gives home 64% and 57% of live frames, and the midpoint between the median width
+on v5's home frames and on its away frames is +1.1 m and +0.7 m, about half a bin. The 10 IDSSE
+and Metrica matches have per-match medians from -0.6 to +1.7 m. From v5 to v6, 6.5% of graded
+frames change: 4,012 from H to A and 3,433 from A to H, a net +0.2% towards home, and home's share
+of live frames is 64.1% and 56.2% (v5: 64.2% and 56.7%). So the changes are not piled on one team.
+Ball-missing frames change more often (8.3%) than ball-visible ones (5.2%), as intended.
+Subtracting each half's median width first changes a further 2.7% of frames, every one of them
+away from home, because the median also removes home's real share of the ball; on the external
+matches centring moved spellF1 by 0.003 at most. The clue is left uncentred.
+
+A team's width needs 6 of its players tracked (`MIN_WIDTH_PLAYERS`). On BAR-ATH 6% of graded
+frames have a team below that and the clue is silent there; the external scores are the same to
+three decimals with a floor of 3.
+
+The constants `WIDTH_GIVEN_HOME`, `WIDTH_GIVEN_DEAD` and `WIDTH_WEIGHT` are hard-coded, so the
+submission is reproducible from the repo alone, but their derivation needs the 30 outside matches.
+The technical document must list all three sources (above) as assets used.
 
 v5 beats v4 on each of the 10 (by 0.032 to 0.112). Its two changes one at a time, then the variant
 that is not the default, with the possessions predicted against the true count:
@@ -116,11 +177,31 @@ matches up) and costs a little on IDSSE (-0.004, 1 of 7 up), whose ball is knock
 and has nothing to fit. Over all 10 that is +0.007, with a 5-95% interval over matches of -0.002
 to +0.016. With nothing to separate them, the default is the hand-set table.
 
+**SkillCorner prefers the lower clue weight.** v5 scores below v4 there (0.359 against 0.374 with
+the ball as recorded), the opposite of IDSSE and Metrica, where weight 0.2 beat 0.1 by 0.043. With
+v5's clues on SkillCorner: 0.377 at weight 0.1, 0.368 at 0.15, 0.359 at 0.2 and 0.345 at 0.3.
+`WEIGHT` stays 0.2. Averaged over all 30 matches v5 scores 0.411 at 0.2 against 0.399 at 0.1, and
+SkillCorner is broadcast tracking at 10 fps that is not graded on its cutaways, so it is the set
+least like ours.
+
 **Where both still go wrong: the team either side of a stoppage.** The truth has the same team
 before and after 27% of its stoppages (IDSSE 29%, Metrica 21%); `hmm_v5` and `hmm_v5fit` have it at
 49% and 47%. Few of those are stoppages that are not there (5 to 8 a match). Most are real
 stoppages where the model has the wrong team on one side: 51 same-team of the 97 it shares with
 the truth on IDSSE, where the truth has 28.
+
+**How much each kind of mistake is worth.** v5 over the original 10 (0.516), given part of the
+truth: the true restarting team after each stoppage, +0.010; the true stop and restart instants,
++0.062; the true alive/dead on every frame, +0.091; the true team on every live frame, +0.287. So
+most of what is left is naming the team in open play, not the stoppages. Three ideas aimed at
+stoppages were tried and dropped, each moving spellF1 by 0.005 or less: states for the restart
+phase, a stoppage that remembers the last team, and simulated team anchors.
+
+**Neither IDSSE nor Metrica can validate a clue that reads the ball during a stoppage.** IDSSE
+freezes the ball while play is dead: it moves exactly zero on 100% of dead frames. Metrica shows
+no ball on dead frames (seen on 0-8% of them). A ball-speed clue gained +0.051 on IDSSE for that
+reason alone and was dropped. Our ball does neither: on BAR-ATH it is usable on 26% of frames in
+the 5 s before a tagged set piece, and still (under 0.5 m/s) on 3% of those.
 
 Read the two sets differently:
 

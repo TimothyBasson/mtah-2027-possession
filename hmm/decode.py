@@ -1,5 +1,5 @@
-"""Sticky HMM v5: nearest-player gap and distance + where the ball is + how fast the players move +
-who kicked the ball in flight, decoded with Viterbi, one path per half.
+"""Sticky HMM v6: nearest-player gap and distance + where the ball is + how fast the players move +
+who kicked the ball in flight + which team is spread wider, decoded with Viterbi, one path per half.
 
 v2 added a ball that goes out of play: a missing ball on its own is close to neutral, and D comes
 from the ball being seen past a line, or lost at or past one. v3 adds the players' speed. When the
@@ -31,11 +31,19 @@ zero (up on the 3 Metrica samples, slightly down on 6 of the 7 IDSSE matches), a
 use on BAR-ATH confirms its dead row. With no evidence to separate them, the default is the one
 with fewer assumptions. fit_place's docstring has the numbers.
 
+v6 adds the width clue (hmm/clues.py team_width_difference): the team with the ball spreads out
+across the pitch and the team without it closes up. It reads the players only, so it speaks on the
+frames where the ball is missing, which is where v5 names the wrong team most often. It changes
+slowly, so each frame adds little that the last did not, and it gets a quarter of the other clues'
+weight (WIDTH_WEIGHT). On the external matches it lifts spellF1 on all three sets, by 0.01-0.02
+(external/README.md).
+
 The gap clue counts a goalkeeper slot near a goal for the team defending that goal, not the team
 the metadata gives the slot: the tracker sometimes carries one keeper under the other keeper's
 slot (hmm/clues.py).
 
-    python -m hmm.decode                    # writes evaluation/results/hmm_v5.csv
+    python -m hmm.decode                    # writes evaluation/results/hmm_v6.csv
+    python -m hmm.decode --no-width         # v5 again
     python -m hmm.decode --weight 0.1 --hand-gap   # v4 again; either flag alone takes that one
                                             # change back out, to tell them apart
     python -m hmm.decode --fit-place        # with the place table counted on the match
@@ -69,7 +77,7 @@ from hmm.ball import flight_clue, mirror_flight  # noqa: E402
 from hmm.clues import (  # noqa: E402
     KEEPER_ON_BALL, MISSING_AFTER_LINE, N_DISTANCE_BINS, N_GAP_BINS, N_PLACES, ball_is_usable,
     ball_place_category, gap_distance_category, keeper_slots, load_distances, mirror_gap_distance,
-    speed_category)
+    speed_category, width_category)
 from hmm.model import (  # noqa: E402
     A, D, H, STATES, baum_welch, build_log_emit, forward_backward, rate_log_trans, viterbi)
 from starter.baseline import RESULTS_DIR, team_of_each_track, write_submission  # noqa: E402
@@ -182,6 +190,24 @@ CARRY_SECONDS = 30
 # to 0.1.
 PLACE_FLOOR = 0.02
 
+# p(width category | H), away-much-wider .. home-much-wider (hmm/clues.py WIDTH_EDGES), and given D.
+# Counted on the 30 external matches' labels, each of the three sets counting once
+# (python external/score_hmm.py --tables prints them); no set's home row is further than 0.024 from
+# this one. First counted with a floor of 3 tracked players; recounted at MIN_WIDTH_PLAYERS = 6,
+# --tables prints the same rows to three decimals (within 0.001), so the constants stand. A mirrors H, and D is counted both ways round so it cannot favour a team.
+WIDTH_GIVEN_HOME = np.array([0.015, 0.025, 0.051, 0.047, 0.061, 0.083, 0.106, 0.194, 0.217, 0.202])
+WIDTH_GIVEN_DEAD = np.array([0.087, 0.100, 0.135, 0.092, 0.085, 0.085, 0.092, 0.135, 0.100, 0.087])
+# Trust exponent on the width clue. A team's shape changes over seconds, not frames, so it gets
+# less than the ball clues' WEIGHT. This number is tuned on the external matches it is judged on:
+# spellF1 gain over v5 at 0.02 / 0.035 / 0.05 / 0.075 / 0.1 / 0.15 / 0.2 is
+#   IDSSE        +0.017 +0.020 +0.023 +0.024 +0.025 +0.015 +0.006
+#   Metrica      +0.007 +0.007 +0.010 +0.006  0.000 -0.028 -0.063
+#   SkillCorner  +0.006 +0.008 +0.010 +0.012 +0.016 +0.018 +0.018   (ball as recorded)
+# Chosen with each set left out in turn, the other two pick 0.05, 0.1 and 0.05, and the set left
+# out then gains +0.023 (IDSSE), 0.000 (Metrica, at 0.1) and +0.010 (SkillCorner): +0.011 on
+# average, which is the honest size of this clue. 0.05 is the largest weight at which no set loses.
+WIDTH_WEIGHT = 0.05
+
 # Trust exponent on each frame's clue. At 25 fps neighbouring frames repeat the same look at the
 # ball; 0.2 counts 5 frames (0.2 s) as one independent observation. v1-v4 used 0.1. Chosen on the
 # 10 external matches, where spellF1 with the v4 clues is 0.443 at 0.1, 0.477 at 0.15, 0.486 at
@@ -245,6 +271,13 @@ def flight_table(home=FLIGHT_GIVEN_HOME):
     home = np.asarray(home) / np.sum(home)  # the rounded constants sum to 0.999
     away = mirror_flight(home)
     return np.log(np.array([home, away, (home + away) / 2]))
+
+
+def width_table(home=WIDTH_GIVEN_HOME, dead=WIDTH_GIVEN_DEAD):
+    """log p(width category | state), states x width categories. A is H with the bins reversed."""
+    home = np.asarray(home) / np.sum(home)  # the rounded constants do not sum to exactly 1
+    dead = np.asarray(dead) / np.sum(dead)
+    return np.log(np.array([home, home[::-1], dead]))
 
 
 def transitions():
@@ -346,26 +379,28 @@ def place_placebo(gap, place, speed, flight, log_trans, log_start, segments, kic
     return out
 
 
-def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIGHT):
+def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIGHT, extra=()):
     """Labels for every video frame: one Viterbi path per half, X everywhere else.
 
-    clues is a list of (obs, log_table), each obs covering every video frame."""
+    clues is a list of (obs, log_table), each obs covering every video frame, all at `weight`.
+    extra is a list of (obs, log_table, weight) for clues with a weight of their own."""
     labels = np.full(len(clues[0][0]), "X", dtype="<U1")
     for lo, hi in segments:
-        log_emit = build_log_emit([(obs[lo:hi], table, weight) for obs, table in clues])
+        log_emit = build_log_emit([(obs[lo:hi], table, weight) for obs, table in clues]
+                                  + [(obs[lo:hi], table, own) for obs, table, own in extra])
         pin_dead_before_kickoff(log_emit, lo, hi, kickoffs)
         labels[lo:hi] = STATES[viterbi(log_emit, log_trans, log_start)]
     return labels
 
 
 def load_observations(game=GAME, data_dir=None):
-    """(gap-distance, place, speed, flight) categories for every video frame."""
+    """(gap-distance, place, speed, flight, width) categories for every video frame."""
     meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
     n_frames = source_frames("tactical", game)
     print("reading {} (cached after the first run) ...".format(os.path.basename(raw_path)))
     pitch = GAMES[game]["pitch"]
     keepers = keeper_slots(meta_path)
-    ball_x, ball_y, d_home, d_away, speed, stats = load_distances(
+    ball_x, ball_y, d_home, d_away, speed, width, stats = load_distances(
         raw_path, team_of_each_track(meta_path), n_frames, pitch, FPS, CACHE_DIR,
         keepers=keepers, halves=graded_segments(game))
     print("  {} tracking lines, {} malformed and skipped, {} frames with no line "
@@ -386,11 +421,12 @@ def load_observations(game=GAME, data_dir=None):
                                   np.where(usable, ball_y, np.nan), d_home, d_away, FPS)
     print("  {} touches, {:.0%} with a player within reach; {:.1%} of frames in flight".format(
         len(touches["frame"]), np.mean(touches["team"] >= 0), np.mean(flight >= 0)))
-    return gap, place, speed_category(speed), flight
+    return gap, place, speed_category(speed), flight, width_category(width)
 
 
 PLACE_NAMES = ["in play", "outside", "lost@line", "lost@play", "stale"]
 SPEED_NAMES = ["<0.6", "<0.9", "<1.2", "<1.5", "<2.0", "<2.5", ">=2.5"]
+WIDTH_NAMES = ["<-5", "<-3.5", "<-2", "<-1", "<0", "<1", "<2", "<3.5", "<5", ">=5"]
 FLIGHT_NAMES = ["H<0.5s", "H<1.5s", "H>=1.5s", "A<0.5s", "A<1.5s", "A>=1.5s", "unknown"]
 
 
@@ -521,12 +557,14 @@ def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", help="default evaluation/results/hmm_v5.csv, with the "
+    parser.add_argument("--out", help="default evaluation/results/hmm_v6.csv, with the "
                         "variant flags in the name if any is set")
     parser.add_argument("--weight", type=float, default=WEIGHT,
                         help="emission weight (v5: {}, v4: {})".format(WEIGHT, WEIGHT_V4))
     parser.add_argument("--hand-gap", action="store_true",
                         help="ablation: v4's hand-set gap table, without the distance")
+    parser.add_argument("--no-width", action="store_true",
+                        help="ablation: without the width clue, which is v5")
     parser.add_argument("--fit-place", action="store_true",
                         help="count the ball-place table on the match (fit_place) instead of "
                              "using the hand-set one")
@@ -539,11 +577,12 @@ def main():
                              "the decoder (tempered, a heuristic)".format(WEIGHT))
     args = parser.parse_args()
 
-    gap, place, speed, flight = load_observations()
+    gap, place, speed, flight, width = load_observations()
     segments = graded_segments()
     report_shares(place, PLACE_NAMES, "ball place", segments)
     report_shares(speed, SPEED_NAMES, "player speed (m/s)", segments)
     report_shares(flight, FLIGHT_NAMES, "flight", segments)
+    report_shares(width, WIDTH_NAMES, "width, home minus away (m)", segments)
     log_trans = transitions()
     gap_clue = (gap, gap_distance_table())
     if args.hand_gap:  # the gap bin alone is the category's row in the gap x distance grid
@@ -560,12 +599,14 @@ def main():
     # gap, place, speed, flight: the order report_baum_welch names them in
     clues = [others[0], (place, place_table(live, dead))] + others[1:]
 
-    labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight)
+    extra = [] if args.no_width else [(width, width_table(), WIDTH_WEIGHT)]
+    labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight, extra=extra)
     ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),
                                            ("_handgap", args.hand_gap),
+                                           ("_nowidth", args.no_width),
                                            ("_fitplace", args.fit_place)) if on)
     path = write_submission(
-        args.out or os.path.join(RESULTS_DIR, "hmm_v5{}.csv".format(ablation)), labels)
+        args.out or os.path.join(RESULTS_DIR, "hmm_v6{}.csv".format(ablation)), labels)
     print("-> {}".format(os.path.relpath(path, ROOT)))
     summarise(labels, segments)
     report_dead_runs(labels, place, segments, load_smart_tagging())
