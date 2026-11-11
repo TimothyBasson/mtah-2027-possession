@@ -18,6 +18,12 @@ starter = [
     "matplotlib",
     "notebook",
 ]
+# seq/ and external/score_seq.py; mirrors requirements-seq.txt. Not in default-groups, and not in
+# uv.lock until `uv lock` is next run.
+seq = [
+    "scikit-learn==1.6.1",
+    "threadpoolctl==3.7.0",
+]
 
 [tool.uv]
 package = false

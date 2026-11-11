@@ -2,10 +2,10 @@
 
     python external/score_seq.py [--seen 0.59] [--drop k_] [--tag name] [--refit]
 
-Each set (IDSSE, Metrica, SkillCorner) is scored by a model fitted on the other two only, the two
-counting equally. The chain's numbers are chosen the same way: for the set being scored, the
-setting that does best on the other two sets' left-out predictions, so nothing about a set's own
-score picks its setting. The ball is the one external/score_hmm.py gives its models (same seed),
+Each set (IDSSE, Metrica, SkillCorner) is scored by a scorer fitted on the other two only, the two
+counting equally. The chain's numbers and the hybrid's weight are chosen for a set without any of
+its labels: on each of the other two sets, as scored by a scorer fitted on the third set alone.
+That is six fits a run: three for the reported scores, three for the choosing. The ball is the one external/score_hmm.py gives its models (same seed),
 so the rows compare with that table.
 
 --drop   leave out feature groups by prefix (p_ players, b_ ball against players, k_ ball alone).
@@ -16,7 +16,8 @@ Two models are scored. "seq" is the learned labeller on its own chain. "hybrid" 
 labeller's per-frame log-probabilities added to its clues at a weight, decoded by hmm_v6's own
 chain at 25 fps; at weight 0 it is hmm_v6 itself, which is the row to compare against. The HMM's
 tables are counted as in external/score_hmm.py (each provider with the other's, SkillCorner with
-the shipped constants), and the weight is chosen for each set on the other two.
+the shipped constants). The labeller scores every 5th frame and each score is held for 5 frames,
+so the weight is per 25 fps frame: at another stride the same weight is a different trust.
 """
 
 import argparse
@@ -41,8 +42,7 @@ from seq import model  # noqa: E402
 
 SETS = ("idsse", "metrica", "skillcorner")
 CACHE = os.path.join(ROOT, "data", "cache", "seq")
-GRID = dict(weight=(0.15, 0.25, 0.4, 0.6, 1.0), possession=(4.0, 8.0, 12.0, 20.0),
-            stoppage=(4.0, 8.0, 16.0))
+GRID = dict(weight=(0.4, 1.0), possession=(4.0, 8.0, 12.0), stoppage=(8.0, 16.0))
 HYBRID_WEIGHTS = (0.0, 0.05, 0.1, 0.2, 0.4)
 
 
@@ -149,6 +149,7 @@ def main():
         meta[name] = dict(labels=d["labels"], halves=[tuple(h) for h in d["halves"]],
                           fps=int(d["fps"]))
 
+    others_of = {k: [o for o in SETS if o != k] for k in SETS}
     if a.refit or not os.path.exists(prob_path):
         drop = tuple(p for p in a.drop.split(",") if p)
         feats = {}
@@ -158,33 +159,44 @@ def main():
         names = feats[next(iter(feats))][2]
         keep = np.array([not n.startswith(drop) if drop else True for n in names])
         print("{} of {} features kept".format(keep.sum(), len(keep)))
-        probs = {}
-        for held in SETS:
+
+        def fit_on(sets):
+            """A scorer fitted on these sets, each counting equally, at 2.5 Hz, teams both ways."""
             Xs, ys, ws = [], [], []
-            for other in SETS:
-                if other == held:
-                    continue
-                rows = sum(np.sum(feats[n][4][::2] != "X") for n in feats if n.startswith(other))
+            for k in sets:
+                rows = sum(np.sum(feats[n][4][::2] != "X") for n in feats if n.startswith(k))
                 for n in feats:
-                    if not n.startswith(other):
+                    if not n.startswith(k):
                         continue
                     X, Xsw, _, _, y = feats[n]
-                    ok = np.flatnonzero(y != "X")[::2]          # 2.5 Hz, both ways round
+                    ok = np.flatnonzero(y != "X")[::2]
                     code = np.array([model.CODES[c] for c in y[ok]])
                     Xs += [X[ok][:, keep], Xsw[ok][:, keep]]
                     ys += [code, np.where(code == 2, 2, 1 - code)]
                     ws += [np.full(2 * len(ok), 1.0 / rows)]
             Xtr, ytr, wtr = np.concatenate(Xs), np.concatenate(ys), np.concatenate(ws)
-            print("fit without {}: {} rows".format(held, len(ytr)), flush=True)
-            clf = model.fit(Xtr, ytr, wtr * len(wtr) / wtr.sum(), max_iter=a.max_iter)
-            del Xtr
-            for n in feats:
-                if n.startswith(held):
-                    probs[n] = model.probabilities(clf, feats[n][0][:, keep], feats[n][1][:, keep])
+            print("fit on {}: {} rows".format(" + ".join(sets), len(ytr)), flush=True)
+            return model.fit(Xtr, ytr, wtr * len(wtr) / wtr.sum(), max_iter=a.max_iter)
+
+        def score_sets(clf, sets, prefix=""):
+            return {prefix + n: model.probabilities(clf, feats[n][0][:, keep], feats[n][1][:, keep])
+                    for n in feats if n.startswith(tuple(sets))}
+
+        probs = {}
+        for held in SETS:                       # the scores that are reported
+            probs.update(score_sets(fit_on(others_of[held]), [held]))
+        for alone in SETS:                      # the scores the settings are chosen on
+            probs.update(score_sets(fit_on([alone]), others_of[alone], "by_" + alone + "_"))
         np.savez(prob_path, **probs, **{"frames_" + n: feats[n][3] for n in feats})
     z = np.load(prob_path)
     probs = {n: z[n] for n in paths}
     frames = {n: z["frames_" + n] for n in paths}
+
+    def tuning_prob(name, held):
+        """This match's scores from the scorer fitted on the one set that is neither its own nor
+        `held`: nothing in them has seen a label of `held`."""
+        (alone,) = [k for k in SETS if k != held and not name.startswith(k)]
+        return z["by_{}_{}".format(alone, name)]
 
     # per-frame quality before any decoding
     for k in SETS:
@@ -196,41 +208,45 @@ def main():
                 acc.append(np.mean(model.STATES[np.argmax(probs[n][ok], axis=1)] == y[ok]))
         print("{:11s} frame accuracy of the scorer alone {:.3f}".format(k, np.mean(acc)))
 
-    def run(name, **kw):
+    def run(name, prob, **kw):
         m = meta[name]
-        pred = model.decode(probs[name], frames[name], len(m["labels"]), m["halves"], m["fps"],
-                            **kw)
+        pred = model.decode(prob, frames[name], len(m["labels"]), m["halves"], m["fps"], **kw)
         return spell_f1(m["labels"], pred)
+
+    def mean_over(k, per_match):
+        return np.mean([per_match[n] for n in paths if n.startswith(k)], axis=0)
 
     keys = list(GRID)
     settings = [dict(zip(keys, v)) for v in itertools.product(*GRID.values())]
-    table = {n: np.array([run(n, **s)[0] for s in settings]) for n in paths}
-    by_set = {k: np.mean([table[n] for n in paths if n.startswith(k)], axis=0) for k in SETS}
-    print("\nseq alone: left-out scores, chain chosen on the other two sets:")
+    print("\nseq alone: left-out scores, chain chosen on the other two sets as scored by a scorer "
+          "that never saw this one:")
     for k in SETS:
-        others = np.mean([by_set[o] for o in SETS if o != k], axis=0)
-        best = int(np.argmax(others))
-        rows = np.array([run(n, **settings[best]) for n in paths if n.startswith(k)])
+        tune = {n: np.array([run(n, tuning_prob(n, k), **s)[0] for s in settings])
+                for n in paths if not n.startswith(k)}
+        best = int(np.argmax(np.mean([mean_over(o, tune) for o in others_of[k]], axis=0)))
+        rows = np.array([run(n, probs[n], **settings[best]) for n in paths if n.startswith(k)])
         print("  {:11s} spellF1 {:.3f}  macroF1 {:.3f}  alive/dead {:.3f}  team_acc {:.3f}   "
-              "{}   (own best {:.3f}, worst match {:.3f})".format(
-                  k, *rows.mean(axis=0), settings[best], by_set[k].max(), rows[:, 0].min()))
-    every = np.mean([by_set[k] for k in SETS], axis=0)
-    print("  one setting for all three: {} -> {}".format(
-        settings[int(np.argmax(every))],
-        "  ".join("{} {:.3f}".format(k, by_set[k][int(np.argmax(every))]) for k in SETS)))
+              "{}   (worst match {:.3f})".format(k, *rows.mean(axis=0), settings[best],
+                                                 rows[:, 0].min()))
 
     emit = hmm_emissions(paths, a.seen)
-    hyb = {n: np.array([spell_f1(meta[n]["labels"], hybrid_labels(
-        np.load(emit[n]).astype(float), probs[n], frames[n], meta[n]["halves"], w))
-        for w in HYBRID_WEIGHTS]) for n in paths}
-    by_set = {k: np.mean([hyb[n] for n in paths if n.startswith(k)], axis=0) for k in SETS}
+
+    def hybrid(name, prob):
+        return np.array([spell_f1(meta[name]["labels"], hybrid_labels(
+            np.load(emit[name]).astype(float), prob, frames[name], meta[name]["halves"], w))
+            for w in HYBRID_WEIGHTS])
+
+    hyb = {n: hybrid(n, probs[n]) for n in paths}
+    by_set = {k: mean_over(k, hyb) for k in SETS}
     print("\nhybrid (hmm_v6 + seq at a weight): spellF1 macroF1 alive/dead team_acc")
     for i, w in enumerate(HYBRID_WEIGHTS):
         print("  weight {:<5}".format(w) + " | ".join(
             k + " " + " ".join("{:.3f}".format(v) for v in by_set[k][i]) for k in SETS))
-    print("\nhybrid - hmm_v6 in spellF1, paired by match, weight chosen on the other two sets:")
+    print("\nhybrid - hmm_v6 in spellF1, paired by match, weight chosen on the other two sets as "
+          "scored by a scorer that never saw this one:")
     for k in SETS:
-        best = int(np.argmax(np.mean([by_set[o][:, 0] for o in SETS if o != k], axis=0)))
+        tune = {n: hybrid(n, tuning_prob(n, k))[:, 0] for n in paths if not n.startswith(k)}
+        best = int(np.argmax(np.mean([mean_over(o, tune) for o in others_of[k]], axis=0)))
         names = [n for n in paths if n.startswith(k)]
         diff = np.array([hyb[n][best, 0] - hyb[n][0, 0] for n in names])
         print("  {:11s} weight {:<5} spellF1 {:.3f}  mean {:+.3f}  standard error {:.3f}  worst "

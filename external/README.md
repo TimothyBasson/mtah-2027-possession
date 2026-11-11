@@ -221,36 +221,64 @@ Scores also get no help from set-piece tags, because these matches have no Smart
 
 Boosted trees score each frame H / A / D from team-level features, and a chain decodes the half
 (`seq/model.py`, after Kim et al., KDD 2023, and PathCRF, arXiv 2602.12080). Each set is scored by a
-scorer fitted on the other two sets only, the two counting equally. Needs scikit-learn; one run
-is three fits and takes about 20 minutes, cached under `data/cache/seq/`.
+scorer fitted on the other two sets only, the two counting equally. Needs scikit-learn
+(`pip install -r requirements-seq.txt`, pinned); one run is six fits and takes about 40 minutes,
+cached under `data/cache/seq/`. A fit at 1, 4 and 8 threads gave byte-identical probabilities;
+the thread count is fixed anyway (`seq.model.THREADS`).
 
 "hybrid" is `hmm_v6` with the labeller's per-frame log-probabilities added to its clues at a
-weight, chosen for each set on the other two (0.1, 0.2 and 0.2). At weight 0 it reproduces the
-`hmm_v6` row above exactly.
+weight. At weight 0 it reproduces the `hmm_v6` row above exactly. The labeller scores every 5th
+frame and each score is held for 5 frames, so the weight is per 25 fps frame.
 
-| spellF1 | hmm_v6 | seq alone | hybrid | hybrid - hmm_v6, paired (standard error) | matches up |
+**The chain and the weight are chosen for a set without any of its labels**: on each of the other
+two sets, as scored by a scorer fitted on the third set alone. That picks a weight of 0.05, 0.1
+and 0.05:
+
+| spellF1 | hmm_v6 | seq alone | hybrid | hybrid - hmm_v6, paired (standard error) | worst match | matches up |
+|---|---|---|---|---|---|---|
+| IDSSE mean (7) | 0.441 | 0.474 | 0.494 | +0.053 (0.003) | +0.039 | 7 of 7 |
+| Metrica mean (3) | 0.753 | 0.637 | 0.776 | +0.022 (0.013) | -0.001 | 2 of 3 |
+| SkillCorner mean (20) | 0.354 | 0.414 | 0.407 | +0.053 (0.003) | +0.027 | 20 of 20 |
+
+Metrica's gain is not established: three matches, one of them level, and inside the 0.04 band.
+
+The nested choice leans to low weights, because a scorer fitted on one set is weaker than the
+two-set scorer whose weight it is choosing. Every weight, with the reported (two-set) scorers:
+
+| hybrid spellF1 by weight | 0 (`hmm_v6`) | 0.05 | 0.1 | 0.2 | 0.4 |
 |---|---|---|---|---|---|
-| IDSSE mean (7) | 0.441 | 0.471 | 0.524 | +0.083 (0.004) | 7 of 7 |
-| Metrica mean (3) | 0.753 | 0.655 | 0.777 | +0.024 (0.010) | 3 of 3 |
-| SkillCorner mean (20) | 0.354 | 0.407 | 0.408 | +0.055 (0.004) | 20 of 20 |
+| IDSSE | 0.441 | 0.494 | 0.517 | 0.536 | 0.537 |
+| Metrica | 0.753 | 0.769 | 0.776 | 0.779 | 0.760 |
+| SkillCorner | 0.354 | 0.407 | 0.411 | 0.410 | 0.398 |
 
-Most of the hybrid's gain is in alive/dead (IDSSE 0.903 to 0.949, SkillCorner 0.903 to 0.936);
-team accuracy moves by about 0.01 or less. The chain's own settings move seq alone by 0.01-0.02
-and not consistently, so the per-frame scorer is its limit.
+No set loses at any weight up to 0.4, and 0.1 to 0.2 is the flat top on all three. Reading the
+weight off this table is in-sample by one number in five.
 
-**The ball-alone features (`k_`) are left out by default.** With them in (`--drop "" --tag all`):
+Most of the hybrid's gain is in alive/dead (at 0.1: IDSSE 0.903 to 0.948, SkillCorner 0.903 to
+0.936); team accuracy moves by about 0.01 or less. So the labeller is a better stoppage detector
+more than a better judge of which team has the ball. The outside sets lose the ball at random
+(`drop_ball`), not around restarts as BAR-ATH does, which is the main risk to this gain carrying
+over and is not yet tested.
+
+**The ball-alone features (`k_`) are left out by default.** With them in (`--drop "" --tag all`),
+each column with its own nested choice:
 
 | spellF1 | seq alone, with k_ | seq alone, without | hybrid, with k_ | hybrid, without |
 |---|---|---|---|---|
-| IDSSE | 0.474 | 0.471 | 0.534 | 0.524 |
-| Metrica | 0.721 | 0.655 | 0.799 | 0.777 |
-| SkillCorner | 0.352 | 0.407 | 0.361 | 0.408 |
+| IDSSE | 0.474 | 0.474 | 0.510 | 0.494 |
+| Metrica | 0.723 | 0.637 | 0.800 | 0.776 |
+| SkillCorner | 0.359 | 0.414 | 0.383 | 0.407 |
 
 A scorer fitted on IDSSE and Metrica learns that a still or missing ball means a stoppage, which
-is how those two providers record one (above), and held-out SkillCorner pays for it. Metrica
-gains from them because its labels and its ball come from the same events. Players only
-(`--drop b_,k_ --tag players`) scores 0.406 / 0.524 / 0.389 alone.
+is how those two providers record one (above), and held-out SkillCorner pays for it: its frame
+accuracy is 0.71 with them and 0.80 without. Metrica gains from them because its labels and its
+ball come from the same events. Players only (`--drop b_,k_ --tag players`) scores 0.405 / 0.520 /
+0.389 alone and 0.488 / 0.738 / 0.398 as the hybrid, which is below `hmm_v6` on Metrica.
 
-Not settled: the feature groups were compared on all three sets, the hybrid weight is picked from
-four values, and `b_touch_since` still reads a ball that IDSSE freezes. Nothing in `seq/` has
-tests yet, and no script in the repo fits on all 30 matches and labels BAR-ATH.
+Not settled: the feature groups were compared on all three sets, and `b_touch_since` still reads
+a ball that IDSSE freezes. Nothing in `seq/` has tests yet. **No script in the repo fits on all 30
+matches and labels BAR-ATH, so none of this is in the submission.** `seq/features.py` now takes
+the (frames, slots) team map `hmm/clues.team_by_frame` gives, so that path can use the same keeper
+correction as `hmm_v6`. Several features (`p_tracked`, the defensive lines, the 6-player floor)
+depend on tracking quality the outside sets do not show, and how they behave on BAR-ATH's
+fragmented slots is unchecked. `uv.lock` does not include the `seq` group yet.

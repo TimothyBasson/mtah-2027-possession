@@ -16,10 +16,10 @@ numbers (WEIGHT, POSSESSION_SECONDS, STOPPAGE_SECONDS).
 The ball-alone features (k_: its speed, whether it is seen, how near a line) are built but left
 out by default (external/score_seq.py --drop). IDSSE freezes the ball in a stoppage and Metrica
 hides it, and a scorer fitted on those two learns exactly that: with k_ in, held-out SkillCorner
-drops from 0.407 to 0.352 spellF1 and its frame accuracy from 0.80 to 0.71. Without k_, IDSSE is
-unchanged (0.471 against 0.474), so nothing real is lost there.
+drops from 0.414 to 0.359 spellF1 and its frame accuracy from 0.80 to 0.71. Without k_, IDSSE is
+unchanged (0.474 both ways), so nothing real is lost there.
 
-On its own chain the labeller is about level with hmm_v6. Its use is as one more clue in the
+On its own chain the labeller is ahead of hmm_v6 on two sets and behind on Metrica. Its use is as one more clue in the
 HMM (external/score_seq.py, "hybrid"), where the two make different mistakes.
 """
 
@@ -33,6 +33,7 @@ from hmm.model import STATES, rate_log_trans, viterbi  # noqa: E402
 from seq import features  # noqa: E402
 
 STRIDE = 5                    # frames between scored frames (5 Hz at 25 fps)
+THREADS = 4                   # fixed, so the fit does not depend on the machine's core count
 WEIGHT = 0.5                  # trust in each scored frame's log-probability
 POSSESSION_SECONDS = 12.0
 STOPPAGE_SECONDS = 8.0
@@ -42,23 +43,31 @@ CODES = {"H": 0, "A": 1, "D": 2}
 
 
 def featurise(d, ball, swap=False, stride=STRIDE):
-    """(X, names, frames) for one match; swap=True names the teams the other way round."""
-    team = 1 - d["team"] if swap else d["team"]
+    """(X, names, frames) for one match; swap=True names the teams the other way round.
+    d["team"] is one team per slot, or a (frames, slots) map (hmm/clues.team_by_frame)."""
+    team = 1 - np.asarray(d["team"]) if swap else d["team"]
     return features.compute(d["players"], ball, team, [tuple(h) for h in d["halves"]],
                             d["pitch"], int(d["fps"]), stride=stride)
 
 
 def fit(X, y, sample_weight=None, max_iter=300, seed=0):
+    """The per-frame scorer. No subsampling and no early stopping, a fixed seed and a fixed thread
+    count (THREADS), with scikit-learn pinned in requirements-seq.txt, so a refit on the same rows
+    gives the same trees."""
     from sklearn.ensemble import HistGradientBoostingClassifier
+    from threadpoolctl import threadpool_limits
     clf = HistGradientBoostingClassifier(max_iter=max_iter, learning_rate=0.1, max_leaf_nodes=63,
                                          min_samples_leaf=200, l2_regularization=1.0,
                                          early_stopping=False, random_state=seed)
-    return clf.fit(X, y, sample_weight=sample_weight)
+    with threadpool_limits(limits=THREADS):
+        return clf.fit(X, y, sample_weight=sample_weight)
 
 
 def probabilities(clf, X, X_swapped):
     """p(H, A, D) per row, averaged with the swapped-team view so neither name is favoured."""
-    p, q = clf.predict_proba(X), clf.predict_proba(X_swapped)
+    from threadpoolctl import threadpool_limits
+    with threadpool_limits(limits=THREADS):
+        p, q = clf.predict_proba(X), clf.predict_proba(X_swapped)
     return 0.5 * (p + q[:, [1, 0, 2]])
 
 

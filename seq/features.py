@@ -13,6 +13,10 @@ Three groups, named by prefix so a group can be left out and the loss measured:
 
 Each base signal is given as its value at the frame and as its mean over the windows in WINDOWS
 before and after it (the submission is produced offline, so the future may be read).
+
+Every half is computed on its own: no window, carried value or timer reads across halftime, and
+frames outside the halves are NaN. `team` is either one team per slot or a (frames, slots) map,
+as hmm/clues.team_by_frame gives for BAR-ATH, where a keeper slot can change team by frame.
 """
 
 import os
@@ -39,15 +43,20 @@ def _nan(func, *args, **kw):
         return func(*args, **kw)
 
 
-def attack_sign(px, team, halves):
-    """+1 on frames where home attacks towards +x, -1 where towards -x; constant within a half."""
-    sign = np.ones(len(px))
-    home = _nan(np.nanmean, px[:, team == 0], axis=1)
-    away = _nan(np.nanmean, px[:, team == 1], axis=1)
-    for lo, hi in halves:
-        diff = _nan(np.nanmean, (home - away)[lo:hi + 1])
-        sign[lo:hi + 1] = -1.0 if diff > 0 else 1.0   # home's centre nearer the goal it defends
-    return sign
+def sides(team, n_frames):
+    """(is_home, is_away) as (frames, slots) masks, from a per-slot or per-frame team map."""
+    team = np.asarray(team)
+    if team.ndim == 1:
+        team = np.broadcast_to(team, (n_frames, len(team)))
+    return team == 0, team == 1
+
+
+def attack_sign(px, is_home, is_away):
+    """+1 if home attacks towards +x over these frames (one half), -1 if towards -x: a team's
+    centre sits, on average, on its own goal's side of the other team's."""
+    home = _nan(np.nanmean, np.where(is_home, px, np.nan), axis=1)
+    away = _nan(np.nanmean, np.where(is_away, px, np.nan), axis=1)
+    return -1.0 if _nan(np.nanmean, home - away) > 0 else 1.0
 
 
 def velocities(px, py, fps):
@@ -94,6 +103,7 @@ def _carry(values, forward=True):
 
 def _window_mean(x, w, before):
     """NaN-aware mean of x over the w frames before (t-w..t-1) or after (t+1..t+w) each frame."""
+    x = np.asarray(x, dtype=np.float64)   # a float32 running sum drifts by ~0.1 over a half
     ok = np.isfinite(x)
     cs = np.concatenate([[0.0], np.cumsum(np.where(ok, x, 0.0))])
     cn = np.concatenate([[0], np.cumsum(ok)])
@@ -106,31 +116,32 @@ def _window_mean(x, w, before):
         return np.where(count > 0, (cs[hi] - cs[lo]) / count, np.nan)
 
 
-def base_signals(players, ball, team, halves, pitch, fps):
-    """dict name -> per-frame signal. Positive means "home" wherever a signal takes a side."""
+def base_signals(players, ball, team, pitch, fps):
+    """dict name -> per-frame signal over one half (the frames given are read as one unbroken
+    stretch of play). Positive means "home" wherever a signal takes a side."""
     px, py = players[:, :, 0].astype(np.float32), players[:, :, 1].astype(np.float32)
     bx, by = ball[:, 0].astype(float), ball[:, 1].astype(float)
     length, width = float(pitch[0]), float(pitch[1])
     n = len(px)
-    sign = attack_sign(px, team, halves)
-    # home attacks +x: flip x about the centre line on the halves where it does not
-    ax = np.where(sign[:, None] > 0, px, length - px)
-    abx = np.where(sign > 0, bx, length - bx)
+    is_home, is_away = sides(team, n)
+    sign = attack_sign(px, is_home, is_away)
+    # home attacks +x: flip x about the centre line in a half where it does not
+    ax = px if sign > 0 else length - px
+    abx = bx if sign > 0 else length - bx
     vx, vy = velocities(px, py, fps)
-    avx = vx * sign[:, None].astype(np.float32)
+    avx = vx * np.float32(sign)
     speed = np.hypot(vx, vy)
-    is_home, is_away = team == 0, team == 1
     s = {}
 
     def shape(sel):
-        x, y = ax[:, sel], py[:, sel]
+        x, y = np.where(sel, ax, np.nan), np.where(sel, py, np.nan)
         count = np.isfinite(x).sum(axis=1)
         few = count < MIN_PLAYERS
         cx, cy = _nan(np.nanmean, x, axis=1), _nan(np.nanmean, y, axis=1)
         out = dict(cx=cx, cy=cy, sx=_nan(np.nanstd, x, axis=1), sy=_nan(np.nanstd, y, axis=1),
                    spread=_nan(np.nanmean, np.hypot(x - cx[:, None], y - cy[:, None]), axis=1),
-                   vx=_nan(np.nanmean, avx[:, sel], axis=1),
-                   speed=_nan(np.nanmean, speed[:, sel], axis=1),
+                   vx=_nan(np.nanmean, np.where(sel, avx, np.nan), axis=1),
+                   speed=_nan(np.nanmean, np.where(sel, speed, np.nan), axis=1),
                    count=count.astype(float))
         xs = np.sort(np.where(np.isfinite(x), x, np.inf), axis=1)
         out["back"] = np.where(np.isfinite(xs[:, 1]), xs[:, 1], np.nan)   # second-lowest x
@@ -168,7 +179,7 @@ def base_signals(players, ball, team, halves, pitch, fps):
                  lead_y - by[:, None].astype(np.float32)) / REACH_SPEED
 
     def nearest(d, sel, k=0):
-        part = np.sort(np.where(np.isfinite(d[:, sel]), d[:, sel], np.inf), axis=1)[:, k]
+        part = np.sort(np.where(sel & np.isfinite(d), d, np.inf), axis=1)[:, k]
         return np.where(np.isfinite(part), part, np.nan)
 
     d_home, d_away = nearest(dist, is_home), nearest(dist, is_away)
@@ -179,14 +190,14 @@ def base_signals(players, ball, team, halves, pitch, fps):
     seen = np.isfinite(bx)
     for radius in (5.0, 12.0):
         near = _nan(np.less, dist, radius)
-        diff = (near[:, is_home].sum(axis=1) - near[:, is_away].sum(axis=1)).astype(float)
+        diff = ((near & is_home).sum(axis=1) - (near & is_away).sum(axis=1)).astype(float)
         s["b_near{:.0f}_diff".format(radius)] = np.where(seen, diff, np.nan)
     s["b_ahead_of_home"] = abx - home["cx"]      # the ball relative to each team's block
     s["b_ahead_of_away"] = abx - away["cx"]
-    behind_home = _nan(np.nanmean, np.where(np.isfinite(ax[:, is_home]),
-                                            ax[:, is_home] < abx[:, None], np.nan), axis=1)
-    behind_away = _nan(np.nanmean, np.where(np.isfinite(ax[:, is_away]),
-                                            ax[:, is_away] > abx[:, None], np.nan), axis=1)
+    behind_home = _nan(np.nanmean, np.where(is_home & np.isfinite(ax),
+                                            ax < abx[:, None], np.nan), axis=1)
+    behind_away = _nan(np.nanmean, np.where(is_away & np.isfinite(ax),
+                                            ax > abx[:, None], np.nan), axis=1)
     s["b_goalside_diff"] = np.where(seen, behind_away - behind_home, np.nan)
     s["b_gap_last"] = _carry(s["b_gap"], forward=True)       # through a dropout
     s["b_gap_next"] = _carry(s["b_gap"], forward=False)
@@ -219,19 +230,36 @@ NO_WINDOWS = {"b_gap_last", "b_gap_next", "b_touch_last", "b_touch_next", "b_tou
               "b_touch_until", "k_seen_since", "k_seen_until", "k_edge_last", "k_edge_next",
               "p_tracked", "p_tracked_diff"}
 
-def compute(players, ball, team, halves, pitch, fps, stride=1, offset=0):
-    """(features [m, d] float32, names, frames) for every stride-th frame from offset."""
-    signals = base_signals(players, ball, team, halves, pitch, fps)
-    frames = np.arange(offset, len(players), stride)
+def signal_columns(signals, fps, rows):
+    """(columns [len(rows), d], names): each signal at these rows of its half, with its windows."""
     cols, names = [], []
     for name, x in signals.items():
-        cols.append(x[frames])
+        cols.append(x[rows])
         names.append(name)
         if name in NO_WINDOWS:
             continue
         for seconds in WINDOWS:
             w = int(round(seconds * fps))
             for before in (True, False):
-                cols.append(_window_mean(x, w, before)[frames])
+                cols.append(_window_mean(x, w, before)[rows])
                 names.append("{}@{}{:.0f}".format(name, "-" if before else "+", seconds))
-    return np.stack(cols, axis=1).astype(np.float32), names, frames
+    return np.stack(cols, axis=1).astype(np.float32), names
+
+
+def compute(players, ball, team, halves, pitch, fps, stride=1, offset=0):
+    """(features [m, d] float32, names, frames) for every stride-th frame from offset. halves are
+    (first, last) frames, last included; each is computed on its own and rows outside them are
+    NaN."""
+    frames = np.arange(offset, len(players), stride)
+    team = np.asarray(team)
+    out, names = None, None
+    for lo, hi in halves:
+        lo, hi = int(lo), int(hi)
+        signals = base_signals(players[lo:hi + 1], ball[lo:hi + 1],
+                               team[lo:hi + 1] if team.ndim == 2 else team, pitch, fps)
+        inside = np.flatnonzero((frames >= lo) & (frames <= hi))
+        block, names = signal_columns(signals, fps, frames[inside] - lo)
+        if out is None:
+            out = np.full((len(frames), block.shape[1]), np.nan, dtype=np.float32)
+        out[inside] = block
+    return out, names, frames
