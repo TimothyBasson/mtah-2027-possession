@@ -132,8 +132,15 @@ def main():
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
     out = os.path.join(D.ROOT, "data", "cache", "deep", a.tag, a.fold)
     os.makedirs(out, exist_ok=True)
-    t0, run = time.time(), []
-    for step in range(1, a.steps + 1):
+    t0, run, start = time.time(), [], 0
+    ckpt = os.path.join(out, "ckpt.pt")
+    if os.path.exists(ckpt):  # the cloud container can restart mid-run: carry on from the last save
+        c = torch.load(ckpt, weights_only=False)
+        net.load_state_dict(c["net"]); opt.load_state_dict(c["opt"]); sched.load_state_dict(c["sched"])
+        rng.bit_generator.state = c["rng"]
+        start = c["step"]
+        print(f"resumed at step {start}", flush=True)
+    for step in range(start + 1, a.steps + 1):
         net.train()
         X, M, y, ball, e = batch(train, rng, a.batch, a.window, a)
         logits, bhat, ehat = net(X, M)
@@ -153,6 +160,9 @@ def main():
             if step % 500 == 0 or step == a.steps:
                 msg += f"  val acc {frame_scores(net, val):.3f}  test acc {frame_scores(net, test[:3]):.3f}"
             print(msg, flush=True)
+            torch.save(dict(net=net.state_dict(), opt=opt.state_dict(), sched=sched.state_dict(),
+                            rng=rng.bit_generator.state, step=step), ckpt + ".tmp")
+            os.replace(ckpt + ".tmp", ckpt)
     torch.save(net.state_dict(), os.path.join(out, "net.pt"))
     for kind, ms in (("val", val), ("test", test)):
         for m in ms:
