@@ -45,6 +45,8 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-12 | look-ahead stoppage signals (on a line, width, median speed, acceleration over the next 1-5 s, to start stoppages earlier), with and without players tracked | 0.436-0.439 | 0.804-0.810 | 0.914-0.918 | 0.865 | no: under +0.01, IDSSE falls 0.003-0.008 |
 | 2026-11-12 | team model at more scales: push and width over 0.6 s or 2-5 s as well; goal-side marking; without length | 0.432-0.439 | 0.801-0.803 | 0.914 | 0.861-0.866 | no: under +0.01 |
 | 2026-11-12 | start every decoded stoppage 0.5 / 1 / 1.5 / 2 / 3 s earlier (1.5 s picked in all three folds) | 0.440 | 0.807 | 0.912 | 0.869 | no: +0.005, up on all three but under +0.01; alive/dead falls |
+| 2026-11-12 | players knocked out as BAR-ATH's tracker loses them (`heldout.py --knock score`), shipped weights: what the model loses to missing players | 0.419 | 0.792 | 0.912 | 0.851 | a measurement, not a change |
+| 2026-11-12 | weights refitted on knocked-out tracking, scored on knocked-out tracking (`--knock both`) | 0.423 | 0.793 | 0.913 | 0.850 | no: recovers 0.004 of the 0.016, under +0.01; on full tracking that fit scores 0.436 / 0.802 / 0.915 / 0.862 (`--knock fit`) |
 
 **Team model** (who has the ball, players only). The spread lean was one number with its cutoff
 at zero, read over 2 s either side, so it answered a turnover about 2 s late. Now a logistic
@@ -155,6 +157,29 @@ its public minutes 0.19 alive against 0.35 dead, 28.6 alive against 21.3 dead. S
 direction. BAR-ATH (check only): 121 / 137 possessions per half, 41% / 42% dead; public 5 minutes
 macroF1 0.846, spellF1 0.516, 14 possessions against 17 (0.860 and 0.538 before; one possession
 of 17 is worth more than that gap).
+
+**Missing players.** BAR-ATH is the match that is scored, and its tracker loses players; IDSSE
+and Metrica never do. Measured on BAR-ATH's tracking alone, no labels: 22 are tracked on 50% of
+graded frames, 21 on 26%, 20 or fewer on 23%; 18 times an hour most of them go at once (14 or
+fewer tracked, 8.6 on average, median 2.7 s, mean 10.4 s), 5% of frames; outside those bursts
+0.85 of the 22 are missing on average, in runs of median 3 s. That is 7% of player-frames.
+`external/score.py drop_players` reproduces it on the outside matches (6.8% of player-frames,
+two or more missing on 23% of frames, 14 or fewer tracked on 5%), and `heldout.py --knock` uses
+it when scoring, fitting or both. Its shape is `possession/research/exp9.py`'s on
+`claude/project-thread-uvbxom`, with BAR-ATH's rates in place of that script's 11%.
+
+| weights fitted on | scored on | IDSSE | Metrica | SkillCorner | mean |
+|---|---|---|---|---|---|
+| full tracking (shipped) | full | 0.424 | 0.506 | 0.375 | 0.435 |
+| full tracking (shipped) | knocked out | 0.403 | 0.493 | 0.361 | 0.419 |
+| knocked out | knocked out | 0.407 | 0.501 | 0.362 | 0.423 |
+| knocked out | full | 0.426 | 0.509 | 0.372 | 0.436 |
+
+So **0.435 is on full tracking; with BAR-ATH's gaps the same model scores 0.419** (macroF1
+0.792, alive/dead 0.912, team 0.851). The loss is on the team side (0.864 → 0.851); the
+stoppage model barely moves. Refitting on knocked-out tracking recovers 0.004, under the +0.01
+bar, so the shipped weights stay. SkillCorner's off-camera players are extrapolated, so its
+"full" tracking is already kinder than a real feed.
 
 **Where the rest of the error is.** With the Viterbi labels, swapping in the true team wherever
 both are alive gives held-out spellF1 0.80-0.86; swapping in the true dead frames gives 0.47-0.58.

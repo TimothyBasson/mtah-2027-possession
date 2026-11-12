@@ -1,6 +1,6 @@
 """Held-out-provider scoring: pick settings on two providers, score them on the third.
 
-    uv run python external/heldout.py [--model DIR] [param=v1,v2,... ...]
+    uv run python external/heldout.py [--model DIR] [--knock score|fit|both] [param=v1,v2,... ...]
 
 Each comma list is a grid; every combination is scored on every outside match. Then, for each
 provider (idsse, metrica, skillcorner) in turn, the combination with the best mean spellF1 on the
@@ -28,7 +28,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path[:0] = [HERE, ROOT]
-from score import drop_ball, frames, pm  # noqa: E402
+from score import drop_ball, drop_players, frames, pm  # noqa: E402
 
 METRICS = ("spellF1", "macroF1", "alive/dead", "team")
 
@@ -39,7 +39,7 @@ def provider(path):
 
 def score_match(args):
     """Scores of one match under every combination: {combo index: (spellF1, macroF1, alive/dead, team)}."""
-    path, model_dir, combos = args
+    path, model_dir, combos, knock = args
     sys.path.insert(0, model_dir)
     import features
     import model
@@ -51,7 +51,8 @@ def score_match(args):
     features.PITCH = model.PITCH = tuple(d["pitch"])
     model.HALVES = halves
     model.graded_mask = lambda n: mask
-    F = frames(d["players"], drop_ball(d["ball"], 1.0, model.FPS, labels=d["labels"]), d["team"], features)
+    players = drop_players(d["players"], halves, model.FPS, os.path.basename(path)) if knock else d["players"]
+    F = frames(players, drop_ball(d["ball"], 1.0, model.FPS, labels=d["labels"]), d["team"], features)
     truth = pm.label_codes(d["labels"])
     out = []
     for params in combos:
@@ -70,13 +71,15 @@ def parse_grid(items):
 
 
 def fit_fold(args):
-    model_dir, train = args
+    model_dir, train, knock = args
     sys.path.insert(0, model_dir)
     import model
     ms = []
     for path in train:
         d = np.load(path)
-        ms.append((provider(path), d["players"], d["labels"], [tuple(h) for h in d["halves"]], d["team"], d["pitch"]))
+        halves = [tuple(h) for h in d["halves"]]
+        players = drop_players(d["players"], halves, model.FPS, os.path.basename(path)) if knock else d["players"]
+        ms.append((provider(path), players, d["labels"], halves, d["team"], d["pitch"]))
     return model.fit(ms)
 
 
@@ -101,6 +104,9 @@ def heldout(paths, scores, combos, only=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default=os.path.join(ROOT, "possession"))
+    ap.add_argument("--knock", choices=("score", "fit", "both"), help="knock players out like BAR-ATH's "
+                    "tracker (score.drop_players) when scoring, when fitting, or both")
+    ap.add_argument("--workers", type=int, help="processes (default: every core)")
     ap.add_argument("grid", nargs="*")
     a = ap.parse_args()
     combos = parse_grid(a.grid)
@@ -109,17 +115,17 @@ def main():
     sys.path.insert(0, model_dir)
     import model
     sets = sorted({provider(p) for p in paths})
-    with ProcessPoolExecutor() as ex:
+    with ProcessPoolExecutor(a.workers) as ex:
         if hasattr(model, "fit"):  # one refit per held-out provider, on the other two
-            fits = list(ex.map(fit_fold, [(model_dir, [p for p in paths if provider(p) != s]) for s in sets]))
+            fits = list(ex.map(fit_fold, [(model_dir, [p for p in paths if provider(p) != s], a.knock in ("fit", "both")) for s in sets]))
             rows = []
             for s, fitted in zip(sets, fits):
                 cs = [c | fitted for c in combos]
-                scores = np.array(list(ex.map(score_match, [(p, model_dir, cs) for p in paths])))
+                scores = np.array(list(ex.map(score_match, [(p, model_dir, cs, a.knock in ("score", "both")) for p in paths])))
                 rows += [(t, {k: v for k, v in c.items() if k not in fitted}, x, b)
                          for t, c, x, b in heldout(paths, scores, cs, only=s)]
         else:
-            scores = np.array(list(ex.map(score_match, [(p, model_dir, combos) for p in paths])))
+            scores = np.array(list(ex.map(score_match, [(p, model_dir, combos, a.knock in ("score", "both")) for p in paths])))
             rows = heldout(paths, scores, combos)
     # scores: (match, combo, metric)
     print(f"{len(combos)} setting(s) x {len(paths)} matches; settings picked on the other providers"
