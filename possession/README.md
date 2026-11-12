@@ -37,6 +37,7 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-12 | **Viterbi decode**: the best H/A/D path on the two probabilities, a change of team costing 5 and to or from dead 20, instead of cutting each at even odds and absorbing short runs | **0.404** | **0.780** | 0.899 | 0.856 | **yes** |
 | 2026-11-12 | the same, the two costs picked held out from 2, 5 x 20, 40 | 0.405 | 0.782 | 0.901 | 0.856 | no: the folds pick three different pairs, the surface is flat |
 | 2026-11-12 | **which goal a team defends**, read from the two teams against each other, not against halfway (a bug: wrong in a half of 9 of the 30 matches, which flipped push and dropped a forward as the keeper) | **0.414** | **0.783** | 0.899 | **0.861** | **yes** |
+| 2026-11-12 | **two more stoppage signals**: players on or over a boundary line, and both teams' width summed, each ±1 s | **0.435** | **0.802** | **0.914** | 0.864 | **yes** |
 
 **Team model** (who has the ball, players only). The spread lean was one number with its cutoff
 at zero, read over 2 s either side, so it answered a turnover about 2 s late. Now a logistic
@@ -115,6 +116,38 @@ x=0 defends that end. BAR-ATH was read correctly either way. Per held-out provid
 team): IDSSE 0.385 → 0.402, 0.853 → 0.860; Metrica 0.475 → 0.484, 0.892 → 0.899; SkillCorner
 0.354 → 0.356, 0.822 → 0.824. Refitted, push carries more (+1.20 / −0.57) and length less
 (+0.24 / +0.02). The signal tables above were made before this fix.
+
+**Two more stoppage signals.** Swapping in the true dead frames was worth about 0.10 spellF1
+(below), so the stoppage model was revisited after the decode. Thirteen players-only signals were
+each added to the three speed signals and scored frame by frame, held out (accuracy 0.864, dead F1
+0.792 before):
+
+| added, ±1 s | accuracy | dead F1 |
+|---|---|---|
+| **players within 0.5 m of a touchline or goal line, or beyond it** | 0.874 | 0.808 |
+| **both teams' width (sd across the pitch), summed** | 0.874 | 0.807 |
+| players inside either penalty area | 0.871 | 0.803 |
+| players tracked | 0.866 | 0.794 |
+| all players' mean velocity, or how aligned their velocities are | 0.865 | 0.793 |
+| nearest player to a touchline; fastest player; 20th-percentile speed; share standing still; mean distance to the nearest opponent; both teams' length | 0.864-0.865 | 0.792-0.793 |
+| change in the number tracked | 0.858 | 0.777 |
+| **on a line + width (kept)** | **0.887** | **0.826** |
+| on a line + width + penalty areas | 0.887 | 0.827 |
+
+A player on a line is taking a throw-in or a corner, or fetching the ball: it pushes toward dead
+(+0.78). Summed width pushes toward live (−0.78): in play both sides spread to use and to cover
+the pitch, and at a stoppage they close up around the restart or walk back into shape. Per
+held-out provider (spellF1, alive/dead): IDSSE 0.402 → 0.424, 0.921 → 0.932; Metrica 0.484 →
+0.506, 0.870 → 0.889; SkillCorner 0.356 → 0.375, 0.906 → 0.922.
+
+Do they stand on the same footing on BAR-ATH? Checked, no tuning. Share of frames with a player
+on a line (all / alive / dead) and median summed width in metres (all / alive / dead): IDSSE
+0.28 / 0.12 / 0.48 and 23.5 / 24.9 / 21.9; Metrica 0.24 / 0.15 / 0.42 and 25.4 / 26.1 / 23.7;
+SkillCorner 0.21 / 0.12 / 0.43 and 23.7 / 24.6 / 21.5; BAR-ATH whole match 0.23 and 24.2, and in
+its public minutes 0.19 alive against 0.35 dead, 28.6 alive against 21.3 dead. Same levels, same
+direction. BAR-ATH (check only): 121 / 137 possessions per half, 41% / 42% dead; public 5 minutes
+macroF1 0.846, spellF1 0.516, 14 possessions against 17 (0.860 and 0.538 before; one possession
+of 17 is worth more than that gap).
 
 **Where the rest of the error is.** With the Viterbi labels, swapping in the true team wherever
 both are alive gives held-out spellF1 0.80-0.86; swapping in the true dead frames gives 0.47-0.58.

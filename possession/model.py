@@ -4,7 +4,7 @@
   A small logistic model reads four shape and movement signals (TEAM_SIGNALS), each over the 2 s
   after and the 2 s before the frame, and leans home above even odds.
 - dead: a stoppage changes how the whole team moves, not just how fast. A small logistic model
-  reads three player-movement signals (DEAD_SIGNALS) and calls the frame dead above even odds. Its weights
+  reads five players-only signals (DEAD_SIGNALS) and calls the frame dead above even odds. Its weights
   are fitted on the outside matches; external/heldout.py refits them without the provider it scores.
 
 Both are smoothed over a window centred on the frame, which is allowed because the task is
@@ -45,12 +45,15 @@ DEAD_SIGNALS = (
     "median speed, +-0.5 s",          # the typical player walks at a stoppage
     "speed change, 2 s after - before",  # everyone slows into a stoppage, speeds up out of it
     "80th percentile |acceleration|, +-3 s",  # in play players keep changing pace; at a stoppage they don't
+    "players on or over a boundary line, +-1 s",  # someone is taking a throw-in or a corner, or fetching the ball
+    "both teams' width, summed, +-1 s",  # in play both sides spread to use and cover the pitch; at a stoppage they close up
 )
+ON_LINE = 0.5      # m inside a touchline or goal line still counts as on it
 # Logistic weights on the standardised signals: intercept, then one per signal, with each signal's
 # mean and sd. Fitted on all 30 outside matches, each provider weighted equally:
 #   uv run python possession/model.py --fit
-DEAD_FIT = {"w": [-1.381, -1.462, -0.481, -1.578],
-            "mu": [1.744, -0.002, 0.932], "sd": [0.995, 0.614, 0.374]}
+DEAD_FIT = {"w": [-1.312, -1.146, -0.482, -1.662, 0.775, -0.783],
+            "mu": [1.744, -0.002, 0.932, 0.301, 23.72], "sd": [0.995, 0.614, 0.374, 0.61, 5.025]}
 
 # Players-only who-has-it signals (features.team_signals), home minus away. Each is read twice:
 # over the TEAM_WINDOW after the frame and over the one before, because shape answers a turnover
@@ -102,8 +105,8 @@ def window_mean(x, seconds, ahead):
     return out
 
 
-def dead_signals(players):
-    """(frames, 3) array of DEAD_SIGNALS, NaN where nobody is tracked."""
+def dead_signals(players, team):
+    """(frames, 5) array of DEAD_SIGNALS, NaN where nobody is tracked."""
     s = players[:, :, 2].astype(float)
     s[s > MAX_SPEED] = np.nan
     acc = np.full(s.shape, np.nan)  # each player's change of speed, m/s^2, within each half
@@ -114,8 +117,12 @@ def dead_signals(players):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # nobody tracked
         q50, a80 = np.nanmedian(s, 1), np.nanpercentile(acc, 80, 1)
+        x, y = players[:, :, 0].astype(float), players[:, :, 1].astype(float)
+        edge = np.minimum(np.minimum(x, PITCH[0] - x), np.minimum(y, PITCH[1] - y))  # m inside the nearest line
+        on_line = np.where(np.isfinite(x).any(1), (edge < ON_LINE).sum(1), np.nan)
+        width = np.nanstd(y[:, team == 0], 1) + np.nanstd(y[:, team == 1], 1)
     return np.column_stack([smooth(q50, 0.5), window_mean(q50, 2, True) - window_mean(q50, 2, False),
-                            smooth(a80, 3)])
+                            smooth(a80, 3), smooth(on_line, 1), smooth(width, 1)])
 
 
 def team_signals(F):
@@ -153,16 +160,16 @@ def fit_logistic(Xs, ys, provs, l2=1e-3):
 
 
 def fit(matches):
-    """Every fitted setting, from [(provider, players, labels, halves, team)]: what
+    """Every fitted setting, from [(provider, players, labels, halves, team, pitch)]: what
     external/heldout.py refits without the provider it scores. Dead against live on every labelled
     frame; home against away on the frames either team has the ball."""
-    global HALVES
+    global HALVES, PITCH
     dead, who, provs = ([], []), ([], []), []
-    for prov, players, labels, halves, team in matches:
-        HALVES = halves
+    for prov, players, labels, halves, team, pitch in matches:
+        HALVES, PITCH = halves, features.PITCH = halves, tuple(pitch)
         provs.append(prov)
         g = np.isin(labels, ["H", "A", "D"])
-        dead[0].append(dead_signals(players)[g]); dead[1].append(labels[g] == "D")
+        dead[0].append(dead_signals(players, team)[g]); dead[1].append(labels[g] == "D")
         g = np.isin(labels, ["H", "A"])
         who[0].append(team_signals(dict(players=players, team=team))[g]); who[1].append(labels[g] == "H")
     return {"dead_fit": fit_logistic(*dead, provs), "team_fit": fit_logistic(*who, provs)}
@@ -240,7 +247,7 @@ def explain(F, params=None):
             last = ok[np.clip(np.searchsorted(ok, np.arange(b + 1 - a), "right") - 1, 0, None)]
             pred[a:b + 1] = pred[a:b + 1][last]
     if p["dead"] == "logit":
-        dead_x = dead_signals(F["players"])
+        dead_x = dead_signals(F["players"], F["team"])
         dead_lo = logit(dead_x, p["dead_fit"])
         dead_p = 1 / (1 + np.exp(-dead_lo))
     else:
@@ -276,7 +283,7 @@ if __name__ == "__main__" and sys.argv[1:] == ["--fit"]:  # refit DEAD_FIT and T
     ms = []
     for path in paths:
         d = np.load(path)
-        ms.append((os.path.basename(path).split("_")[0], d["players"], d["labels"], [tuple(h) for h in d["halves"]], d["team"]))
+        ms.append((os.path.basename(path).split("_")[0], d["players"], d["labels"], [tuple(h) for h in d["halves"]], d["team"], d["pitch"]))
     for name, value in fit(ms).items():
         print(name.upper(), "=", value)
 elif __name__ == "__main__":  # uv run python possession/model.py: check the run merging
