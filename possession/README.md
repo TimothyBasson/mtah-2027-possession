@@ -36,6 +36,7 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-12 | **team model**: logistic on width, length, push and speed difference, each over the next 2 s and the last 2 s, instead of the spread's sign (below) | **0.392** | **0.775** | 0.898 | **0.854** | **yes** |
 | 2026-11-12 | **Viterbi decode**: the best H/A/D path on the two probabilities, a change of team costing 5 and to or from dead 20, instead of cutting each at even odds and absorbing short runs | **0.404** | **0.780** | 0.899 | 0.856 | **yes** |
 | 2026-11-12 | the same, the two costs picked held out from 2, 5 x 20, 40 | 0.405 | 0.782 | 0.901 | 0.856 | no: the folds pick three different pairs, the surface is flat |
+| 2026-11-12 | **which goal a team defends**, read from the two teams against each other, not against halfway (a bug: wrong in a half of 9 of the 30 matches, which flipped push and dropped a forward as the keeper) | **0.414** | **0.783** | 0.899 | **0.861** | **yes** |
 
 **Team model** (who has the ball, players only). The spread lean was one number with its cutoff
 at zero, read over 2 s either side, so it answered a turnover about 2 s late. Now a logistic
@@ -105,6 +106,15 @@ SkillCorner 0.345 → 0.354. On a research copy of the pipeline, held-out spellF
 were fixed rather than tuned. `decode=absorb` brings back the old clean-up.
 On BAR-ATH (check only): 129 / 141 possessions per half, 39% / 43% dead; public 5 minutes macroF1
 0.860, spellF1 0.538, 15 possessions against 17.
+
+**Which goal a team defends** (`features.own_goal`) was read from which side of halfway its
+players stood on average over the half. A side that dominates a half averages beyond halfway, so
+both teams were given the same goal in a half of 9 of the 30 outside matches. There push pointed
+the wrong way and the "keeper" left out was the furthest forward. Now the team standing nearer
+x=0 defends that end. BAR-ATH was read correctly either way. Per held-out provider (spellF1,
+team): IDSSE 0.385 → 0.402, 0.853 → 0.860; Metrica 0.475 → 0.484, 0.892 → 0.899; SkillCorner
+0.354 → 0.356, 0.822 → 0.824. Refitted, push carries more (+1.20 / −0.57) and length less
+(+0.24 / +0.02). The signal tables above were made before this fix.
 
 **Where the rest of the error is.** With the Viterbi labels, swapping in the true team wherever
 both are alive gives held-out spellF1 0.80-0.86; swapping in the true dead frames gives 0.47-0.58.

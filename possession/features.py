@@ -17,12 +17,15 @@ def nearest_by_team(players, ball, team):
 
 
 def own_goal(players, team, halves):
-    """Per team, per half: +1 if its own goal is at x=0, -1 if at x=PITCH[0], read from which side
-    of halfway its players stand on average."""
+    """Per team, per half: +1 if its own goal is at x=0, -1 if at x=PITCH[0]. The team standing
+    nearer x=0 on average defends that end. The two teams are compared with each other, not with
+    halfway: a side that dominates a half averages beyond halfway and would be read as defending
+    the wrong goal (it happened in a half of 9 of the 30 outside matches)."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        return [[1 if np.nanmean(players[a:b + 1, team == t, 0]) < PITCH[0] / 2 else -1 for a, b in halves]
-                for t in (0, 1)]
+        home = [1 if np.nanmean(players[a:b + 1, team == 0, 0]) < np.nanmean(players[a:b + 1, team == 1, 0]) else -1
+                for a, b in halves]
+    return [home, [-s for s in home]]
 
 
 def spread(players, team, halves, keepers=False):
