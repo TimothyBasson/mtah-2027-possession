@@ -1,9 +1,8 @@
 # Test-only tooling. Not needed to produce or score a submission.
 #
 #   pip install -r requirements.txt -r requirements-dev.txt
-#   python -m pytest
-# Training the control classifier only (external/train_control.py); the decoder does not need it.
-scikit-learn tests
+#   python -m pytest tests
 pytest
-# Training the control classifier only (external/train_control.py); the decoder does not need it.
-scikit-learn
+# Retraining the control classifier only (external/train_control.py). The decoder does not need
+# it: it reads the exported trees in hmm/models/. Pinned, since another version grows other trees.
+scikit-learn==1.6.1

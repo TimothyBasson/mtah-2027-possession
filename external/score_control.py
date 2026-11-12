@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(ROOT, "evaluation"))
 sys.path.insert(0, os.path.join(ROOT, "external"))
 import hmm.decode as dec  # noqa: E402
 import score_hmm as sh  # noqa: E402
-from control import control_labels  # noqa: E402
+from control import CONTROL_SECONDS, control_labels  # noqa: E402
 from control_features import CACHE, match_ball  # noqa: E402
 from hmm.clues import ball_is_usable, ball_place_category, gap_distance_category  # noqa: E402
 
@@ -63,7 +63,7 @@ def run(name):
     speed_t, flight_t, gap_t, width_t = tabs[k]
     d = sh.load(paths[name])
     ball = match_ball(name, d)
-    views = (d["labels"], control_labels(d))
+    views = (d["labels"], control_labels(d, STATE["fold_seconds"]))
     fps, pitch = int(d["fps"]), tuple(float(v) for v in d["pitch"])
     segments = [(int(a), int(b) + 1) for a, b in d["halves"]]
     bx, by = ball[:, 0].astype(float), ball[:, 1].astype(float)
@@ -89,15 +89,19 @@ def main():
     ap.add_argument("--weights", default="0.05,0.1,0.15,0.2")
     ap.add_argument("--sets", default=",".join(sh.SETS))
     ap.add_argument("--jobs", type=int, default=8)
+    ap.add_argument("--loso", default="control_loso.npz",
+                    help="posteriors file in the cache, from train_control.py --loso [--out]")
+    ap.add_argument("--fold-seconds", type=float, default=CONTROL_SECONDS,
+                    help="spell length under which the folded view folds (external/control.py)")
     a = ap.parse_args()
     paths = {os.path.basename(p)[:-4]: p
              for p in sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
              if os.path.basename(p).startswith(tuple(a.sets.split(",")))}
-    loso_path = os.path.join(CACHE, "control_loso.npz")
+    loso_path = os.path.join(CACHE, a.loso)
     if not os.path.exists(loso_path):
         sys.exit("no {}: run external/train_control.py --loso first".format(loso_path))
     state = dict(paths=paths, tables=tables(paths), loso=dict(np.load(loso_path)),
-                 weights=[float(w) for w in a.weights.split(",")])
+                 weights=[float(w) for w in a.weights.split(",")], fold_seconds=a.fold_seconds)
     with Pool(a.jobs, initializer=_init, initargs=(state,)) as pool:
         rows = dict(pool.map(run, list(paths)))
     models = list(next(iter(rows.values())))

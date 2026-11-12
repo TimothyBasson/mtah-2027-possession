@@ -270,7 +270,7 @@ CACHE_DIR = os.path.join(DATA_DIR, "cache")
 # Chosen with each set left out in turn (mean of both views over the other two), the folds pick
 # 0.15, 0.15 and 0.2, and the set left out then gains +0.036 raw / +0.052 folded on average. Every
 # weight gains on every set in both views.
-CONTROL_MODEL = os.path.join(DATA_DIR, "models", "control_state.npz")
+CONTROL_MODEL = os.path.join(ROOT, "hmm", "models", "control_state.npz")
 CONTROL_WEIGHT = 0.15
 
 
@@ -456,8 +456,12 @@ def load_control(game=GAME, data_dir=None, model_path=CONTROL_MODEL):
     args = (px, py, team, ball_x, ball_y, pitch, FPS, halves)
     X, names = control_features(*args)
     Xs, _ = control_features(*args, swap=True)
-    if list(names) != list(model["names"]):
-        sys.exit("the control model was trained on other feature columns: retrain it")
+    missing = set(model["names"]) - set(names)
+    if missing:
+        sys.exit("the control model needs feature columns hmm/control.py no longer makes: {}"
+                 .format(sorted(missing)))
+    cols = [list(names).index(n) for n in model["names"]]  # the model's columns, in its order
+    X, Xs = X[:, cols], Xs[:, cols]
     for lo, hi in halves:
         out[lo:hi] = control_log_ratio(model, X[lo:hi], Xs[lo:hi])
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -633,6 +637,8 @@ def main():
                         "--no-control), with the variant flags in the name if any is set")
     parser.add_argument("--no-control", action="store_true",
                         help="ablation: without the control classifier, which is v6")
+    parser.add_argument("--control-model", default=CONTROL_MODEL,
+                        help="exported classifier (default hmm/models/control_state.npz)")
     parser.add_argument("--control-weight", type=float, default=CONTROL_WEIGHT,
                         help="weight on the control clue (default {})".format(CONTROL_WEIGHT))
     parser.add_argument("--weight", type=float, default=WEIGHT,
@@ -676,7 +682,8 @@ def main():
     clues = [others[0], (place, place_table(live, dead))] + others[1:]
 
     extra = [] if args.no_width else [(width, width_table(), WIDTH_WEIGHT)]
-    direct = None if args.no_control else args.control_weight * load_control()
+    direct = None if args.no_control else args.control_weight * load_control(
+        model_path=args.control_model)
     labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight, extra=extra,
                     direct=direct)
     ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),

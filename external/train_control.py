@@ -1,11 +1,14 @@
 """Train the "who controls the ball" classifier (hmm/control.py) on the external matches.
 
     python external/control_features.py             # features, once (~3 min)
-    python external/train_control.py                # -> data/models/control_state.npz
+    python external/train_control.py                # -> hmm/models/control_state.npz
     python external/train_control.py --loso         # held-out posteriors for score_control.py
 
-Needs scikit-learn (requirements-dev.txt). The decoder does not: the fitted trees are exported to
-plain arrays (hmm/trees.py) and evaluated in numpy.
+Needs scikit-learn, pinned in requirements-dev.txt. The decoder does not: the fitted trees are
+exported to plain arrays (hmm/trees.py), the model is committed as hmm/models/control_state.npz
+(it is derived from the open external data only), and the decoder evaluates it in numpy. Retrained
+with scikit-learn 1.6.1 from the same features it comes out byte-identical; the sha256 printed at
+the end is the check.
 
 The target is the label per frame, H / A / D, folded towards the challenge's controlled-possession
 rule (external/control.py): a spell under 2 s with fewer than 2 own touches goes back to the team
@@ -26,6 +29,7 @@ Metrica / SkillCorner left out).
 """
 
 import argparse
+import hashlib
 import glob
 import os
 import sys
@@ -42,8 +46,7 @@ from hmm import trees  # noqa: E402
 
 SETS = ("idsse", "metrica", "skillcorner")
 STEP = 5
-MODEL_DIR = os.path.join(ROOT, "data", "models")
-MODEL_PATH = os.path.join(MODEL_DIR, "control_state.npz")
+MODEL_PATH = os.path.join(ROOT, "hmm", "models", "control_state.npz")
 SWAP = np.array([1, 0, 2])  # H <-> A, D stays
 
 
@@ -64,6 +67,11 @@ def load_matches():
     if not matches:
         sys.exit("no features in {}: run external/control_features.py first".format(CACHE))
     return matches
+
+
+def keep_columns(names, drop):
+    """Indices of the feature columns to train on: all but those containing any of drop."""
+    return [i for i, n in enumerate(names) if not any(d in n for d in drop)]
 
 
 def rows(matches, names):
@@ -90,9 +98,18 @@ def posteriors(model, a, b):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--loso", action="store_true", help="held-out posteriors per set")
+    ap.add_argument("--drop", default="", help="comma-separated substrings: leave out the feature "
+                    "columns whose names contain any of them (an ablation)")
+    ap.add_argument("--out", help="model path (default {}) or, with --loso, the posteriors' "
+                    "file name in the cache".format(os.path.relpath(MODEL_PATH, ROOT)))
     a = ap.parse_args()
     matches = load_matches()
     names = next(iter(matches.values()))[3]
+    keep = keep_columns(names, [d for d in a.drop.split(",") if d])
+    if len(keep) < len(names):
+        print("leaving out {} of {} columns".format(len(names) - len(keep), len(names)))
+        matches = {n: (x[:, keep], xs[:, keep], y, nm) for n, (x, xs, y, nm) in matches.items()}
+        names = [names[i] for i in keep]
     if a.loso:
         out = {}
         for k in SETS:
@@ -106,7 +123,7 @@ def main():
                 out["prior_" + n] = prior
             print("{:12s} left out: {} rows, {} iterations, {:.0f} s".format(
                 k, len(y), model.n_iter_, time.time() - t), flush=True)
-        path = os.path.join(CACHE, "control_loso.npz")
+        path = os.path.join(CACHE, a.out or "control_loso.npz")
         np.savez_compressed(path, **out)
         print("->", path)
         return
@@ -114,15 +131,17 @@ def main():
     t = time.time()
     model = fit(X, y)
     print("{} rows, {} iterations, {:.0f} s".format(len(y), model.n_iter_, time.time() - t))
-    os.makedirs(MODEL_DIR, exist_ok=True)
+    path = a.out or MODEL_PATH
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     prior = np.bincount(y, minlength=3) / len(y)
-    trees.export(model, MODEL_PATH, prior=prior, names=np.array(names))
+    trees.export(model, path, prior=prior, names=np.array(names))
     check = X[np.random.default_rng(0).choice(len(X), 20000, replace=False)]
-    diff = np.abs(trees.predict_proba(trees.load(MODEL_PATH), check) - model.predict_proba(check))
+    diff = np.abs(trees.predict_proba(trees.load(path), check) - model.predict_proba(check))
     print("numpy trees vs scikit-learn: max |p difference| {:.2e} on 20000 rows".format(diff.max()))
     if diff.max() > 1e-6:
         sys.exit("the exported trees do not reproduce the model")
-    print("->", MODEL_PATH)
+    with open(path, "rb") as handle:
+        print("->", path, "sha256", hashlib.sha256(handle.read()).hexdigest())
 
 
 if __name__ == "__main__":
