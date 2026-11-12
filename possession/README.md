@@ -34,6 +34,7 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-11 | a missing stoppage signal adds nothing instead of forcing dead (review of #22) | 0.282 | 0.735 | 0.898 | 0.790 | yes: same mean, the principled rule |
 | 2026-11-12 | **three signals**: drop the 80th-percentile speed and the 10 s median (table below) | **0.282** | **0.736** | **0.898** | 0.790 | **yes**: as good with two fewer |
 | 2026-11-12 | **1 s lean window, 1 s minimum possession** (were 2 s, 2 s), from a football-prior grid (below) | **0.287** | **0.736** | **0.899** | 0.790 | **yes**: every provider up, on a flat plateau |
+| 2026-11-12 | **team model**: logistic on spread, width and forward velocity instead of spread alone (below) | **0.333** | **0.757** | **0.899** | **0.824** | **yes**: every provider up |
 
 Stoppage model, per held-out provider (spellF1, alive/dead): IDSSE 0.199 → 0.217, 0.844 → 0.883;
 Metrica 0.271 → 0.299, 0.849 → 0.865; SkillCorner 0.280 → 0.284, 0.874 → 0.889. Frame by frame
@@ -109,6 +110,54 @@ Before the acceleration signal, on BAR-ATH, as a check only: 101 / 108 possessio
 public 5 minutes macroF1 0.814, spellF1 0.336, 8 possessions against 17. Fewer possessions and
 more dead than before: the model now merges more, which the next work on turnovers should balance.
 
+## Team model (2026-11-12)
+
+The breakdown below showed half the mistakes are the team, and the sweep showed smoothing can't
+fix them, so the team call became a small fitted model like the stoppage one. Candidate signals
+each needed a football reason first, and were scored frame by frame held out (logistic fitted on
+alive frames of two providers, scored on the third, providers equal; accuracy on all alive frames
+and within 2 s of a true turnover):
+
+| signals | accuracy | near a turnover | kept? |
+|---|---|---|---|
+| spread alone (as before) | 0.782 | 0.591 | |
+| + **forward velocity**: mean player x velocity toward the goal home attacks, ±0.4 s, smoothed 1 s. The team with the ball pushes up, the other drops | 0.806 | 0.610 | **yes**: every provider up, the same for any lag (0.4 / 1 s) or smoothing (0.5-2 s) |
+| + territory: where the block is past halfway | 0.809 | 0.617 | no: came out with the team in possession deeper, no clear football reason for that sign |
+| + goal-side marking: share of a team's players with an opponent within 5 m goal-side | 0.804 | 0.611 | no: 0.52 alone, nothing added |
+| + team length, home minus away | 0.811 | 0.618 | no: negative weight, no clear football reason |
+| + **width**, home minus away: make the pitch big with the ball, small without it | 0.816 | 0.614 | **yes**: every provider up |
+
+No intercept and no centring: nothing in the game favours home, so zero on every signal is even
+odds. Fitted on all 30 (`TEAM_FIT`): spread 0.455, width 1.381, forward velocity 0.465 per sd.
+Held out with the 1 s settings: spellF1 IDSSE 0.243 → 0.294, Metrica 0.317 → 0.372, SkillCorner
+0.301 → 0.333, mean 0.287 → 0.333; team accuracy 0.790 → 0.824; macroF1 0.736 → 0.757.
+
+Each left out, refitted, held out:
+
+| left out | spellF1 | macroF1 | team |
+|---|---|---|---|
+| nothing | 0.333 | 0.757 | 0.824 |
+| spread | 0.334 | 0.757 | 0.823 |
+| width | 0.322 | 0.751 | 0.815 |
+| forward velocity | 0.307 | 0.749 | 0.811 |
+| width and velocity (spread alone) | 0.287 | 0.736 | 0.790 |
+| spread and width (velocity alone) | 0.203 | 0.625 | 0.603 |
+
+Spread adds nothing once width is in (SkillCorner 0.330 without it against 0.333 with it, the
+other two slightly up). It is kept anyway: it is a mean over every outfield player, so it holds up
+when part of a team is out of the camera's view, which width (a max minus a min) does not, and
+BAR-ATH is filmed by a camera that sees part of the pitch. Dropping it is a one-line change if the
+next work makes it look dead weight.
+
+Breakdown with the team model (`external/errors.py`, means): wrong frames 25.4% → 23.5%; wrong
+team mid-possession 5.1% → 3.6%, near a turnover 7.2% → 6.8%; true possessions matched 21% → 26%,
+merged 34% → 31%, predicted per true 0.62 → 0.68; true turnovers found within 10 s 41% → 49%,
+still 1-2 s late (median). Turnovers remain the weak spot: every signal here is a shape or a
+drift, and none reacts at the moment of the turnover itself.
+
+On BAR-ATH (check only): 257 possessions of mean 14.9 s (was 223 of 17.2 s); public 5 minutes
+macroF1 0.825 (was 0.824), spellF1 0.486 (was 0.352), 11 possessions against 17 (was 8).
+
 ## Where the mistakes are (2026-11-12)
 
 `uv run python external/errors.py` predicts each provider held out and sorts every wrong graded
@@ -171,10 +220,15 @@ The model never reads the ball. Tim's `hmm/` works from the ball, so the two see
 different eyes and should make different mistakes, which is what makes combining them worth it.
 
 On each frame:
-- **Who:** the more spread-out team has the ball. Spread is each team's mean distance from its own
-  centre, averaged over 1 s either side of the frame. The keeper, taken as the team's deepest player
-  toward its own goal, is left out: he adds several metres that depend on where play is, not on who
-  has the ball.
+- **Who:** a team model reads three players-only signals, each home minus away and averaged over
+  1 s either side, and calls home above even odds (`TEAM_SIGNALS`, `TEAM_FIT` in `model.py`):
+  - spread, each team's mean distance from its own centre: attackers stretch, defenders stay
+    compact. The keeper, taken as the team's deepest player toward its own goal, is left out: he
+    adds several metres that depend on where play is, not on who has the ball.
+  - width across the pitch: make the pitch big with the ball, small without it
+  - forward velocity, every player's x velocity toward the goal home attacks: the team with the
+    ball pushes up, the other drops. Which goal is whose is read per half from where each team stands.
+  Its weights are fitted like the stoppage model's, with no intercept (team section above).
 - **Dead:** a stoppage model reads three players-only signals and calls the frame dead above even
   odds (`DEAD_SIGNALS`, `DEAD_FIT` in `model.py`):
   - median player speed over 0.5 s either side: the typical player walks at a stoppage
@@ -272,7 +326,6 @@ What it gets wrong:
 - **Late changes.** Shape takes a couple of seconds to change after a turnover: the model calls
   the turnovers it finds 0.6-2 s late, and finds only about 40% within 10 s (`external/errors.py`).
 - **Style.** A team keeping the ball deep looks compact, and a high press looks stretched.
-- **One number for who.** The team call is still the spread alone, with a fixed cutoff at zero.
 
 ## Ideas to try (research, 2026-11-05)
 

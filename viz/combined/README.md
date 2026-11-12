@@ -35,8 +35,8 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
 - **Team spread** (checkbox by the play controls, remembered): each team's centre, a line to every
   player, and a dashed circle at the average distance from the centre, leaving out the keeper
   (ringed), with both numbers on the pitch. The team your estimate says has the ball is shaded. It
-  is the who-has-the-ball clue in `possession/model.py` for this one frame; the model averages it
-  over 1 s either side.
+  is one of the three who-has-the-ball signals in `possession/model.py` (with width and forward
+  velocity), for this one frame; the model averages them over 1 s either side.
 - **Dead-ball model** (checkbox by the play controls, remembered, `--explain` pages): a panel on
   the pitch with the stoppage model in `possession/model.py` for this frame. Each of its three
   player-speed and acceleration signals shows its value and how far it pushes towards dead (right, grey) or in

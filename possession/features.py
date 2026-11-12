@@ -45,3 +45,27 @@ def spread(players, team, halves, keepers=False):
                 xy[rows, depth[rows].argmin(1)] = np.nan
             out.append(np.nanmean(np.linalg.norm(xy - np.nanmean(xy, 1, keepdims=True), axis=-1), 1))
     return out
+
+
+def width(players, team):
+    """Per frame, each team's width across the pitch (y range of its tracked players), metres: (home, away)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # frames with a side untracked
+        return [np.nanmax(players[:, team == t, 1], 1) - np.nanmin(players[:, team == t, 1], 1) for t in (0, 1)]
+
+
+def forward_velocity(players, team, halves, lag, fps, max_speed):
+    """Per frame, the mean x velocity of every tracked player, m/s, signed toward home's attack
+    (away's goal). Each player's from x `lag` frames ahead minus `lag` behind, within each half, so
+    players dropping in and out of tracking don't move it."""
+    x = players[:, :, 0]
+    v = np.full(x.shape, np.nan)
+    for a, b in halves:
+        v[a + lag:b + 1 - lag] = (x[a + 2 * lag:b + 1] - x[a:b + 1 - 2 * lag]) * fps / (2 * lag)
+    v[np.abs(v) > max_speed] = np.nan
+    toward = np.zeros(len(x))
+    for (a, b), sign in zip(halves, own_goal(players, team, halves)[0]):
+        toward[a:b + 1] = sign
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # nobody tracked
+        return np.nanmean(v, 1) * toward

@@ -76,7 +76,8 @@ def fit_fold(args):
     ms = []
     for path in train:
         d = np.load(path)
-        ms.append((provider(path), d["players"], d["labels"], [tuple(h) for h in d["halves"]]))
+        ms.append((provider(path), d["players"], d["team"], d["labels"], [tuple(h) for h in d["halves"]],
+                   tuple(d["pitch"])))
     return model.fit(ms)
 
 

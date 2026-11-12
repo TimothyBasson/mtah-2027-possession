@@ -1,6 +1,7 @@
 """Possession per frame from the players alone, never the ball. The simplest version:
 
-- who: the more spread-out team has the ball (attackers stretch, defenders compact)
+- who: a small logistic model of three players-only signals (TEAM_SIGNALS): the team with the ball
+  is the more spread out and the wider, and the whole block moves toward the goal it attacks
 - dead: a stoppage changes how the whole team moves, not just how fast. A small logistic model
   reads three player-movement signals (DEAD_SIGNALS) and calls the frame dead above even odds. Its weights
   are fitted on the outside matches; external/heldout.py refits them without the provider it scores.
@@ -26,7 +27,6 @@ HALVES = None  # [(first, last)] graded frames per half, set by the caller
 TEAM_WINDOW = 1.0  # s either side for the spread lean
 DEAD_WINDOW = 0.5  # s either side for the walking test
 WALKING = 1.2      # m/s median player speed below which play is dead
-KEEPERS = 0        # 1 counts each team's deepest player (the keeper) in its spread
 MIN_TEAM = 1.0     # s: shorter H/A runs are absorbed into a neighbour
 MIN_DEAD = 3.0     # s: shorter D runs are absorbed into a neighbour
 DEAD = "logit"     # "logit": the fitted model below; "median": median speed under WALKING
@@ -40,6 +40,16 @@ DEAD_SIGNALS = (
     "speed change, 2 s after - before",  # everyone slows into a stoppage, speeds up out of it
     "80th percentile |acceleration|, +-3 s",  # in play players keep changing pace; at a stoppage they don't
 )
+# Players-only team signals, each home minus away (or toward home's attack), each with its football reason:
+TEAM_SIGNALS = (
+    "spread, home - away, m",           # attackers stretch out, defenders stay compact
+    "width, home - away, m",            # make the pitch big with the ball, small without it
+    "forward velocity toward away goal, m/s",  # the team with the ball pushes up, the other drops
+)
+# Logistic weights on the signals divided by their sd, no intercept and no centring: nothing in
+# the game favours home, so zero on every signal is even odds. Fitted like DEAD_FIT.
+TEAM_FIT = {"w": [0.455, 1.381, 0.465], "sd": [4.289, 14.813, 1.679]}
+
 # Logistic weights on the standardised signals: intercept, then one per signal, with each signal's
 # mean and sd. Fitted on all 30 outside matches, each provider weighted equally:
 #   uv run python possession/model.py --fit
@@ -98,6 +108,47 @@ def dead_signals(players):
                             smooth(a80, 3)])
 
 
+def team_signals(players, team, window):
+    """(frames, 3) array of TEAM_SIGNALS, each smoothed over +-window s, NaN where a side is untracked."""
+    sh, sa = features.spread(players, team, HALVES)
+    wh, wa = features.width(players, team)
+    v = features.forward_velocity(players, team, HALVES, ACCEL_LAG, FPS, MAX_SPEED)
+    return np.column_stack([smooth(sh - sa, window), smooth(wh - wa, window), smooth(v, window)])
+
+
+def team_logodds(X, fit):
+    """Log-odds that home has the ball. A missing signal adds nothing; NaN only where all are."""
+    z = np.nan_to_num(X / fit["sd"]) @ np.array(fit["w"])
+    z[~np.isfinite(X).any(1)] = np.nan
+    return z
+
+
+def logistic(Xs, ys, provs, l2=1e-3, intercept=True):
+    """Weights, mean and sd of a logistic regression on per-match signal arrays, frames weighted so
+    every provider counts equally (each match equally within one). Newton's method."""
+    per = {}
+    for p in provs:
+        per[p] = per.get(p, 0) + 1
+    ok = [np.isfinite(X).all(1) for X in Xs]
+    wt = np.concatenate([np.full(o.sum(), 1 / (per[p] * o.sum())) for o, p in zip(ok, provs)])
+    X = np.vstack([X[o] for X, o in zip(Xs, ok)])
+    y = np.concatenate([y[o] for y, o in zip(ys, ok)]).astype(float)
+    wt /= wt.sum()
+    mu = X.T @ wt if intercept else np.zeros(X.shape[1])
+    sd = np.sqrt(((X - mu) ** 2).T @ wt)
+    Z = (X - mu) / sd
+    if intercept:
+        Z = np.c_[np.ones(len(X)), Z]
+    w = np.zeros(Z.shape[1])
+    for _ in range(25):
+        p = 1 / (1 + np.exp(-Z @ w))
+        grad = Z.T @ (wt * (p - y)) + l2 * w
+        hess = (Z * (wt * p * (1 - p))[:, None]).T @ Z + l2 * np.eye(len(w))
+        w -= np.linalg.solve(hess, grad)
+    r = lambda v: [round(float(x), 3) for x in v]  # noqa: E731
+    return dict(w=r(w), mu=r(mu), sd=r(sd)) if intercept else dict(w=r(w), sd=r(sd))
+
+
 def dead_prob(X, fit=DEAD_FIT):
     """P(dead) per frame. A missing signal (a window with nobody tracked, or past the edge of a
     half) adds nothing either way, rather than forcing dead; with none at all it is the intercept."""
@@ -105,37 +156,32 @@ def dead_prob(X, fit=DEAD_FIT):
     return 1 / (1 + np.exp(-z))
 
 
-def fit_dead(matches, l2=1e-3):
-    """DEAD_FIT from [(players, labels, halves)], each match's frames weighted so every provider
-    counts equally: [(provider, players, labels, halves)]. Newton's method on the log-likelihood."""
+def fit_dead(matches):
+    """DEAD_FIT from [(provider, players, team, labels, halves, pitch)]: graded frames, dead or not."""
     global HALVES
-    Xs, ys, ws = [], [], []
-    per = {}
-    for prov, *_ in matches:
-        per[prov] = per.get(prov, 0) + 1
-    for prov, players, labels, halves in matches:
+    Xs, ys = [], []
+    for prov, players, team, labels, halves, pitch in matches:
         HALVES = halves
         g = np.isin(labels, ["H", "A", "D"])
-        X = dead_signals(players)[g]
-        ok = np.isfinite(X).all(1)
-        Xs.append(X[ok]); ys.append((labels[g] == "D")[ok]); ws.append(np.full(ok.sum(), 1 / (per[prov] * ok.sum())))
-    X, y, wt = np.vstack(Xs), np.concatenate(ys).astype(float), np.concatenate(ws)
-    wt /= wt.sum()
-    mu, sd = X.T @ wt, np.sqrt(((X - X.T @ wt) ** 2).T @ wt)
-    Z = np.c_[np.ones(len(X)), (X - mu) / sd]
-    w = np.zeros(Z.shape[1])
-    for _ in range(25):
-        p = 1 / (1 + np.exp(-Z @ w))
-        grad = Z.T @ (wt * (p - y)) + l2 * w
-        hess = (Z * (wt * p * (1 - p))[:, None]).T @ Z + l2 * np.eye(len(w))
-        w -= np.linalg.solve(hess, grad)
-    return {k: [round(float(x), 3) for x in v] for k, v in (("w", w), ("mu", mu), ("sd", sd))}
+        Xs.append(dead_signals(players)[g]); ys.append(labels[g] == "D")
+    return logistic(Xs, ys, [m[0] for m in matches])
+
+
+def fit_team(matches):
+    """TEAM_FIT from the same matches: frames in play, home or away."""
+    global HALVES
+    Xs, ys = [], []
+    for prov, players, team, labels, halves, pitch in matches:
+        HALVES, features.PITCH = halves, pitch
+        g = np.isin(labels, ["H", "A"])
+        Xs.append(team_signals(players, team, TEAM_WINDOW)[g]); ys.append(labels[g] == "H")
+    return logistic(Xs, ys, [m[0] for m in matches], intercept=False)
 
 
 def fit(matches):
-    """Every fitted setting, from [(provider, players, labels, halves)]: what external/heldout.py
-    refits without the provider it scores."""
-    return {"dead_fit": fit_dead(matches)}
+    """Every fitted setting, from [(provider, players, team, labels, halves, pitch)]: what
+    external/heldout.py refits without the provider it scores."""
+    return {"dead_fit": fit_dead(matches), "team_fit": fit_team(matches)}
 
 
 def absorb_short(labels, min_len):
@@ -163,10 +209,10 @@ def predict(F, params=None):
 def explain(F, params=None):
     """predict, with its working for the viewer: how much more spread out home is than away, in
     metres (positive leans home), and the median player speed in m/s."""
-    p = dict(keepers=KEEPERS, team_window=TEAM_WINDOW, dead_window=DEAD_WINDOW, walking=WALKING,
-             min_team=MIN_TEAM, min_dead=MIN_DEAD, dead=DEAD, dead_fit=DEAD_FIT) | (params or {})
-    sh, sa = features.spread(F["players"], F["team"], HALVES, keepers=bool(p["keepers"]))
-    lean = smooth(sh - sa, p["team_window"])
+    p = dict(team_window=TEAM_WINDOW, dead_window=DEAD_WINDOW, walking=WALKING,
+             min_team=MIN_TEAM, min_dead=MIN_DEAD, dead=DEAD, dead_fit=DEAD_FIT, team_fit=TEAM_FIT) | (params or {})
+    team_x = team_signals(F["players"], F["team"], p["team_window"])
+    lean = team_logodds(team_x, p["team_fit"])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # nobody tracked
         pace = smooth(np.nanmedian(F["players"][:, :, 2], 1), p["dead_window"])
@@ -196,20 +242,24 @@ def explain(F, params=None):
     pred[~graded_mask(len(pred))] = raw[~graded_mask(len(pred))] = "X"
     return dict(pred=pred, raw=raw,
                 dead=dict(signals=DEAD_SIGNALS, fit=p["dead_fit"], x=dead_x) if p["dead"] == "logit" else None,
-                lanes=[("spread, home minus away, metres", "team", lean),
+                team=dict(signals=TEAM_SIGNALS, fit=p["team_fit"], x=team_x),
+                lanes=[("team model, log-odds of home", "team", lean),
                                             ("median player speed minus walking, m/s", "dead", pace - p["walking"])]
                 + ([("stoppage model, log-odds of dead", "dead", np.log(dead_p / (1 - dead_p)))] if p["dead"] == "logit" else []))
 
 
-if __name__ == "__main__" and sys.argv[1:] == ["--fit"]:  # refit DEAD_FIT on every outside match
+if __name__ == "__main__" and sys.argv[1:] == ["--fit"]:  # refit DEAD_FIT and TEAM_FIT on every outside match
     import glob
     import os
     paths = sorted(glob.glob(os.path.join(os.path.dirname(__file__), "..", "data", "external", "*.npz")))
     ms = []
     for path in paths:
         d = np.load(path)
-        ms.append((os.path.basename(path).split("_")[0], d["players"], d["labels"], [tuple(h) for h in d["halves"]]))
-    print("DEAD_FIT =", fit(ms)["dead_fit"])
+        ms.append((os.path.basename(path).split("_")[0], d["players"], d["team"], d["labels"],
+                   [tuple(h) for h in d["halves"]], tuple(d["pitch"])))
+    f = fit(ms)
+    print("DEAD_FIT =", f["dead_fit"])
+    print("TEAM_FIT =", f["team_fit"])
 elif __name__ == "__main__":  # uv run python possession/model.py: check the run merging
     m = {"H": 3, "A": 3, "D": 2}
     f = lambda s: "".join(absorb_short(np.array(list(s)), m))  # noqa: E731
