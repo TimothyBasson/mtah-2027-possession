@@ -129,3 +129,37 @@ around it. Three things could move it, none of them a new aggregate signal:
 Sources: Vidal-Codina et al. 2022 (arXiv 2202.00804), Kim et al. 2023 (arXiv 2306.08206) and
 PathCRF (arXiv 2602.12080) were read for this survey. The other papers in the table are cited
 from memory and need checking before they go into the technical document.
+
+## The two seconds around a turnover (follow-up)
+
+**The players do answer a turnover fast, with their acceleration, not their shape.** Mean of each
+signal around true open-play turnovers, signed so that positive follows home winning the ball,
+in the signal's own standard deviations (`exp14.py`; IDSSE, the other two agree in shape):
+
+| seconds after the turnover | -2 | -1 | 0 | +0.4 | +1 | +2 | +3 | +6 |
+|---|---|---|---|---|---|---|---|---|
+| everybody's acceleration along the pitch | -0.50 | -0.12 | +0.82 | +1.09 | +1.07 | +0.50 | +0.20 | -0.06 |
+| players reversing direction | -0.31 | -0.11 | +0.40 | +0.75 | +0.87 | +0.24 | +0.07 | -0.05 |
+| push (everybody's velocity) | -0.53 | -0.68 | -0.57 | -0.41 | -0.14 | +0.14 | +0.26 | +0.28 |
+| width difference | -0.27 | -0.26 | -0.24 | -0.22 | -0.19 | -0.13 | -0.08 | +0.01 |
+
+Acceleration peaks 0.4 to 1 s after the turnover at about one standard deviation on IDSSE and
+Metrica (0.44 on SkillCorner, whose 10 fps broadcast tracking is smoother). Push only changes
+sign 1.5 s after, and width takes 3 to 6 s. So the fast evidence is an impulse, and a model that
+classifies each frame's level cannot use an impulse:
+
+| idea | score | verdict |
+|---|---|---|
+| seven fast cues as team signals (mean, median and top-four acceleration, reversals, sprint onsets, brakes, turns over 90 degrees), each over 0.6 s and summed over 2 and 5 s after and before | harness 0.406 to 0.411 against 0.411; team accuracy within 1 s of a change 0.637 to 0.640 against 0.637 | dropped |
+| the acceleration impulse as a cheaper change of team in the Viterbi (an input-dependent switch cost), harness | 0.411 against 0.402 for the same Viterbi without it: IDSSE +0.023, Metrica +0.014, SkillCorner -0.010 | tried on the model |
+| the same on `possession/model.py`, `external/heldout.py turn_clue=0,1.5,3,6` (1.5 picked in all three folds) | **0.438** against 0.435: IDSSE 0.429 (+0.005), Metrica 0.514 (+0.008), SkillCorner 0.372 (-0.003) | not adopted: +0.003, one provider down |
+
+The clue is the only thing in this survey that moved turnover timing at all, and it moved it on
+the two optical 25 fps providers, which are the ones most like BAR-ATH's tracking. It is below
+the bar on its own. The model-side code is in commit `0fb083f` (`turn_impulse` and the `turn` argument
+of `viterbi`) and was taken back out of `possession/model.py`; it is the piece most worth
+retrying inside a combined model, where the ball gives the decode something sharper to line the
+impulse up with.
+
+The knocked-out refit was stopped unfinished: the model thread had already run it (a refit
+recovers 0.004; see `possession/README.md`).

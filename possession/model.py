@@ -32,11 +32,6 @@ WALKING = 1.2      # m/s median player speed below which play is dead
 KEEPERS = 0        # 1 counts each team's deepest player (the keeper) in its spread
 DECODE = "viterbi"  # "viterbi": the best H/A/D path below; "absorb": cut each model at even odds, absorb short runs
 SWITCH_TEAM = 5.0  # what a change of team must outweigh, in log-odds summed over frames
-TURN_CLUE = 0.0    # how much one TURN_SD of turn_impulse takes off SWITCH_TEAM; 0 leaves the clue out
-TURN_SPAN = 0.6    # s either side for the acceleration
-TURN_LAG = 0.6     # s: the players' answer to a turnover peaks this long after it
-TURN_SD = 0.5      # m/s^2: the impulse's sd on the outside matches
-TURN_FLOOR = 0.5   # a change of team never costs less than this
 SWITCH_DEAD = 20.0  # the same for the ball going dead or coming alive
 MIN_TEAM = 2.0     # s, "absorb" only: shorter H/A runs are absorbed into a neighbour
 MIN_DEAD = 3.0     # s, "absorb" only: shorter D runs are absorbed into a neighbour
@@ -198,23 +193,7 @@ def absorb_short(labels, min_len):
     return np.array([k for k, n in runs for _ in range(n)], dtype=labels.dtype)
 
 
-def turn_impulse(F):
-    """Per frame, how hard everybody is accelerating toward the goal home attacks, TURN_LAG
-    seconds later, in units of TURN_SD: positive where the players are about to answer home
-    winning the ball. Both teams turn the same way after a turnover, and that shows in their
-    acceleration about 0.7 s later, well before their shape changes."""
-    push = features.team_signals(F["players"], F["team"], HALVES)[:, 2]
-    k, lag = int(TURN_SPAN * FPS), int(TURN_LAG * FPS)
-    out = np.zeros(len(push))
-    for a, b in HALVES:
-        v = push[a:b + 1]
-        acc = np.full(len(v), np.nan)
-        acc[k:-k] = (v[2 * k:] - v[:-2 * k]) * FPS / (2 * k)
-        out[a:b + 1 - lag] = np.nan_to_num(acc[lag:]) / TURN_SD
-    return np.nan_to_num(smooth(out, 0.4))
-
-
-def viterbi(p_home, p_dead, switch_team, switch_dead, turn=None, turn_clue=0.0):
+def viterbi(p_home, p_dead, switch_team, switch_dead):
     """The H/A/D path (as 0/1/2) with the highest total log-probability, where each frame scores
     log P(its label) from the two models and each change of label costs switch_team (H <-> A) or
     switch_dead (to or from D). One frame's evidence can't flip the label; a run of it can, and
@@ -222,15 +201,10 @@ def viterbi(p_home, p_dead, switch_team, switch_dead, turn=None, turn_clue=0.0):
     with np.errstate(divide="ignore"):
         E = np.column_stack([np.log(1 - p_dead) + np.log(p_home), np.log(1 - p_dead) + np.log(1 - p_home),
                              np.log(p_dead)]).clip(-50)
-    cost = np.array([[0.0, switch_team, switch_dead], [switch_team, 0, switch_dead], [switch_dead, switch_dead, 0]])
+    cost = np.array([[0, switch_team, switch_dead], [switch_team, 0, switch_dead], [switch_dead, switch_dead, 0]])
     back = np.zeros((len(E), 3), np.int8)
     score = E[0]
-    if turn is not None and turn_clue:  # a change of team is cheaper where the players turn that way
-        to_home = np.maximum(switch_team - turn_clue * np.maximum(turn, 0), TURN_FLOOR)
-        to_away = np.maximum(switch_team - turn_clue * np.maximum(-turn, 0), TURN_FLOOR)
     for i in range(1, len(E)):
-        if turn is not None and turn_clue:
-            cost[1, 0], cost[0, 1] = to_home[i], to_away[i]
         via = score[:, None] - cost
         back[i] = via.argmax(0)
         score = via.max(0) + E[i]
@@ -252,7 +226,7 @@ def explain(F, params=None):
     p = dict(keepers=KEEPERS, team_window=TEAM_WINDOW, dead_window=DEAD_WINDOW, walking=WALKING,
              min_team=MIN_TEAM, min_dead=MIN_DEAD, dead=DEAD, dead_fit=DEAD_FIT,
              team=TEAM, team_fit=TEAM_FIT, decode=DECODE, switch_team=SWITCH_TEAM,
-             switch_dead=SWITCH_DEAD, turn_clue=TURN_CLUE) | (params or {})
+             switch_dead=SWITCH_DEAD) | (params or {})
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # nobody tracked
         pace = smooth(np.nanmedian(F["players"][:, :, 2], 1), p["dead_window"])
@@ -282,11 +256,9 @@ def explain(F, params=None):
         dead_p = np.where(F["dead"], 1.0, dead_p)
     alive = dead_p < 0.5
     raw = np.where(alive, pred, "D")
-    turn = turn_impulse(F) if p["turn_clue"] and p["decode"] == "viterbi" else None
     for a, b in HALVES:
         if p["decode"] == "viterbi":
-            pred[a:b + 1] = np.array(list("HAD"))[viterbi(home_p[a:b + 1], dead_p[a:b + 1], p["switch_team"], p["switch_dead"],
-                                                          None if turn is None else turn[a:b + 1], p["turn_clue"])]
+            pred[a:b + 1] = np.array(list("HAD"))[viterbi(home_p[a:b + 1], dead_p[a:b + 1], p["switch_team"], p["switch_dead"])]
         else:
             # Blips: absorb short runs in alive/dead and in the team lean separately, so a dead
             # blip can't move a turnover: the team changes where the lean does.

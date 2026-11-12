@@ -47,6 +47,7 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-12 | start every decoded stoppage 0.5 / 1 / 1.5 / 2 / 3 s earlier (1.5 s picked in all three folds) | 0.440 | 0.807 | 0.912 | 0.869 | no: +0.005, up on all three but under +0.01; alive/dead falls |
 | 2026-11-12 | classical literature survey (`possession/research/README.md`): pressure on the most closed-down player and polarisation for who; packed penalty area, nearest player to a corner flag and kickoff shape for dead | 0.436 | 0.805 | 0.915 | 0.866 | no: +0.001, and no subset adds more than 0.002 |
 | 2026-11-12 | same survey, in its 5 Hz harness on the three-signal team model: 36 more team-shape, line, keeper and space signals, finer windows, interactions, per-match self-training, a who-is-on-the-ball choice model, a semi-Markov decode | see its README | | | | no: each inside ±0.006 |
+| 2026-11-12 | turnover clue (`possession/research/README.md`): everybody's acceleration along the pitch peaks 0.4 to 1 s after a turnover; a change of team costs less in the Viterbi where it points that way (`turn_clue` 1.5 picked in all three folds) | 0.438 | 0.803 | 0.914 | 0.864 | no: +0.003; IDSSE +0.005, Metrica +0.008, SkillCorner −0.003 |
 
 **Team model** (who has the ball, players only). The spread lean was one number with its cutoff
 at zero, read over 2 s either side, so it answered a turnover about 2 s late. Now a logistic
