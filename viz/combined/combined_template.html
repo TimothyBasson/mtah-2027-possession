@@ -391,9 +391,9 @@ function drawDead(frame) {
     }
     cx.fillStyle = '#fff'; cx.fillRect(mid - 1, y + 5, 2, 28);
   };
-  const short = ['median speed', 'fastest 20%', 'median, ±10 s', 'speed change', 'acceleration, ±3 s'];
+  const short = ['median speed', 'speed change', 'acceleration, ±3 s'];
   v.forEach((xi, i) => bar(y0 + 56 + i * rh, xi === null ? null : m.fit.w[i + 1] * (xi - m.fit.mu[i]) / m.fit.sd[i],
-    short[i] || m.signals[i], xi === null ? '–' : (i === 3 && xi > 0 ? '+' : '') + xi.toFixed(2) + (i === 4 ? ' m/s²' : ' m/s')));
+    short[i] || m.signals[i], xi === null ? '–' : (i === 1 && xi > 0 ? '+' : '') + xi.toFixed(2) + (i === 2 ? ' m/s²' : ' m/s')));
   bar(y0 + 56 + v.length * rh, m.fit.w[0], 'starting lean');
   // probability against the 0.5 line
   const py = y0 + 56 + (v.length + 1) * rh + 10, px = x0 + 16, pw = bw - 32;

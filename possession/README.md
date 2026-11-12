@@ -32,6 +32,7 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-11 | stoppage model, minimum runs re-picked held out | 0.268 | 0.715 | 0.883 | 0.790 | no: +0.002, folds disagree on the settings |
 | 2026-11-11 | **+ acceleration**: 80th percentile of players' \|change of speed\|, ±3 s, as a fifth stoppage signal | **0.282** | **0.735** | **0.898** | 0.790 | **yes** |
 | 2026-11-11 | a missing stoppage signal adds nothing instead of forcing dead (review of #22) | 0.282 | 0.735 | 0.898 | 0.790 | yes: same mean, the principled rule |
+| 2026-11-12 | **three signals**: drop the 80th-percentile speed and the 10 s median (table below) | **0.282** | **0.736** | **0.898** | 0.790 | **yes**: as good with two fewer |
 
 Stoppage model, per held-out provider (spellF1, alive/dead): IDSSE 0.199 → 0.217, 0.844 → 0.883;
 Metrica 0.271 → 0.299, 0.849 → 0.865; SkillCorner 0.280 → 0.284, 0.874 → 0.889. Frame by frame
@@ -77,9 +78,30 @@ data, and in the public minutes it separates dead from alive as it does there:
 Taking each match's own floor out (subtracting its 10th or 50th percentile) scores the same held
 out (0.282, 0.283), so the signal stays as it is. No graded BAR-ATH frame is missing any signal.
 
+**Which signals still earn their place, once acceleration is in?** Each left out in turn, and
+some pairs, refitted and scored held out:
+
+| left out | spellF1 | macroF1 | alive/dead |
+|---|---|---|---|
+| nothing (five signals) | 0.282 | 0.735 | 0.898 |
+| median speed | 0.281 | 0.734 | 0.897 |
+| 80th-percentile speed | 0.280 | 0.735 | 0.898 |
+| median, ±10 s | 0.282 | 0.736 | 0.899 |
+| speed change | 0.278 | 0.732 | 0.896 |
+| acceleration | 0.266 | 0.711 | 0.879 |
+| median + 80th-percentile speed | 0.271 | 0.724 | 0.891 |
+| **80th-percentile speed + median ±10 s (kept)** | **0.282** | **0.736** | **0.898** |
+| 80th-percentile speed + speed change | 0.279 | 0.732 | 0.896 |
+
+Acceleration took over the 80th-percentile speed's job (picking out the busiest players), and
+the 10 s median added nothing on top. One of the two speed levels is needed, not both. So three
+signals: median speed, speed change, acceleration. Per provider: IDSSE 0.237, Metrica 0.309,
+SkillCorner 0.300. On BAR-ATH (check only): 99 / 113 possessions per half, 38% / 42% dead; public
+5 minutes macroF1 0.826, spellF1 0.352, 8 possessions against 17.
+
 **Not every choice was made held out.** The weights are refitted per held-out provider, but which
-signals to use (4 of 9 speed signals, then 1 of 6 acceleration signals) and their window lengths
-were chosen on all 30 matches. The ablations say those choices move held-out accuracy by under
+signals to use (4 of 9 speed signals, then 1 of 6 acceleration signals, then dropping 2 of the 5)
+and their window lengths were chosen on all 30 matches. The ablations say those choices move held-out accuracy by under
 0.01; the technical document should still say so.
 
 Before the acceleration signal, on BAR-ATH, as a check only: 101 / 108 possessions per half, mean 18.1 / 16.5 s, 43% / 44% dead;
@@ -96,18 +118,16 @@ On each frame:
   centre, averaged over 2 s either side of the frame. The keeper, taken as the team's deepest player
   toward its own goal, is left out: he adds several metres that depend on where play is, not on who
   has the ball.
-- **Dead:** a stoppage model reads four players-only signals and calls the frame dead above even
+- **Dead:** a stoppage model reads three players-only signals and calls the frame dead above even
   odds (`DEAD_SIGNALS`, `DEAD_FIT` in `model.py`):
   - median player speed over 0.5 s either side: the typical player walks at a stoppage
-  - the 80th-percentile speed over the same window: in slow build-up the fastest few still run
-  - median speed over 10 s either side: stoppages last, a slow patch in play doesn't
   - speed over the next 2 s minus the last 2 s: everyone slows into a stoppage and speeds up out
   - the 80th percentile of players' |change of speed| over 3 s either side: in play players keep
     changing pace as they react to the ball; at a stoppage they jog or walk steadily
   Its weights are a logistic regression on the 30 outside matches, each provider counted equally.
-  The fitted weights (`DEAD_FIT["w"]`, after the intercept): median −0.58, 80th percentile
-  −0.67, 10 s median −0.40, speed change −0.50, acceleration −1.35. All point the same way, and
-  acceleration carries the most. A missing signal adds nothing either way. The viewer's Dead-ball
+  The fitted weights (`DEAD_FIT["w"]`, after the intercept): median −1.46, speed change −0.48,
+  acceleration −1.58. All point the same way, and acceleration carries the most. The
+  80th-percentile speed and 10 s median were dropped once acceleration made them redundant (above). A missing signal adds nothing either way. The viewer's Dead-ball
   model toggle shows each one's push for any frame. `dead=median` brings back the old rule (median under 1.2 m/s).
 - **No blips:** within each half, alive/dead and the team lean are cleaned separately: an alive
   run under 2 s or a dead run under 3 s flips, and so does a home or away run of the lean under

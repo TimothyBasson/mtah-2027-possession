@@ -2,7 +2,7 @@
 
 - who: the more spread-out team has the ball (attackers stretch, defenders compact)
 - dead: a stoppage changes how the whole team moves, not just how fast. A small logistic model
-  reads four speed signals (DEAD_SIGNALS) and calls the frame dead above even odds. Its weights
+  reads three player-movement signals (DEAD_SIGNALS) and calls the frame dead above even odds. Its weights
   are fitted on the outside matches; external/heldout.py refits them without the provider it scores.
 
 Both are smoothed over a window centred on the frame, which is allowed because the task is
@@ -37,16 +37,14 @@ ACCEL_LAG = 5      # frames either side for a player's change of speed (0.4 s in
 # Players-only stoppage signals, each with its own football reason:
 DEAD_SIGNALS = (
     "median speed, +-0.5 s",          # the typical player walks at a stoppage
-    "80th percentile speed, +-0.5 s",  # in slow build-up the fastest few still run
-    "median speed, +-10 s",           # stoppages last; a slow patch in play doesn't
     "speed change, 2 s after - before",  # everyone slows into a stoppage, speeds up out of it
     "80th percentile |acceleration|, +-3 s",  # in play players keep changing pace; at a stoppage they don't
 )
 # Logistic weights on the standardised signals: intercept, then one per signal, with each signal's
 # mean and sd. Fitted on all 30 outside matches, each provider weighted equally:
 #   uv run python possession/model.py --fit
-DEAD_FIT = {"w": [-1.33, -0.577, -0.67, -0.403, -0.495, -1.351],
-            "mu": [1.744, 2.567, 1.75, -0.002, 0.932], "sd": [0.995, 1.269, 0.666, 0.614, 0.374]}
+DEAD_FIT = {"w": [-1.381, -1.462, -0.481, -1.578],
+            "mu": [1.744, -0.002, 0.932], "sd": [0.995, 0.614, 0.374]}
 
 
 def graded_mask(n):
@@ -85,7 +83,7 @@ def window_mean(x, seconds, ahead):
 
 
 def dead_signals(players):
-    """(frames, 5) array of DEAD_SIGNALS, NaN where nobody is tracked."""
+    """(frames, 3) array of DEAD_SIGNALS, NaN where nobody is tracked."""
     s = players[:, :, 2].astype(float)
     s[s > MAX_SPEED] = np.nan
     acc = np.full(s.shape, np.nan)  # each player's change of speed, m/s^2, within each half
@@ -95,9 +93,9 @@ def dead_signals(players):
     acc[acc > MAX_ACCEL] = np.nan
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # nobody tracked
-        q50, q80, a80 = np.nanmedian(s, 1), np.nanpercentile(s, 80, 1), np.nanpercentile(acc, 80, 1)
-    return np.column_stack([smooth(q50, 0.5), smooth(q80, 0.5), smooth(q50, 10),
-                            window_mean(q50, 2, True) - window_mean(q50, 2, False), smooth(a80, 3)])
+        q50, a80 = np.nanmedian(s, 1), np.nanpercentile(acc, 80, 1)
+    return np.column_stack([smooth(q50, 0.5), window_mean(q50, 2, True) - window_mean(q50, 2, False),
+                            smooth(a80, 3)])
 
 
 def dead_prob(X, fit=DEAD_FIT):

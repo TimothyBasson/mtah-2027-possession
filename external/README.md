@@ -63,19 +63,19 @@ All three cut possessions shorter than the public window (17 in 5 minutes, mean 
 7.6 s, D 20%), so a model fitted to them may lean towards short possessions. These are descriptive
 only: the labels are not adjusted towards the public window.
 
-## Baseline: `possession/` with the stoppage model (players only: more spread-out team, keepers left out, has it; a logistic model on four player-speed signals and one acceleration signal for dead; short runs absorbed)
+## Baseline: `possession/` with the stoppage model (players only: more spread-out team, keepers left out, has it; a logistic model on two player-speed signals and one acceleration signal for dead; short runs absorbed)
 
 Held out by provider (`external/heldout.py`: the stoppage weights refitted on the other two
 providers each time), the number to compare changes on:
 
 | held out | spellF1 | macroF1 | alive/dead F1 | team acc |
 |---|---|---|---|---|
-| IDSSE (7) | 0.234 | 0.753 | 0.912 | 0.768 |
-| Metrica (3) | 0.311 | 0.731 | 0.877 | 0.804 |
-| SkillCorner (20) | 0.299 | 0.719 | 0.905 | 0.798 |
-| mean of the three | 0.282 | 0.735 | 0.898 | 0.790 |
+| IDSSE (7) | 0.237 | 0.757 | 0.914 | 0.769 |
+| Metrica (3) | 0.309 | 0.729 | 0.875 | 0.804 |
+| SkillCorner (20) | 0.300 | 0.721 | 0.905 | 0.798 |
+| mean of the three | 0.282 | 0.736 | 0.898 | 0.790 |
 
-Before the acceleration signal: held-out mean 0.266 / 0.712 / 0.879 / 0.790.
+Before the acceleration signal: held-out mean 0.266 / 0.712 / 0.879 / 0.790. With all five signals (before dropping the two redundant ones): 0.282 / 0.735 / 0.898 / 0.790.
 
 `score.py` in-sample (weights fitted on all 30): IDSSE 0.244, Metrica 0.311, SkillCorner 0.300,
 all 30 0.288 spellF1. Before the stoppage model (median speed under 1.2 m/s): held-out mean 0.250,
