@@ -1,17 +1,17 @@
-"""Possession per frame from the players alone, never the ball. The simplest version:
+"""Possession per frame from the players alone, never the ball.
 
 - who: the team with the ball stretches the pitch and both teams move toward the goal it attacks.
   A small logistic model reads four shape and movement signals (TEAM_SIGNALS), each over the 2 s
-  after and the 2 s before the frame, and leans home above even odds.
+  after and the 2 s before the frame.
 - dead: a stoppage changes how the whole team moves, not just how fast. A small logistic model
-  reads five players-only signals (DEAD_SIGNALS) and calls the frame dead above even odds. Its weights
-  are fitted on the outside matches; external/heldout.py refits them without the provider it scores.
+  reads five players-only signals (DEAD_SIGNALS).
+- labels: the best H/A/D path on those two probabilities (viterbi).
 
-Both are smoothed over a window centred on the frame, which is allowed because the task is
-offline. Windows stop at the edges of each half.
+Both models' weights are fitted on the outside matches; external/heldout.py refits them without
+the provider it scores. Windows look ahead as well as back, which is allowed because the task is
+offline, and stop at the edges of each half.
 
-This is the starting point to build on one idea at a time, each one kept only if it raises the
-score on the outside matches (external/score.py).
+Built one idea at a time, each kept only if it raises the held-out score (possession/README.md).
 """
 
 import itertools

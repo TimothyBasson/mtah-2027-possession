@@ -6,7 +6,7 @@ This model is separate from `hmm/`. The plan is to compare and combine the two a
 uv run python possession/run.py                    # -> evaluation/results/possession.csv (BAR-ATH)
 uv run python external/heldout.py                  # THE score: per provider, fitted without it
 uv run python external/score.py                    # every outside match, in-sample
-uv run python possession/model.py --fit            # refit DEAD_FIT on all 30 outside matches
+uv run python possession/model.py --fit            # refit DEAD_FIT and TEAM_FIT on all 30 outside matches
 uv run python viz/combined/make_combined.py --match all --explain --open   # see how it works
 ```
 
@@ -21,6 +21,8 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 3. **Priors from football, not from our data**, such as possession counts and stoppage lengths.
 4. **BAR-ATH is left alone.** The public 5 minutes are a final sanity check, never a target.
 5. **Every idea goes in the log below**, with its held-out score, kept or dropped.
+6. **A change counts from +0.01 on the held-out mean with no provider down.** Providers disagree
+   by up to 0.025 on the same change.
 
 ## Experiment log (held-out mean over the three providers, `external/heldout.py`)
 
@@ -38,6 +40,11 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-12 | the same, the two costs picked held out from 2, 5 x 20, 40 | 0.405 | 0.782 | 0.901 | 0.856 | no: the folds pick three different pairs, the surface is flat |
 | 2026-11-12 | **which goal a team defends**, read from the two teams against each other, not against halfway (a bug: wrong in a half of 9 of the 30 matches, which flipped push and dropped a forward as the keeper) | **0.414** | **0.783** | 0.899 | **0.861** | **yes** |
 | 2026-11-12 | **two more stoppage signals**: players on or over a boundary line, and both teams' width summed, each ±1 s | **0.435** | **0.802** | **0.914** | 0.864 | **yes** |
+| 2026-11-12 | restart taker as a team signal: home minus away players on a boundary line, over the last 2 / 5 / 10 s | 0.435 | | | | no: frame accuracy 0.846 → 0.847, width already says it |
+| 2026-11-12 | decode variations: dead log-odds shifted by −1 / −0.5 / +0.5 / +1; team odds shifted 0.5 s earlier, 0.5 s or 1 s later; team evidence halved or doubled; costs 2-10 and 10-30 | 0.405-0.437, picked held out 0.432 | | | | no: nothing clears +0.01 and the folds disagree |
+| 2026-11-12 | look-ahead stoppage signals (on a line, width, median speed, acceleration over the next 1-5 s, to start stoppages earlier), with and without players tracked | 0.436-0.439 | 0.804-0.810 | 0.914-0.918 | 0.865 | no: under +0.01, IDSSE falls 0.003-0.008 |
+| 2026-11-12 | team model at more scales: push and width over 0.6 s or 2-5 s as well; goal-side marking; without length | 0.432-0.439 | 0.801-0.803 | 0.914 | 0.861-0.866 | no: under +0.01 |
+| 2026-11-12 | start every decoded stoppage 0.5 / 1 / 1.5 / 2 / 3 s earlier (1.5 s picked in all three folds) | 0.440 | 0.807 | 0.912 | 0.869 | no: +0.005, up on all three but under +0.01; alive/dead falls |
 | 2026-11-12 | classical literature survey (`possession/research/README.md`): pressure on the most closed-down player and polarisation for who; packed penalty area, nearest player to a corner flag and kickoff shape for dead | 0.436 | 0.805 | 0.915 | 0.866 | no: +0.001, and no subset adds more than 0.002 |
 | 2026-11-12 | same survey, in its 5 Hz harness on the three-signal team model: 36 more team-shape, line, keeper and space signals, finer windows, interactions, per-match self-training, a who-is-on-the-ball choice model, a semi-Markov decode | see its README | | | | no: each inside ±0.006 |
 
@@ -237,35 +244,66 @@ Before the acceleration signal, on BAR-ATH, as a check only: 101 / 108 possessio
 public 5 minutes macroF1 0.814, spellF1 0.336, 8 possessions against 17. Fewer possessions and
 more dead than before: the model now merges more, which the next work on turnovers should balance.
 
-## v0: players only, no ball
+## The model: players only, no ball
 
 The model never reads the ball. Tim's `hmm/` works from the ball, so the two see the match through
 different eyes and should make different mistakes, which is what makes combining them worth it.
+`model.explain(F)` returns `p_home` (P(home has it | alive)) and `p_dead` per frame beside the
+labels; those two are what a combination would take.
+
+| held out (`external/heldout.py`) | spellF1 | macroF1 | alive/dead | team |
+|---|---|---|---|---|
+| IDSSE (7) | 0.424 | 0.837 | 0.932 | 0.864 |
+| Metrica (3) | 0.506 | 0.800 | 0.889 | 0.899 |
+| SkillCorner (20) | 0.375 | 0.770 | 0.922 | 0.829 |
+| mean of the three | 0.435 | 0.802 | 0.914 | 0.864 |
 
 On each frame:
-- **Who:** the more spread-out team has the ball. Spread is each team's mean distance from its own
-  centre, averaged over 2 s either side of the frame. The keeper, taken as the team's deepest player
-  toward its own goal, is left out: he adds several metres that depend on where play is, not on who
-  has the ball.
-- **Dead:** a stoppage model reads three players-only signals and calls the frame dead above even
-  odds (`DEAD_SIGNALS`, `DEAD_FIT` in `model.py`):
+- **Who** (`TEAM_SIGNALS`, `TEAM_FIT`): a logistic model on four signals, home minus away with the
+  keepers left out, each over the next 2 s and the last 2 s: width, length, push (both teams'
+  velocity toward the goal home attacks) and mean speed. The team with the ball stretches the
+  pitch, everyone moves the way the ball is going, and the side without it chases. `team=spread`
+  brings back the old rule (the more spread-out team, 2 s either side).
+- **Dead** (`DEAD_SIGNALS`, `DEAD_FIT`): a logistic model on five signals:
   - median player speed over 0.5 s either side: the typical player walks at a stoppage
   - speed over the next 2 s minus the last 2 s: everyone slows into a stoppage and speeds up out
   - the 80th percentile of players' |change of speed| over 3 s either side: in play players keep
     changing pace as they react to the ball; at a stoppage they jog or walk steadily
-  Its weights are a logistic regression on the 30 outside matches, each provider counted equally.
-  The fitted weights (`DEAD_FIT["w"]`, after the intercept): median −1.46, speed change −0.48,
-  acceleration −1.58. All point the same way, and acceleration carries the most. The
-  80th-percentile speed and 10 s median were dropped once acceleration made them redundant (above). A missing signal adds nothing either way. The viewer's Dead-ball
-  model toggle shows each one's push for any frame. `dead=median` brings back the old rule (median under 1.2 m/s).
-- **No blips:** within each half, alive/dead and the team lean are cleaned separately: an alive
-  run under 2 s or a dead run under 3 s flips, and so does a home or away run of the lean under
-  2 s, shortest first (`absorb_short`; `uv run python possession/model.py` checks it). Without
-  this, a moment of walking inside a possession turned it D and split it in two. Cleaning the two
-  apart means a dead blip can't move a turnover: the team changes where the lean does.
+  - players on or over a boundary line, 1 s either side: a throw-in or corner taker, or someone
+    fetching the ball
+  - both teams' width, summed, 1 s either side: in play both sides spread; at a stoppage they
+    close up
+  `dead=median` brings back the first rule (median speed under 1.2 m/s).
+- Both models' weights are fitted on the 30 outside matches, each provider counted equally
+  (`uv run python possession/model.py --fit`), and refitted without the held-out provider for
+  every score above. A missing signal adds nothing either way.
+- **Labels** (`model.viterbi`): the best H/A/D path on the two probabilities, a change of team
+  costing 5 and to or from dead 20, within each half. With no team evidence (a side untracked)
+  possession stays with the team that had it. `decode=absorb` brings back the old clean-up
+  (even-odds cuts, runs under 2 s / 3 s absorbed).
 - Graded frames before each kickoff are D on BAR-ATH.
 
 Windows look forward as well as back (the task is offline) and stop at the edge of each half.
+
+What it gets wrong:
+- **Brief possessions.** A possession of a touch or two (under about 4 s) never changes the
+  teams' shape, and the team call there is a coin toss. They are half of IDSSE's possessions.
+  Each one missed also merges its two neighbours. This is the largest part of the remaining gap
+  and likely needs the ball.
+- **Turnover timing.** On long possessions the call is 69% right in the first half-second and
+  over 90% after 2 s on IDSSE and Metrica: shape still answers a turnover late.
+- **Stoppages start late.** The players slow down after the whistle, not before it. Look-ahead
+  signals did not fix it (log above).
+- **SkillCorner.** Its off-camera players are extrapolated, which blurs push; it gains least.
+- **Signal choice was made on all 30 matches**; only the weights are refitted held out.
+
+## v0, as first built (kept for the record; the numbers below are from 2026-11-05 to 11-11)
+
+The first version: the more spread-out team has the ball (spread is each team's mean distance from
+its own centre over 2 s either side, keepers left out), the frame is dead when the median player
+speed is under 1.2 m/s, and alive runs under 2 s, dead runs under 3 s and team runs under 2 s
+are absorbed (`absorb_short`), alive/dead and the team lean cleaned separately so a dead blip
+can't move a turnover.
 
 | outside matches | spellF1 | macroF1 | alive/dead | team |
 |---|---|---|---|---|
@@ -333,18 +371,6 @@ roughly 360 possessions, so 255 is about 30% too few, where 520 was about 45% to
 
 This model is one half of a combined model with `hmm/`, not a replacement for the best single
 model.
-
-What it gets wrong:
-- **Missed turnovers.** Absorbing short runs fixed the over-splitting (520 possessions on BAR-ATH
-  down to 255), and showed what it was hiding: the lean misses turnovers, so the model now makes
-  about 30% too few possessions on BAR-ATH and about half the true count on the outside matches.
-  Looser minimums won't recover them; a sharper turnover signal would.
-- **Fixed minimums.** The 2 s / 3 s cutoffs suit this model's runs. They would need re-picking
-  before being put on `hmm/` or a combined model, which have fewer short false runs.
-- **Late changes.** Shape takes a couple of seconds to change after a turnover, and the 2 s window
-  adds to that.
-- **Style.** A team keeping the ball deep looks compact, and a high press looks stretched.
-- **One number for who.** The team call is still the spread alone, with a fixed cutoff at zero.
 
 ## Ideas to try (research, 2026-11-05)
 
