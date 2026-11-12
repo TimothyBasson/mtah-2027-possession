@@ -1,5 +1,9 @@
 # Test-only tooling. Not needed to produce or score a submission.
 #
 #   pip install -r requirements.txt -r requirements-dev.txt
-#   python -m pytest tests
+#   python -m pytest
+# Training the control classifier only (external/train_control.py); the decoder does not need it.
+scikit-learn tests
 pytest
+# Training the control classifier only (external/train_control.py); the decoder does not need it.
+scikit-learn
