@@ -58,7 +58,24 @@ How hard players change pace matters, not which way. Held-out spellF1 per provid
 0.217 → 0.234, Metrica 0.299 → 0.311, SkillCorner 0.284 → 0.299. With it, all five weights point
 the same way (faster or livelier means in play), and acceleration carries the most (−1.35).
 On BAR-ATH (check only): 101 / 111 possessions per half, 38% / 42% dead (was 43% / 44%); public 5
-minutes macroF1 0.820, 15% dead against 20% true.
+minutes macroF1 0.814 → 0.820, spellF1 0.336 → 0.352, still 8 possessions against 17, 15% dead
+against 20% true.
+
+**Is it measuring the tracker's jitter?** Acceleration is a second difference of positions, so
+positional noise raises it, and a noisier tracker would look livelier. Checked, no tuning. The
+signal (m/s², 10th / 50th / 90th percentile) has the same floor on BAR-ATH as on the outside
+data, and in the public minutes it separates dead from alive as it does there:
+
+| | all frames | alive, median | dead, median |
+|---|---|---|---|
+| IDSSE | 0.40 / 0.91 / 1.48 | 1.19 | 0.48 |
+| Metrica | 0.39 / 0.90 / 1.33 | 1.04 | 0.53 |
+| SkillCorner | 0.53 / 1.00 / 1.43 | 1.10 | 0.66 |
+| BAR-ATH, whole match | 0.43 / 0.99 / 1.61 | | |
+| BAR-ATH, public minutes | 0.71 / 1.21 / 1.68 | 1.32 | 0.71 |
+
+Taking each match's own floor out (subtracting its 10th or 50th percentile) scores the same held
+out (0.282, 0.283), so the signal stays as it is. No graded BAR-ATH frame is missing any signal.
 
 **Not every choice was made held out.** The weights are refitted per held-out provider, but which
 signals to use (4 of 9 speed signals, then 1 of 6 acceleration signals) and their window lengths
