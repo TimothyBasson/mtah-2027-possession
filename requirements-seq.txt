@@ -1,0 +1,6 @@
+# The learned labeller in seq/ and external/score_seq.py, on top of requirements.txt. Pinned: the
+# fitted trees, and so the labels, are only the same for the same scikit-learn. 1.6.1 is the last
+# release for Python 3.9 and also installs on 3.11.
+-r requirements.txt
+scikit-learn==1.6.1
+threadpoolctl==3.7.0
