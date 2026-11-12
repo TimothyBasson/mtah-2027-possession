@@ -44,6 +44,7 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-12 | decode variations: dead log-odds shifted by −1 / −0.5 / +0.5 / +1; team odds shifted 0.5 s earlier, 0.5 s or 1 s later; team evidence halved or doubled; costs 2-10 and 10-30 | 0.405-0.437, picked held out 0.432 | | | | no: nothing clears +0.01 and the folds disagree |
 | 2026-11-12 | look-ahead stoppage signals (on a line, width, median speed, acceleration over the next 1-5 s, to start stoppages earlier), with and without players tracked | 0.436-0.439 | 0.804-0.810 | 0.914-0.918 | 0.865 | no: under +0.01, IDSSE falls 0.003-0.008 |
 | 2026-11-12 | team model at more scales: push and width over 0.6 s or 2-5 s as well; goal-side marking; without length | 0.432-0.439 | 0.801-0.803 | 0.914 | 0.861-0.866 | no: under +0.01 |
+| 2026-11-12 | start every decoded stoppage 0.5 / 1 / 1.5 / 2 / 3 s earlier (1.5 s picked in all three folds) | 0.440 | 0.807 | 0.912 | 0.869 | no: +0.005, up on all three but under +0.01; alive/dead falls |
 
 **Team model** (who has the ball, players only). The spread lean was one number with its cutoff
 at zero, read over 2 s either side, so it answered a turnover about 2 s late. Now a logistic
