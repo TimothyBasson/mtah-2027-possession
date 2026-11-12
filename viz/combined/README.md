@@ -38,8 +38,8 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
   is the who-has-the-ball clue in `possession/model.py` for this one frame; the model averages it
   over 2 s either side.
 - **Dead-ball model** (checkbox by the play controls, remembered, `--explain` pages): a panel on
-  the pitch with the stoppage model in `possession/model.py` for this frame. Each of its four
-  player-speed signals shows its value and how far it pushes towards dead (right, grey) or in
+  the pitch with the stoppage model in `possession/model.py` for this frame. Each of its three
+  player-speed and acceleration signals shows its value and how far it pushes towards dead (right, grey) or in
   play (left, green). They add up, with the starting lean, into P(dead), with the 0.5 line that
   decides. Under it are the label after the blip clean-up and P(dead) over 30 s either side.
 - **Two strips under the video.** Click either one to jump, or drag it to scrub:
