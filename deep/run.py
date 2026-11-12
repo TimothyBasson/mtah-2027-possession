@@ -27,7 +27,7 @@ def probabilities(tag):
     import load
     players, ball, team, halves = load.load()
     net = PossessionNet(nfeat=D.NFEAT)
-    net.load_state_dict(torch.load(os.path.join(ROOT, "data", "cache", "deep", tag, "none", "net.pt")))
+    net.load_state_dict(torch.load(os.path.join(HERE, "models", tag + ".pt")))  # train.py --fold none
     probs = []
     for a, b in halves:
         X, M, bxy, fr = D.half_tensors(players, ball, team, a, b, load.PITCH, load.FPS)
@@ -43,6 +43,7 @@ def main():
     from starter.baseline import RESULTS_DIR, write_submission
     from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES
     probs, halves, n = probabilities(a.tag)
+    os.makedirs(os.path.join(ROOT, "data", "cache", "deep", a.tag), exist_ok=True)
     np.savez_compressed(os.path.join(ROOT, "data", "cache", "deep", a.tag, "bar_ath_probs.npz"),
                         **{f"p{i}": p for i, p in enumerate(probs)})
     pred = decode.labels_from(probs, halves, n, **DECODE)
