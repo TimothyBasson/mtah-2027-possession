@@ -1,0 +1,164 @@
+"""Train the learned possession model with one provider held out, and save per-frame probabilities.
+
+    python deep/train.py --fold idsse [--steps 3000] [--tag v1]
+
+Trains on the other two providers (each drawn equally often), minus a few of their matches kept
+back as validation for choosing decode settings (deep/decode.py). Writes
+data/cache/deep/<tag>/<fold>/<match>.npz with H/A/D probabilities at 5 fps for the held-out
+provider's matches and the validation matches. CPU only.
+"""
+
+import argparse
+import os
+import sys
+import time
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import data as D  # noqa: E402
+from net import PossessionNet  # noqa: E402
+
+VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3}  # last n matches of each training provider
+
+
+def split(matches, fold):
+    train, val, test = [], [], []
+    for prov in sorted({m["provider"] for m in matches}):
+        ms = [m for m in matches if m["provider"] == prov]
+        if prov == fold:
+            test += ms
+        else:
+            train += ms[:-VAL[prov]]
+            val += ms[-VAL[prov]:]
+    return train, val, test
+
+
+def edges(y):
+    """1 where the label changes within 2 steps (0.4 s) either side; ungraded frames don't count."""
+    ch = np.zeros(len(y), bool)
+    d = (y[1:] != y[:-1]) & (y[1:] >= 0) & (y[:-1] >= 0)
+    for k in range(-2, 3):
+        i = np.flatnonzero(d) + 1 + k
+        ch[i[(i >= 0) & (i < len(y))]] = True
+    return ch.astype(np.float32)
+
+
+def batch(train, rng, B, T, a):
+    provs = sorted({m["provider"] for m in train})
+    Xs, Ms, ys, bs, es = [], [], [], [], []
+    while len(Xs) < B:
+        prov = provs[rng.integers(len(provs))]
+        ms = [m for m in train if m["provider"] == prov]
+        h = ms[rng.integers(len(ms))]["halves"]
+        h = h[rng.integers(len(h))]
+        n = len(h["y"])
+        s = rng.integers(0, max(1, n - T))
+        X, M, y, ball = h["X"][s:s + T], h["M"][s:s + T], h["y"][s:s + T], h["ball"][s:s + T]
+        if len(X) < T or (y >= 0).mean() < 0.3:
+            continue
+        e = edges(y)
+        if rng.random() < 0.5:
+            X, y, ball = D.swap_teams(X, y, ball)
+        if rng.random() < 0.5:
+            X, ball = D.mirror(X, ball)
+        X, M = X.copy(), M.copy()
+        if a.noise:
+            X[..., :2] += rng.normal(0, a.noise / 40, X[..., :2].shape).astype(np.float32)
+        p = rng.uniform(0, a.dropout)
+        drop = rng.random(M.shape) < p
+        M &= ~drop
+        X[~M] = 0
+        Xs.append(X); Ms.append(M); ys.append(y); bs.append(ball); es.append(e)
+    t = lambda v: torch.from_numpy(np.stack(v))  # noqa: E731
+    return t(Xs), t(Ms), t(ys), t(bs), t(es)
+
+
+@torch.no_grad()
+def predict_half(net, h, tta=True):
+    """(T, 3) probabilities, averaged over the four symmetric views of the half."""
+    net.eval()
+    out = 0
+    views = [(s, m) for s in (0, 1) for m in (0, 1)] if tta else [(0, 0)]
+    dummy_y, dummy_b = np.zeros(len(h["y"]), np.int64), h["ball"]
+    for s, m in views:
+        X = h["X"]
+        if s:
+            X, _, _ = D.swap_teams(X, dummy_y, dummy_b)
+        if m:
+            X, _ = D.mirror(X, dummy_b)
+        logits = net(torch.from_numpy(X)[None], torch.from_numpy(h["M"])[None])[0][0]
+        p = F.softmax(logits, -1).numpy()
+        out = out + (p[:, [1, 0, 2]] if s else p)
+    return out / len(views)
+
+
+def frame_scores(net, ms):
+    acc, n = 0, 0
+    for m in ms:
+        for h in m["halves"]:
+            p = predict_half(net, h, tta=False)
+            g = h["y"] >= 0
+            acc += (p.argmax(1)[g] == h["y"][g]).sum(); n += g.sum()
+    return acc / max(n, 1)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--fold", required=True)
+    ap.add_argument("--steps", type=int, default=3000)
+    ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--window", type=int, default=300)
+    ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--noise", type=float, default=0.2, help="position jitter, metres")
+    ap.add_argument("--dropout", type=float, default=0.15, help="max share of players hidden per window")
+    ap.add_argument("--ball", type=float, default=0.5, help="weight of the where-is-the-ball loss")
+    ap.add_argument("--edge", type=float, default=0.3)
+    ap.add_argument("--d", type=int, default=128)
+    ap.add_argument("--no-gru", action="store_true")
+    ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--tag", default="v1")
+    ap.add_argument("--seed", type=int, default=0)
+    a = ap.parse_args()
+    torch.set_num_threads(a.threads)
+    torch.manual_seed(a.seed)
+    rng = np.random.default_rng(a.seed)
+    matches = D.load_all()
+    train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
+    net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru)
+    opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
+    out = os.path.join(D.ROOT, "data", "cache", "deep", a.tag, a.fold)
+    os.makedirs(out, exist_ok=True)
+    t0, run = time.time(), []
+    for step in range(1, a.steps + 1):
+        net.train()
+        X, M, y, ball, e = batch(train, rng, a.batch, a.window, a)
+        logits, bhat, ehat = net(X, M)
+        g = y >= 0
+        loss_c = F.cross_entropy(logits[g], y[g])
+        bg = g & (y < 2) & torch.isfinite(ball[..., 0])
+        loss_b = F.smooth_l1_loss(bhat[bg], ball[bg], beta=0.1) if bg.any() else logits.sum() * 0
+        loss_e = F.binary_cross_entropy_with_logits(ehat[g], e[g])
+        loss = loss_c + a.ball * loss_b + a.edge * loss_e
+        opt.zero_grad(); loss.backward()
+        torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
+        opt.step(); sched.step()
+        run.append((loss_c.item(), loss_b.item(), loss_e.item()))
+        if step % 100 == 0 or step == a.steps:
+            r = np.mean(run, 0); run = []
+            msg = f"{step:5d} ce {r[0]:.3f} ball {r[1]:.3f} edge {r[2]:.3f}  {time.time() - t0:.0f}s"
+            if step % 500 == 0 or step == a.steps:
+                msg += f"  val acc {frame_scores(net, val):.3f}  test acc {frame_scores(net, test[:3]):.3f}"
+            print(msg, flush=True)
+    torch.save(net.state_dict(), os.path.join(out, "net.pt"))
+    for kind, ms in (("val", val), ("test", test)):
+        for m in ms:
+            np.savez_compressed(os.path.join(out, m["name"] + ".npz"), kind=kind,
+                                **{f"p{i}": predict_half(net, h) for i, h in enumerate(m["halves"])})
+
+
+if __name__ == "__main__":
+    main()
