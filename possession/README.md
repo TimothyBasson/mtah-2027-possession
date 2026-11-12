@@ -33,6 +33,7 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-11 | **+ acceleration**: 80th percentile of players' \|change of speed\|, ±3 s, as a fifth stoppage signal | **0.282** | **0.735** | **0.898** | 0.790 | **yes** |
 | 2026-11-11 | a missing stoppage signal adds nothing instead of forcing dead (review of #22) | 0.282 | 0.735 | 0.898 | 0.790 | yes: same mean, the principled rule |
 | 2026-11-12 | **three signals**: drop the 80th-percentile speed and the 10 s median (table below) | **0.282** | **0.736** | **0.898** | 0.790 | **yes**: as good with two fewer |
+| 2026-11-12 | **1 s lean window, 1 s minimum possession** (were 2 s, 2 s), from a football-prior grid (below) | **0.287** | **0.736** | **0.899** | 0.790 | **yes**: every provider up, on a flat plateau |
 
 Stoppage model, per held-out provider (spellF1, alive/dead): IDSSE 0.199 → 0.217, 0.844 → 0.883;
 Metrica 0.271 → 0.299, 0.849 → 0.865; SkillCorner 0.280 → 0.284, 0.874 → 0.889. Frame by frame
@@ -108,6 +109,62 @@ Before the acceleration signal, on BAR-ATH, as a check only: 101 / 108 possessio
 public 5 minutes macroF1 0.814, spellF1 0.336, 8 possessions against 17. Fewer possessions and
 more dead than before: the model now merges more, which the next work on turnovers should balance.
 
+## Where the mistakes are (2026-11-12)
+
+`uv run python external/errors.py` predicts each provider held out and sorts every wrong graded
+frame, and every true possession it fails to match at IoU 0.5. With the 2 s settings (columns:
+mean, IDSSE, Metrica, SkillCorner):
+
+| graded frames wrong | 25.4% | 22.1% | 26.7% | 27.4% |
+|---|---|---|---|---|
+| wrong team, within 2 s of a true turnover | 7.1% | 8.0% | 6.6% | 6.9% |
+| wrong team, mid-possession | 5.1% | 4.2% | 4.4% | 6.6% |
+| stoppage called in open play | 4.9% | 1.3% | 10.3% | 3.2% |
+| stoppage called, within 2 s of a true edge | 0.9% | 0.3% | 1.6% | 0.8% |
+| missed stoppage: start / middle / end | 7.4% | 8.3% | 3.8% | 10.0% |
+
+| true possessions (IoU 0.5) | mean | IDSSE | Metrica | SkillCorner |
+|---|---|---|---|---|
+| matched | 20.4% | 16.5% | 23.4% | 21.1% |
+| merged into a prediction over twice as long | 34.5% | 40.2% | 29.2% | 34.1% |
+| no prediction for that team overlaps it at all | 34.3% | 36.0% | 33.1% | 33.8% |
+| split / shifted | 10.9% | 7.3% | 14.3% | 11.0% |
+| predicted / true possessions | 0.59 | 0.46 | 0.56 | 0.75 |
+
+- Half the errors are the team, half the stoppage. The team errors cluster at turnovers: the
+  model finds 38% of true changes of team within 10 s, and those it finds come 0.6-2 s late.
+- A third of true possessions get no frame of their own team at all. True possessions are short
+  (median 3.7 / 5.9 / 5.8 s; 20-30% under 2 s, 38-53% under 4 s), and a team's shape doesn't
+  change in a one-second possession, so spread can't see these whatever the smoothing.
+- Metrica's "stoppage in open play" (10%) is the largest single bucket on any provider.
+
+**Is the smoothing causing the merging?** The lean window and the minimum runs were set by hand
+and never scored held out. Grid from football, not from the data: lean window 0.5 / 1 / 2 / 3 s
+either side (a team reshapes within 1-3 s of a turnover), minimum possession 0 / 0.5 / 1 / 2 / 3 s
+(a controlled touch and pass takes about a second), minimum stoppage 1 / 3 / 5 s (the quickest
+restart, a quick throw-in, takes a few seconds). Held-out spellF1, each provider in its own fold,
+providers equal (minimum stoppage 3 s; 1 s is 0.008-0.012 worse everywhere, 5 s the same as 3 s):
+
+| lean window \ min possession | 0 | 0.5 | 1 | 2 | 3 |
+|---|---|---|---|---|---|
+| 0.5 s | 0.286 | 0.287 | 0.287 | 0.285 | 0.282 |
+| 1 s | 0.286 | 0.287 | **0.287** | 0.284 | 0.281 |
+| 2 s (was) | 0.283 | 0.283 | 0.283 | **0.282** | 0.280 |
+| 3 s | 0.280 | 0.280 | 0.280 | 0.279 | 0.279 |
+
+macroF1 is 0.735-0.737 across the whole grid. Picked on the other two providers, the folds chose
+(1, 1, 3), (0.5, 1, 5) and (0.5, 0.5, 3): different points, but all on the same short plateau.
+The middle of it, 1 s and 1 s, raises every provider (IDSSE 0.237 → 0.243, Metrica 0.309 →
+0.317, SkillCorner 0.300 → 0.301) and was adopted. The minimum alive run is the same setting, so
+it is 1 s too.
+
+**So no: the smoothing isn't the cause.** The whole grid spans 0.279-0.287, possessions predicted
+per true one go only 0.59 → 0.62, merged 34.5% → 33.6%, and turnovers found within 10 s 38% →
+41%. The ceiling on these knobs is about +0.005; the merging comes from the spread signal not
+seeing turnovers, which is where the next work goes (faster turnover signals). On BAR-ATH (check
+only): 223 possessions of mean 17.2 s (was 212 of 18.0 s); public 5 minutes macroF1 0.824 (was
+0.826), spellF1 0.352 (same), 8 possessions against 17.
+
 ## v0: players only, no ball
 
 The model never reads the ball. Tim's `hmm/` works from the ball, so the two see the match through
@@ -115,7 +172,7 @@ different eyes and should make different mistakes, which is what makes combining
 
 On each frame:
 - **Who:** the more spread-out team has the ball. Spread is each team's mean distance from its own
-  centre, averaged over 2 s either side of the frame. The keeper, taken as the team's deepest player
+  centre, averaged over 1 s either side of the frame. The keeper, taken as the team's deepest player
   toward its own goal, is left out: he adds several metres that depend on where play is, not on who
   has the ball.
 - **Dead:** a stoppage model reads three players-only signals and calls the frame dead above even
@@ -130,8 +187,8 @@ On each frame:
   80th-percentile speed and 10 s median were dropped once acceleration made them redundant (above). A missing signal adds nothing either way. The viewer's Dead-ball
   model toggle shows each one's push for any frame. `dead=median` brings back the old rule (median under 1.2 m/s).
 - **No blips:** within each half, alive/dead and the team lean are cleaned separately: an alive
-  run under 2 s or a dead run under 3 s flips, and so does a home or away run of the lean under
-  2 s, shortest first (`absorb_short`; `uv run python possession/model.py` checks it). Without
+  run under 1 s or a dead run under 3 s flips, and so does a home or away run of the lean under
+  1 s, shortest first (`absorb_short`; `uv run python possession/model.py` checks it). Without
   this, a moment of walking inside a possession turned it D and split it in two. Cleaning the two
   apart means a dead blip can't move a turnover: the team changes where the lean does.
 - Graded frames before each kickoff are D on BAR-ATH.
@@ -210,10 +267,10 @@ What it gets wrong:
   down to 255), and showed what it was hiding: the lean misses turnovers, so the model now makes
   about 30% too few possessions on BAR-ATH and about half the true count on the outside matches.
   Looser minimums won't recover them; a sharper turnover signal would.
-- **Fixed minimums.** The 2 s / 3 s cutoffs suit this model's runs. They would need re-picking
+- **Fixed minimums.** The 1 s / 3 s cutoffs suit this model's runs. They would need re-picking
   before being put on `hmm/` or a combined model, which have fewer short false runs.
-- **Late changes.** Shape takes a couple of seconds to change after a turnover, and the 2 s window
-  adds to that.
+- **Late changes.** Shape takes a couple of seconds to change after a turnover: the model calls
+  the turnovers it finds 0.6-2 s late, and finds only about 40% within 10 s (`external/errors.py`).
 - **Style.** A team keeping the ball deep looks compact, and a high press looks stretched.
 - **One number for who.** The team call is still the spread alone, with a fixed cutoff at zero.
 

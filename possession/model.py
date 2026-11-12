@@ -23,11 +23,11 @@ from load import FPS, PITCH  # noqa: F401  (external/score.py repoints PITCH and
 
 HALVES = None  # [(first, last)] graded frames per half, set by the caller
 
-TEAM_WINDOW = 2.0  # s either side for the spread lean
+TEAM_WINDOW = 1.0  # s either side for the spread lean
 DEAD_WINDOW = 0.5  # s either side for the walking test
 WALKING = 1.2      # m/s median player speed below which play is dead
 KEEPERS = 0        # 1 counts each team's deepest player (the keeper) in its spread
-MIN_TEAM = 2.0     # s: shorter H/A runs are absorbed into a neighbour
+MIN_TEAM = 1.0     # s: shorter H/A runs are absorbed into a neighbour
 MIN_DEAD = 3.0     # s: shorter D runs are absorbed into a neighbour
 DEAD = "logit"     # "logit": the fitted model below; "median": median speed under WALKING
 MAX_SPEED = 12.0   # m/s; faster is a tracked identity jumping, not a player (as hmm/clues.py)
