@@ -63,9 +63,33 @@ Full match: 130 / 150 possessions per half, median 7.8 / 6.6 s, 44% / 48% dead.
 1,500 training steps per fold (2,000 for the final model) of 16 one-minute windows, CPU only,
 about 70 minutes per fold on one core.
 
+## What was tried on top (same folds, 1,500 steps, one seed each)
+
+| variant | IDSSE | Metrica | SkillCorner | mean | kept? |
+|---|---|---|---|---|---|
+| **v1** (above) | 0.541 | 0.635 | 0.381 | **0.519** | yes |
+| no ball target (`--ball 0`) | 0.532 | 0.608 | 0.380 | 0.507 | no: the ball target is worth about +0.012, no fold down |
+| v1 and no-ball probabilities averaged | 0.539 | 0.623 | 0.391 | 0.518 | no: nothing over v1 |
+| short possessions weighted up in the loss (`--spell 0.5`) | 0.552 | 0.653 | 0.371 | 0.525 | no: +0.006, SkillCorner down 0.010 |
+
+By the project's bar (mean up 0.01 or more, no provider down) only the ball target counts, and
+with one seed per row even that is suggestive rather than settled.
+
+**Where v1 still loses.** Held out, share of true possessions matched at IoU 0.5, by length:
+
+| | under 2 s | 2 to 5 s | 5 to 10 s | over 10 s | possessions predicted / true |
+|---|---|---|---|---|---|
+| IDSSE | 8% | 36% | 63% | 87% | 1,813 / 3,061 |
+| Metrica | 10% | 44% | 67% | 81% | 714 / 1,041 |
+| SkillCorner | 3% | 25% | 47% | 66% | 6,409 / 6,500 |
+
+Long possessions are found; ones under 2 s almost never are, the same wall the hand-built model
+hit. Weighting them up in the loss did not move it, so from players alone they may not be there
+to find. BAR-ATH's public window has 2 of 17 possessions under 2 s, against 20 to 30% outside.
+
 ## Caveats
 
-- One seed, one architecture, no ablation yet: which parts earn their place is untested.
+- One seed per run, so differences under about 0.01 between rows are not established.
 - The outside labels are not the organisers' rule (`external/README.md`); 0.519 is not a
   leaderboard prediction.
 - `torch` is a new dependency and is not in `uv.lock`.
