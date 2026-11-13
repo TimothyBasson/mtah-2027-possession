@@ -61,12 +61,17 @@ def build_log_emit(clues, n_states=3):
 
 
 def viterbi(log_emit, log_trans, log_start):
-    """Most probable state path. O(T * S^2) with the time loop in Python, S^2 vectorised."""
+    """Most probable state path. O(T * S^2) with the time loop in Python, S^2 vectorised.
+
+    log_trans is (S, S), or (T, S, S) for transitions that change per frame: log_trans[t] is used
+    for the step from frame t - 1 into frame t."""
     n_frames, n_states = log_emit.shape
+    varying = np.ndim(log_trans) == 3
     back = np.empty((n_frames, n_states), dtype=np.int8)
     score = log_start + log_emit[0]
     for t in range(1, n_frames):
-        candidates = score[:, None] + log_trans  # from i (rows) to j (cols)
+        # from i (rows) to j (cols)
+        candidates = score[:, None] + (log_trans[t] if varying else log_trans)
         back[t] = np.argmax(candidates, axis=0)
         score = candidates[back[t], np.arange(n_states)] + log_emit[t]
 

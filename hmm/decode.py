@@ -38,12 +38,24 @@ slowly, so each frame adds little that the last did not, and it gets a quarter o
 weight (WIDTH_WEIGHT). On the external matches it lifts spellF1 on all three sets, by 0.01-0.02
 (external/README.md).
 
+v7 adds the control clue (hmm/control.py): a gradient-boosted classifier, trained on the 30
+external matches (external/train_control.py), reads both teams' nearest players, how they move with
+the ball, the touches either side and windows before and after each frame, and says how likely
+H, A and D are. Its log posterior over the class shares is added to every v6 clue at
+CONTROL_WEIGHT. With the classifier trained with each set left out, it lifts spellF1 on all three
+sets against both the raw and the control-folded labels (external/score_control.py). Two things
+tried and not kept: letting it replace the gap-distance and flight clues (worse everywhere), and
+making a change of team cheaper where a second classifier sees one (helps the raw labels, not the
+folded ones, and costs SkillCorner). The trees run in numpy (hmm/trees.py); only training needs
+scikit-learn.
+
 The gap clue counts a goalkeeper slot near a goal for the team defending that goal, not the team
 the metadata gives the slot: the tracker sometimes carries one keeper under the other keeper's
 slot (hmm/clues.py).
 
-    python -m hmm.decode                    # writes evaluation/results/hmm_v6.csv
-    python -m hmm.decode --no-width         # v5 again
+    python -m hmm.decode                    # writes evaluation/results/hmm_v7.csv
+    python -m hmm.decode --no-control       # v6 again
+    python -m hmm.decode --no-control --no-width   # v5 again
     python -m hmm.decode --weight 0.1 --hand-gap   # v4 again; either flag alone takes that one
                                             # change back out, to tell them apart
     python -m hmm.decode --fit-place        # with the place table counted on the match
@@ -74,10 +86,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
 from hmm.ball import flight_clue, mirror_flight  # noqa: E402
+from hmm import trees  # noqa: E402
 from hmm.clues import (  # noqa: E402
     KEEPER_ON_BALL, MISSING_AFTER_LINE, N_DISTANCE_BINS, N_GAP_BINS, N_PLACES, ball_is_usable,
-    ball_place_category, gap_distance_category, keeper_slots, load_distances, mirror_gap_distance,
-    speed_category, width_category)
+    ball_place_category, cache_key, gap_distance_category, keeper_slots, load_distances,
+    mirror_gap_distance, read_positions, speed_category, team_by_frame, width_category)
+from hmm.control import control_log_ratio  # noqa: E402
+from hmm.control import features as control_features  # noqa: E402
 from hmm.model import (  # noqa: E402
     A, D, H, STATES, baum_welch, build_log_emit, forward_backward, rate_log_trans, viterbi)
 from starter.baseline import RESULTS_DIR, team_of_each_track, write_submission  # noqa: E402
@@ -242,6 +257,22 @@ IMPOSSIBLE = -1e9
 
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 
+# The control clue (v7): a classifier trained on the external matches (external/train_control.py)
+# says, per frame, how likely each state is given the players and ball around it; its posterior
+# over the class shares is added to the emissions at CONTROL_WEIGHT, on top of every v6 clue.
+# Replacing the gap-distance and flight clues with it instead was worse on all three sets: its
+# windowed features blur the moment of a switch, which those two clues mark. Chosen on the
+# external matches with the classifier trained with each set left out (external/score_control.py).
+# spellF1 change from v6, raw / folded labels, at 0.05 / 0.1 / 0.15 / 0.2:
+#   IDSSE        +0.057/+0.067  +0.071/+0.087  +0.082/+0.099  +0.084/+0.107
+#   Metrica      +0.011/+0.024  +0.014/+0.031  +0.011/+0.039  +0.013/+0.043
+#   SkillCorner  +0.026/+0.032  +0.024/+0.029  +0.021/+0.024  +0.016/+0.017
+# Chosen with each set left out in turn (mean of both views over the other two), the folds pick
+# 0.15, 0.15 and 0.2, and the set left out then gains +0.036 raw / +0.052 folded on average. Every
+# weight gains on every set in both views.
+CONTROL_MODEL = os.path.join(ROOT, "hmm", "models", "control_state.npz")
+CONTROL_WEIGHT = 0.15
+
 
 def gap_table():
     """log p(gap bin | state), states x gap bins."""
@@ -379,18 +410,63 @@ def place_placebo(gap, place, speed, flight, log_trans, log_start, segments, kic
     return out
 
 
-def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIGHT, extra=()):
+def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIGHT, extra=(),
+           direct=None):
     """Labels for every video frame: one Viterbi path per half, X everywhere else.
 
     clues is a list of (obs, log_table), each obs covering every video frame, all at `weight`.
-    extra is a list of (obs, log_table, weight) for clues with a weight of their own."""
+    extra is a list of (obs, log_table, weight) for clues with a weight of their own. direct is a
+    (frames, 3) array added to the log emissions as it is (the control clue, already weighted)."""
     labels = np.full(len(clues[0][0]), "X", dtype="<U1")
     for lo, hi in segments:
         log_emit = build_log_emit([(obs[lo:hi], table, weight) for obs, table in clues]
                                   + [(obs[lo:hi], table, own) for obs, table, own in extra])
+        if direct is not None:
+            log_emit = log_emit + direct[lo:hi]
         pin_dead_before_kickoff(log_emit, lo, hi, kickoffs)
         labels[lo:hi] = STATES[viterbi(log_emit, log_trans, log_start)]
     return labels
+
+
+def load_control(game=GAME, data_dir=None, model_path=CONTROL_MODEL):
+    """(frames, 3) control clue for every video frame: the classifier's log p(state | features)
+    - log p(state) on the graded halves (hmm/control.py), 0 elsewhere. Cached under data/cache,
+    keyed on the tracking and on the model file, since evaluating the trees takes a minute."""
+    if not os.path.exists(model_path):
+        sys.exit("no control model at {}: run external/control_features.py and "
+                 "external/train_control.py (needs scikit-learn), or pass --no-control".format(
+                     os.path.relpath(model_path, ROOT)))
+    meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
+    n_frames = source_frames("tactical", game)
+    pitch = GAMES[game]["pitch"]
+    team_of_track = team_of_each_track(meta_path)
+    keepers = keeper_slots(meta_path)
+    halves = graded_segments(game)
+    stat = os.stat(model_path)
+    key = "{}_{}_{}".format(cache_key(raw_path, team_of_track, n_frames, pitch, FPS, keepers,
+                                      halves), stat.st_size, int(stat.st_mtime))
+    cache_path = os.path.join(CACHE_DIR, "control_{}.npy".format(key))
+    if os.path.exists(cache_path):
+        return np.load(cache_path)
+    print("control clue: reading positions and evaluating the classifier (cached after) ...")
+    px, py, ball_x, ball_y = read_positions(raw_path, len(team_of_track), n_frames, pitch)[:4]
+    team = team_by_frame(px, team_of_track, keepers, halves, pitch[0])
+    model = trees.load(model_path)
+    out = np.zeros((n_frames, 3))
+    args = (px, py, team, ball_x, ball_y, pitch, FPS, halves)
+    X, names = control_features(*args)
+    Xs, _ = control_features(*args, swap=True)
+    missing = set(model["names"]) - set(names)
+    if missing:
+        sys.exit("the control model needs feature columns hmm/control.py no longer makes: {}"
+                 .format(sorted(missing)))
+    cols = [list(names).index(n) for n in model["names"]]  # the model's columns, in its order
+    X, Xs = X[:, cols], Xs[:, cols]
+    for lo, hi in halves:
+        out[lo:hi] = control_log_ratio(model, X[lo:hi], Xs[lo:hi])
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    np.save(cache_path, out)
+    return out
 
 
 def load_observations(game=GAME, data_dir=None):
@@ -557,8 +633,14 @@ def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", help="default evaluation/results/hmm_v6.csv, with the "
-                        "variant flags in the name if any is set")
+    parser.add_argument("--out", help="default evaluation/results/hmm_v7.csv (hmm_v6.csv with "
+                        "--no-control), with the variant flags in the name if any is set")
+    parser.add_argument("--no-control", action="store_true",
+                        help="ablation: without the control classifier, which is v6")
+    parser.add_argument("--control-model", default=CONTROL_MODEL,
+                        help="exported classifier (default hmm/models/control_state.npz)")
+    parser.add_argument("--control-weight", type=float, default=CONTROL_WEIGHT,
+                        help="weight on the control clue (default {})".format(CONTROL_WEIGHT))
     parser.add_argument("--weight", type=float, default=WEIGHT,
                         help="emission weight (v5: {}, v4: {})".format(WEIGHT, WEIGHT_V4))
     parser.add_argument("--hand-gap", action="store_true",
@@ -600,13 +682,20 @@ def main():
     clues = [others[0], (place, place_table(live, dead))] + others[1:]
 
     extra = [] if args.no_width else [(width, width_table(), WIDTH_WEIGHT)]
-    labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight, extra=extra)
+    direct = None if args.no_control else args.control_weight * load_control(
+        model_path=args.control_model)
+    labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight, extra=extra,
+                    direct=direct)
     ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),
+                                           ("_cw{:g}".format(args.control_weight),
+                                            not args.no_control
+                                            and args.control_weight != CONTROL_WEIGHT),
                                            ("_handgap", args.hand_gap),
                                            ("_nowidth", args.no_width),
                                            ("_fitplace", args.fit_place)) if on)
     path = write_submission(
-        args.out or os.path.join(RESULTS_DIR, "hmm_v6{}.csv".format(ablation)), labels)
+        args.out or os.path.join(RESULTS_DIR, "hmm_v{}{}.csv".format(
+            6 if args.no_control else 7, ablation)), labels)
     print("-> {}".format(os.path.relpath(path, ROOT)))
     summarise(labels, segments)
     report_dead_runs(labels, place, segments, load_smart_tagging())

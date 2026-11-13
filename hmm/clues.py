@@ -286,7 +286,23 @@ def read_distances(raw_path, team_of_track, n_frames, pitch, fps, keepers=(), ha
     keepers are goalkeeper slots and halves (start, stop) frame slices; a keeper slot near a goal
     counts for the team defending it (team_by_frame).
     """
-    n_slots = len(team_of_track)
+    px, py, ball_x, ball_y, has_line, n_lines, n_malformed = read_positions(
+        raw_path, len(team_of_track), n_frames, pitch)
+    team = team_by_frame(px, team_of_track, keepers, halves, pitch[0])
+    moved = team != np.asarray(team_of_track, dtype=np.int8)
+    with np.errstate(invalid="ignore"):
+        on_ball = np.hypot(px - ball_x[:, None], py - ball_y[:, None]) < KEEPER_ON_BALL
+    d_home, d_away = nearest_by_team(px, py, ball_x, ball_y, team)
+    speed = median_player_speed(px.astype(float), py.astype(float), fps)
+    width = team_width_difference(py, team)
+    return ball_x, ball_y, d_home, d_away, speed, width, (
+        n_lines, n_malformed, int(np.sum(~has_line)), int(np.sum(moved)),
+        int(np.sum(moved & on_ball)))
+
+
+def read_positions(raw_path, n_slots, n_frames, pitch):
+    """Stream the raw ATD once: (px, py, ball_x, ball_y, has_line, n_lines, n_malformed), the
+    positions (frames, slots) and ball in metres, NaN where not seen."""
     px = np.full((n_frames, n_slots), np.nan, dtype=np.float32)
     py = np.full((n_frames, n_slots), np.nan, dtype=np.float32)
     ball_x = np.full(n_frames, np.nan)
@@ -306,16 +322,7 @@ def read_distances(raw_path, team_of_track, n_frames, pitch, fps, keepers=(), ha
             px[frame], py[frame] = xs, ys
             ball_x[frame], ball_y[frame] = line_ball(line, pitch)
             has_line[frame] = True
-    team = team_by_frame(px, team_of_track, keepers, halves, pitch[0])
-    moved = team != np.asarray(team_of_track, dtype=np.int8)
-    with np.errstate(invalid="ignore"):
-        on_ball = np.hypot(px - ball_x[:, None], py - ball_y[:, None]) < KEEPER_ON_BALL
-    d_home, d_away = nearest_by_team(px, py, ball_x, ball_y, team)
-    speed = median_player_speed(px.astype(float), py.astype(float), fps)
-    width = team_width_difference(py, team)
-    return ball_x, ball_y, d_home, d_away, speed, width, (
-        n_lines, n_malformed, int(np.sum(~has_line)), int(np.sum(moved)),
-        int(np.sum(moved & on_ball)))
+    return px, py, ball_x, ball_y, has_line, n_lines, n_malformed
 
 
 def metres_outside(ball_x, ball_y, pitch):
