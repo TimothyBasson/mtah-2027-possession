@@ -38,7 +38,9 @@ def half_tensors(players, ball, team, a, b, pitch, fps=25):
     bxy = ball[a:b + 1, :2].astype(np.float32).copy()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        home_left = np.nanmean(xy[:, team == 0, 0]) < L / 2
+        # the two teams against each other, not against halfway: a side that dominates a half
+        # averages beyond halfway and would be turned the wrong way (possession/features.own_goal)
+        home_left = np.nanmean(xy[:, team == 0, 0]) < np.nanmean(xy[:, team == 1, 0])
     xy -= np.array([L / 2, W / 2], np.float32)
     bxy -= np.array([L / 2, W / 2], np.float32)
     if not home_left:  # turn the pitch half a turn
