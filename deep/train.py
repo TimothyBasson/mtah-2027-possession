@@ -46,9 +46,23 @@ def edges(y):
     return ch.astype(np.float32)
 
 
+def spell_weights(y, power, ref=25, lo=0.5, hi=4.0):
+    """Per-frame loss weight so short possessions are not drowned by long ones: a frame in an H or A
+    run of n steps weighs (ref / n) ** power, clipped. spellF1 counts each possession once, a
+    per-frame loss counts it once per frame. ref is 5 s at 5 fps."""
+    w = np.ones(len(y), np.float32)
+    if power <= 0:
+        return w
+    edge = np.flatnonzero(np.diff(y) != 0) + 1
+    for s, e in zip(np.r_[0, edge], np.r_[edge, len(y)]):
+        if y[s] in (0, 1):
+            w[s:e] = np.clip((ref / (e - s)) ** power, lo, hi)
+    return w
+
+
 def batch(train, rng, B, T, a):
     provs = sorted({m["provider"] for m in train})
-    Xs, Ms, ys, bs, es = [], [], [], [], []
+    Xs, Ms, ys, bs, es, ws = [], [], [], [], [], []
     while len(Xs) < B:
         prov = provs[rng.integers(len(provs))]
         ms = [m for m in train if m["provider"] == prov]
@@ -57,7 +71,11 @@ def batch(train, rng, B, T, a):
         n = len(h["y"])
         s = rng.integers(0, max(1, n - T))
         X, M, y, ball = h["X"][s:s + T], h["M"][s:s + T], h["y"][s:s + T], h["ball"][s:s + T]
+        if "w" not in h or h.get("wp") != a.spell:
+            h["w"], h["wp"] = spell_weights(h["y"], a.spell), a.spell
+        ws.append(h["w"][s:s + T])
         if len(X) < T or (y >= 0).mean() < 0.3:
+            ws.pop()
             continue
         e = edges(y)
         if rng.random() < 0.5:
@@ -73,7 +91,7 @@ def batch(train, rng, B, T, a):
         X[~M] = 0
         Xs.append(X); Ms.append(M); ys.append(y); bs.append(ball); es.append(e)
     t = lambda v: torch.from_numpy(np.stack(v))  # noqa: E731
-    return t(Xs), t(Ms), t(ys), t(bs), t(es)
+    return t(Xs), t(Ms), t(ys), t(bs), t(es), t(ws)
 
 
 @torch.no_grad()
@@ -116,6 +134,7 @@ def main():
     ap.add_argument("--dropout", type=float, default=0.15, help="max share of players hidden per window")
     ap.add_argument("--ball", type=float, default=0.5, help="weight of the where-is-the-ball loss")
     ap.add_argument("--edge", type=float, default=0.3)
+    ap.add_argument("--spell", type=float, default=0.0, help="power of the short-possession loss weight")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
@@ -142,10 +161,10 @@ def main():
         print(f"resumed at step {start}", flush=True)
     for step in range(start + 1, a.steps + 1):
         net.train()
-        X, M, y, ball, e = batch(train, rng, a.batch, a.window, a)
+        X, M, y, ball, e, w = batch(train, rng, a.batch, a.window, a)
         logits, bhat, ehat = net(X, M)
         g = y >= 0
-        loss_c = F.cross_entropy(logits[g], y[g])
+        loss_c = (F.cross_entropy(logits[g], y[g], reduction="none") * w[g]).sum() / w[g].sum()
         bg = g & (y < 2) & torch.isfinite(ball[..., 0])
         loss_b = F.smooth_l1_loss(bhat[bg], ball[bg], beta=0.1) if bg.any() else logits.sum() * 0
         loss_e = F.binary_cross_entropy_with_logits(ehat[g], e[g])
