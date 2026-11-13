@@ -1,6 +1,6 @@
 """Label BAR-ATH with the learned model and write the submission.
 
-    python deep/run.py [--tag v1]      # -> evaluation/results/deep.csv
+    python deep/run.py [--tag v2]      # -> evaluation/results/deep.csv
 
 Uses the network trained on all 30 outside matches (deep/train.py --fold none). Players only.
 """
@@ -37,7 +37,7 @@ def probabilities(tag):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tag", default="v1")
+    ap.add_argument("--tag", default="v2")
     ap.add_argument("--out", default="deep.csv")
     a = ap.parse_args()
     from starter.baseline import RESULTS_DIR, write_submission

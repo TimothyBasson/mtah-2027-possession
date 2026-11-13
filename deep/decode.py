@@ -1,6 +1,6 @@
 """Per-frame probabilities -> labels -> held-out spellF1.
 
-    python deep/decode.py --tag v1
+    python deep/decode.py --tag v2
 
 For each held-out provider, reads the probabilities deep/train.py saved, picks the decode settings
 on that fold's validation matches (training providers, not trained on), and scores the held-out
@@ -102,7 +102,7 @@ GRID = [dict(cost=c, min_team=t, min_dead=dd) for c in (0, 2, 4, 8, 16, 32) for 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tag", default="v1")
+    ap.add_argument("--tag", default="v2")
     a = ap.parse_args()
     base = os.path.join(ROOT, "data", "cache", "deep", a.tag)
     means = []

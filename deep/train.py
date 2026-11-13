@@ -1,6 +1,6 @@
 """Train the learned possession model with one provider held out, and save per-frame probabilities.
 
-    python deep/train.py --fold idsse [--steps 3000] [--tag v1]
+    python deep/train.py --fold idsse [--steps 3000] [--tag v2]
 
 Trains on the other two providers (each drawn equally often), minus a few of their matches kept
 back as validation for choosing decode settings (deep/decode.py). Writes
@@ -142,7 +142,7 @@ def main():
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
-    ap.add_argument("--tag", default="v1")
+    ap.add_argument("--tag", default="v2")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
     torch.set_num_threads(a.threads)

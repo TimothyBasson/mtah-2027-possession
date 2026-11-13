@@ -6,12 +6,49 @@ outside matches. Separate from `possession/`, `hmm/` and `seq/`.
 ```bash
 pip install -r requirements-deep.txt
 python deep/train.py --fold idsse      # and metrica, skillcorner: one provider held out each
-python deep/decode.py --tag v1         # THE score: held-out mean spellF1
-python deep/train.py --fold none --steps 2000   # all 30 matches -> copy net.pt to deep/models/v1.pt
+python deep/decode.py --tag v2         # THE score: held-out mean spellF1
+python deep/train.py --fold none --steps 2000   # all 30 matches -> copy net.pt to deep/models/v2.pt
 python deep/run.py                     # BAR-ATH -> evaluation/results/deep.csv
 ```
 
-## Result (2026-11-12)
+## v2 (2026-11-13): the pitch turned the right way, 0.529
+
+`data.half_tensors` turned the pitch so home defends the left by comparing home's mean position
+with halfway. A side that dominates a half averages beyond halfway, so 5 of the 60 outside halves
+were turned the wrong way (4 SkillCorner, 1 IDSSE): the same bug `possession/features.own_goal`
+had. On those halves v1's team accuracy was 0.70 against 0.82 on the rest of SkillCorner. Now the
+two teams are compared with each other. BAR-ATH was read correctly either way.
+
+Held out by provider, spellF1 (mean with macroF1 / alive-dead / team):
+
+| | IDSSE | Metrica | SkillCorner | mean |
+|---|---|---|---|---|
+| v1 | 0.541 | 0.635 | 0.381 | 0.519 / 0.839 / 0.935 / 0.880 |
+| v1's nets, those halves predicted again (`predict.py --tag v1 --out v1o`) | 0.552 | 0.636 | 0.398 | 0.529 / 0.844 / 0.936 / 0.886 |
+| **v2**: retrained with the fix, same seed | 0.554 | 0.633 | 0.398 | **0.529** / 0.845 / 0.936 / 0.886 |
+
+The gain is the five halves being read correctly, not a better network: retraining on the
+corrected halves changes nothing further. It is a fix to the same seed, so it is not subject to
+the 0.013 seed-to-seed spread the variants below are. `models/v2.pt` is the all-30 model.
+
+**Players missing as on BAR-ATH** (`predict.py --knock`: `external/score.py drop_players`, about
+7% of player-frames lost in runs and bursts, speeds recomputed):
+
+| | full tracking | players knocked out |
+|---|---|---|
+| v1, direction fixed | 0.529 | 0.511 |
+| v2 | 0.529 | 0.516 (IDSSE 0.547, Metrica 0.610, SkillCorner 0.392) |
+| v3: v2 with half the training windows knocked out the same way (`train.py --knock 0.5`) | 0.524 | 0.516 (0.528, 0.624, 0.396) |
+
+BAR-ATH's gaps cost about 0.013 to 0.018, the same as they cost `possession/` (0.016). Training
+on knocked-out windows does not win it back (0.516 either way, and 0.005 lower on full
+tracking), so v3 is not kept. The loss is information that is gone, not a network surprised by
+gaps: v1 already hides up to 15% of players at random in training.
+
+**With `possession/` in the same decode** (`stack/`): 0.530 against 0.529. The hand-built signals
+add nothing the network has not learned, so this model stands alone as the players-only model.
+
+## v1 (2026-11-12)
 
 Held out by provider, the same folds and equal-provider mean as `external/heldout.py`:
 
