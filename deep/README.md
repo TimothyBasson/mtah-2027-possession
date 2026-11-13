@@ -31,6 +31,11 @@ The gain is the five halves being read correctly, not a better network: retraini
 corrected halves changes nothing further. It is a fix to the same seed, so it is not subject to
 the 0.013 seed-to-seed spread the variants below are. `models/v2.pt` is the all-30 model.
 
+BAR-ATH public 5 minutes with `models/v2.pt`, nothing tuned on it (check only; 17 possessions,
+so about ±0.2 of noise): spellF1 0.826, macroF1 0.918, 14 possessions against 17 (v1: 0.775,
+0.894, 15). Full match: 281 possessions, 47% dead (v1: 280, 46%); the two agree on 97.6% of
+graded frames.
+
 **Players missing as on BAR-ATH** (`predict.py --knock`: `external/score.py drop_players`, about
 7% of player-frames lost in runs and bursts, speeds recomputed):
 
