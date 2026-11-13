@@ -68,12 +68,15 @@ about 70 minutes per fold on one core.
 | variant | IDSSE | Metrica | SkillCorner | mean | kept? |
 |---|---|---|---|---|---|
 | **v1** (above) | 0.541 | 0.635 | 0.381 | **0.519** | yes |
-| no ball target (`--ball 0`) | 0.532 | 0.608 | 0.380 | 0.507 | no: the ball target is worth about +0.012, no fold down |
+| v1 again, another seed (`--seed 1`) | 0.520 | 0.618 | 0.380 | 0.506 | the same model: this is the run-to-run noise |
+| no ball target (`--ball 0`) | 0.532 | 0.608 | 0.380 | 0.507 | no: inside the seed-to-seed spread, so the ball target's worth is not shown |
 | v1 and no-ball probabilities averaged | 0.539 | 0.623 | 0.391 | 0.518 | no: nothing over v1 |
 | short possessions weighted up in the loss (`--spell 0.5`) | 0.552 | 0.653 | 0.371 | 0.525 | no: +0.006, SkillCorner down 0.010 |
 
-By the project's bar (mean up 0.01 or more, no provider down) only the ball target counts, and
-with one seed per row even that is suggestive rather than settled.
+Two seeds of the same model differ by 0.013 in the mean (0.519 and 0.506), and up to 0.021 on a
+fold. So none of the variants is distinguishable from v1, including the one without the ball
+target, and the honest headline for this model is about 0.51, give or take 0.01. The gap to the
+hand-built models (0.435) and the baseline (0.282) is many times that.
 
 **Where v1 still loses.** Held out, share of true possessions matched at IoU 0.5, by length:
 
@@ -89,7 +92,7 @@ to find. BAR-ATH's public window has 2 of 17 possessions under 2 s, against 20 t
 
 ## Caveats
 
-- One seed per run, so differences under about 0.01 between rows are not established.
+- The model that labels BAR-ATH is a single run (seed 0); its held-out twin scored 0.519, the other seed 0.506.
 - The outside labels are not the organisers' rule (`external/README.md`); 0.519 is not a
   leaderboard prediction.
 - `torch` is a new dependency and is not in `uv.lock`.
