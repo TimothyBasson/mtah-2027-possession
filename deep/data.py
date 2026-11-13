@@ -72,31 +72,41 @@ def half_tensors(players, ball, team, a, b, pitch, fps=25):
     return X, M, bxy / np.array([52.5, 34.0], np.float32), a + idx
 
 
-def load_match(path):
-    """[(X, mask, y, ball)] per half, y in 0 H, 1 A, 2 D, -1 ungraded; plus what scoring needs."""
+def load_match(path, knock=False):
+    """[(X, mask, y, ball)] per half, y in 0 H, 1 A, 2 D, -1 ungraded; plus what scoring needs.
+    With knock, players are first lost in runs and bursts as BAR-ATH's tracker loses them
+    (external/score.py drop_players), under another seed than the one scoring uses."""
     d = np.load(path)
     halves = [tuple(int(v) for v in h) for h in d["halves"]]
+    players = d["players"]
+    if knock:
+        import sys
+        sys.path[:0] = [os.path.join(ROOT, "external"), os.path.join(ROOT, "possession")]
+        from score import drop_players
+        players = drop_players(players, halves, int(d["fps"]), "train " + os.path.basename(path))
     lab = d["labels"]
     code = np.full(len(lab), -1, np.int64)
     for i, c in enumerate(CLASSES):
         code[lab == c] = i
     out = []
     for a, b in halves:
-        X, M, bxy, fr = half_tensors(d["players"], d["ball"], d["team"], a, b, tuple(d["pitch"]), int(d["fps"]))
+        X, M, bxy, fr = half_tensors(players, d["ball"], d["team"], a, b, tuple(d["pitch"]), int(d["fps"]))
         out.append(dict(X=X, M=M, y=code[fr], ball=bxy, frames=fr))
     return dict(name=os.path.basename(path)[:-4], provider=provider(path), halves=out,
                 spans=halves, labels=lab)
 
 
-def load_all(cache=os.path.join(ROOT, "data", "cache", "deep_v1.pkl")):
+def load_all(knock=False):
     import pickle
+    cache = os.path.join(ROOT, "data", "cache", "deep_v2_knock.pkl" if knock else "deep_v2.pkl")
     if os.path.exists(cache):
         with open(cache, "rb") as f:
             return pickle.load(f)
-    ms = [load_match(p) for p in external_paths()]
+    ms = [load_match(p, knock) for p in external_paths()]
     os.makedirs(os.path.dirname(cache), exist_ok=True)
-    with open(cache, "wb") as f:
+    with open(cache + f".{os.getpid()}", "wb") as f:  # folds trained side by side write it at once
         pickle.dump(ms, f, protocol=4)
+    os.replace(cache + f".{os.getpid()}", cache)
     return ms
 
 

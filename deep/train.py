@@ -66,8 +66,10 @@ def batch(train, rng, B, T, a):
     while len(Xs) < B:
         prov = provs[rng.integers(len(provs))]
         ms = [m for m in train if m["provider"] == prov]
-        h = ms[rng.integers(len(ms))]["halves"]
-        h = h[rng.integers(len(h))]
+        m = ms[rng.integers(len(ms))]
+        hi = rng.integers(len(m["halves"]))
+        # the same half with players lost in runs and bursts, as BAR-ATH's tracker loses them
+        h = (m["knocked"] if "knocked" in m and rng.random() < a.knock else m["halves"])[hi]
         n = len(h["y"])
         s = rng.integers(0, max(1, n - T))
         X, M, y, ball = h["X"][s:s + T], h["M"][s:s + T], h["y"][s:s + T], h["ball"][s:s + T]
@@ -135,6 +137,8 @@ def main():
     ap.add_argument("--ball", type=float, default=0.5, help="weight of the where-is-the-ball loss")
     ap.add_argument("--edge", type=float, default=0.3)
     ap.add_argument("--spell", type=float, default=0.0, help="power of the short-possession loss weight")
+    ap.add_argument("--knock", type=float, default=0.0,
+                    help="share of training windows drawn with players lost in runs, as on BAR-ATH")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
@@ -145,6 +149,10 @@ def main():
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
     matches = D.load_all()
+    if a.knock:
+        for m, k in zip(matches, D.load_all(knock=True)):
+            assert m["name"] == k["name"]
+            m["knocked"] = k["halves"]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
     net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
