@@ -39,7 +39,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="v2")
     ap.add_argument("--out", default="deep.csv")
+    ap.add_argument("--threads", type=int, default=1,
+                    help="pinned so a rerun does the same arithmetic; 1, 4 and 8 give the same file (README)")
     a = ap.parse_args()
+    torch.set_num_threads(a.threads)
     from starter.baseline import RESULTS_DIR, write_submission
     from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES
     probs, halves, n = probabilities(a.tag)

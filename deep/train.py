@@ -165,6 +165,8 @@ def main():
         c = torch.load(ckpt, weights_only=False)
         net.load_state_dict(c["net"]); opt.load_state_dict(c["opt"]); sched.load_state_dict(c["sched"])
         rng.bit_generator.state = c["rng"]
+        if "torch_rng" in c:  # dropout draws from torch's generator: without it a resumed run diverges
+            torch.set_rng_state(c["torch_rng"])
         start = c["step"]
         print(f"resumed at step {start}", flush=True)
     for step in range(start + 1, a.steps + 1):
@@ -188,7 +190,7 @@ def main():
                 msg += f"  val acc {frame_scores(net, val):.3f}  test acc {frame_scores(net, test[:3]):.3f}"
             print(msg, flush=True)
             torch.save(dict(net=net.state_dict(), opt=opt.state_dict(), sched=sched.state_dict(),
-                            rng=rng.bit_generator.state, step=step), ckpt + ".tmp")
+                            rng=rng.bit_generator.state, torch_rng=torch.get_rng_state(), step=step), ckpt + ".tmp")
             os.replace(ckpt + ".tmp", ckpt)
     torch.save(net.state_dict(), os.path.join(out, "net.pt"))
     for kind, ms in (("val", val), ("test", test)):

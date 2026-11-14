@@ -166,7 +166,8 @@ def fit(matches):
     global HALVES, PITCH
     dead, who, provs = ([], []), ([], []), []
     for prov, players, labels, halves, team, pitch in matches:
-        HALVES, PITCH = halves, features.PITCH = halves, tuple(pitch)
+        HALVES, PITCH = halves, tuple(pitch)
+        features.PITCH = PITCH
         provs.append(prov)
         g = np.isin(labels, ["H", "A", "D"])
         dead[0].append(dead_signals(players, team)[g]); dead[1].append(labels[g] == "D")

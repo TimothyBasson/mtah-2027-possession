@@ -36,6 +36,14 @@ so about ±0.2 of noise): spellF1 0.826, macroF1 0.918, 14 possessions against 1
 0.894, 15). Full match: 281 possessions, 47% dead (v1: 280, 46%); the two agree on 97.6% of
 graded frames.
 
+**Regenerating the file.** `run.py` pins one thread. On the machine it was made on (Intel Xeon,
+torch 2.15.0, Python 3.11) `python deep/run.py --threads 1`, `4` and `8` write byte-identical
+CSVs (sha256 `5a94b7d8...0d813d`). It has not been checked on another CPU, where the last bits of
+a probability could differ and a near-tie in the decode could move a boundary. `models/v2.pt`
+came from one uninterrupted run of `train.py --fold none --steps 2000 --tag v2` (4 threads, seed
+0); checkpoints now carry torch's generator as well, so a resumed run would match too. `v1.pt` is
+no longer shipped: v2 replaces it, and `predict.py --tag v1` shows what the fix alone does.
+
 **Players missing as on BAR-ATH** (`predict.py --knock`: `external/score.py drop_players`, about
 7% of player-frames lost in runs and bursts, speeds recomputed):
 
