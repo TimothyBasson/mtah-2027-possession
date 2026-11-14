@@ -60,7 +60,7 @@ joint_features, external/train_control.py), and folds brief possessions after de
 - A decoded possession under MIN_POSSESSION_SECONDS with the other team on both sides goes back
   to that team (fold_brief_possessions).
 With the classifier trained with each set left out, spellF1 against the control-folded labels goes
-from v7's 0.609 / 0.798 / 0.428 to 0.652 / 0.822 / 0.484 (external/README.md).
+from v7's 0.609 / 0.798 / 0.428 to 0.650 / 0.819 / 0.486 (external/README.md).
 
 The gap clue counts a goalkeeper slot near a goal for the team defending that goal, not the team
 the metadata gives the slot: the tracker sometimes carries one keeper under the other keeper's
@@ -277,12 +277,12 @@ CACHE_DIR = os.path.join(DATA_DIR, "cache")
 # all three sets (v7): its windowed features blur the moment of a switch, which those two clues
 # mark. Chosen on the external matches with the classifier trained with each set left out
 # (external/score_control.py). spellF1 against the control-folded labels, brief possessions folded
-# at MIN_POSSESSION_SECONDS, at 0.1 / 0.15 / 0.2 / 0.3 (v6: 0.510, 0.764, 0.403):
-#   IDSSE        0.620  0.641  0.652  0.661
-#   Metrica      0.813  0.819  0.822  0.809
-#   SkillCorner  0.485  0.483  0.484  0.482
-# Chosen with each set left out in turn (best mean over the other two), the folds pick 0.2, 0.3
-# and 0.2. Every weight gains on every set.
+# at MIN_POSSESSION_SECONDS, at 0.15 / 0.2 / 0.3 (v6: 0.510, 0.764, 0.403):
+#   IDSSE        0.641  0.650  0.659
+#   Metrica      0.823  0.819  0.822
+#   SkillCorner  0.485  0.486  0.483
+# The means are 0.650, 0.652 and 0.655, which is flat: an earlier build of the same features had
+# Metrica at 0.809 at 0.3. 0.2 is the middle. Every weight gains on every set.
 CONTROL_MODEL = os.path.join(ROOT, "hmm", "models", "control_state.npz")
 CONTROL_WEIGHT = 0.2
 

@@ -245,21 +245,31 @@ by a classifier trained on the other two, ball at `--seen 0.59`. Measured 2026-1
 
 | folded spellF1 | hmm_v6 | hmm_v7 (weight 0.15) | hmm_v8 (weight 0.2) | v8 - v7 |
 |---|---|---|---|---|
-| IDSSE (7) | 0.510 | 0.609 | 0.652 | +0.043 |
-| Metrica (3) | 0.764 | 0.798 | 0.822 | +0.024 |
-| SkillCorner (20) | 0.403 | 0.428 | 0.484 | +0.056 |
-| mean of the three | 0.559 | 0.612 | 0.653 | +0.041 |
+| IDSSE (7) | 0.510 | 0.609 | 0.650 | +0.041 |
+| Metrica (3) | 0.764 | 0.798 | 0.819 | +0.021 |
+| SkillCorner (20) | 0.403 | 0.428 | 0.486 | +0.058 |
+| mean of the three | 0.559 | 0.612 | 0.652 | +0.040 |
 
 v8 is up on v6 on every match (7 of 7, 3 of 3, 20 of 20). Against the labels as they are it
-scores 0.529 / 0.745 / 0.420 (v7: 0.523 / 0.769 / 0.376): folding brief possessions costs Metrica
+scores 0.527 / 0.751 / 0.421 (v7: 0.523 / 0.769 / 0.376): folding brief possessions costs Metrica
 there, whose raw labels keep them.
 
 **The weight and the fold length were read off these matches.** Chosen for each provider on the
-other two (weights 0.15 / 0.2 / 0.3, fold 0 / 1 / 1.5 / 2 s), the folds pick 0.2 and 1.5 s, 0.3
-and 1.5 s, 0.2 and 1.5 s, and the provider left out then scores 0.652 / 0.809 / 0.484: a mean of
-**0.648**, which is the fair size. The same classifier built by the scratch scripts
-that came before this code scored 0.644 where this code scores 0.640 (weight 0.15, no fold), so
-differences under 0.005 here are noise.
+other two (weights 0.15 / 0.2 / 0.3, fold 0 / 1 / 1.5 / 2 s), the folds pick 0.15 and 2 s, 0.3
+and 1.5 s, 0.3 and 1.5 s, and the provider left out then scores 0.634 / 0.822 / 0.483: a mean of
+**0.646**, which is the fair size. Every setting in that grid has a mean between 0.645 and 0.655
+and no provider below v7:
+
+| mean (IDSSE / Metrica / SkillCorner) | weight 0.15 | 0.2 | 0.3 |
+|---|---|---|---|
+| no fold | 0.645 (0.636 / 0.819 / 0.480) | 0.647 (0.644 / 0.816 / 0.480) | 0.649 (0.653 / 0.817 / 0.476) |
+| fold under 1 s | 0.646 (0.640 / 0.817 / 0.481) | 0.647 (0.647 / 0.812 / 0.481) | 0.648 (0.655 / 0.813 / 0.477) |
+| fold under 1.5 s | 0.650 (0.641 / 0.823 / 0.485) | **0.652** (0.650 / 0.819 / 0.486) | 0.655 (0.659 / 0.822 / 0.483) |
+| fold under 2 s | 0.649 (0.634 / 0.823 / 0.490) | 0.651 (0.641 / 0.820 / 0.492) | 0.652 (0.649 / 0.819 / 0.489) |
+
+The same classifier built by the scratch scripts that came before this code scored 0.644 where
+this code scores 0.645 (weight 0.15, no fold), and a build with three extra signals (below) scored
+0.640, so differences under 0.005 here are noise.
 
 What changed, one step at a time (mean of the three, weight 0.15 unless said):
 
@@ -269,9 +279,9 @@ What changed, one step at a time (mean of the three, weight 0.15 unless said):
 | without the ball-alone columns (`--drop seen,ball_speed,bspeed,ball_dv`) | 0.601 | 0.794 | 0.458 | 0.617 |
 | ... providers weighted equally, regularised, no early stopping | 0.610 | 0.796 | 0.459 | 0.621 |
 | the team-shape features alone, same training | 0.614 | 0.807 | 0.481 | 0.634 |
-| both feature sets (the v8 classifier) | 0.634 | 0.809 | 0.478 | 0.640 |
-| ... brief possessions folded at 1.5 s | 0.641 | 0.819 | 0.483 | 0.648 |
-| ... weight 0.2 (v8) | 0.652 | 0.822 | 0.484 | 0.653 |
+| both feature sets (the v8 classifier) | 0.636 | 0.819 | 0.480 | 0.645 |
+| ... brief possessions folded at 1.5 s | 0.641 | 0.823 | 0.485 | 0.650 |
+| ... weight 0.2 (v8) | 0.650 | 0.819 | 0.486 | 0.652 |
 
 The first three rows after v7 were measured with scratch scripts before the code in this
 repository was written, and differ from it in small ways (the ball outside the pitch was not
@@ -280,7 +290,7 @@ masked for the team-shape features).
 - **The ball on its own is left out** (`hmm.control.BALL_ALONE`, and seq's `k_` group). IDSSE
   freezes the ball in a stoppage and Metrica hides it, and v7's classifier had learned that: held
   out, it called 16% of graded SkillCorner frames dead against a true 29%, with a log loss of
-  1.08. Now 0.77.
+  1.08. Now 0.76.
 - **The team-shape features of `seq/features.py`** (`p_` and `b_` groups) sit next to the control
   features in one classifier (`hmm.control.joint_features`). They read all 22 players, and carry
   most of the SkillCorner gain; the two sets add up on IDSSE.
@@ -288,7 +298,7 @@ masked for the team-shape features).
   with no early stopping (v7 stopped on a random 10% of rows, which are neighbours of the
   training rows).
 - **Brief possessions are folded** after decoding (`hmm.decode.fold_brief_possessions`): under
-  1.5 s with the other team on both sides. At 2 s IDSSE loses 0.008 and SkillCorner gains 0.005.
+  1.5 s with the other team on both sides. At 2 s IDSSE loses 0.009 and SkillCorner gains 0.006.
 
 Tried and not kept, each scored the same way:
 

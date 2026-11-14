@@ -1,12 +1,12 @@
 # Committed model
 
 `control_state.npz` is the v8 control classifier (hmm/control.py), exported to plain arrays by
-hmm/trees.py. It holds only tree arrays, the 275 feature names and the class prior. It loads with
+hmm/trees.py. It holds only tree arrays, the 248 feature names and the class prior. It loads with
 `allow_pickle=False` and nothing in it comes from BAR-ATH.
 
 | | |
 |---|---|
-| sha256 | `c87a5443cc13ba67bf2ed1851de04095e1539a15ae0d85cdea5c44e11dee9cf5` |
+| sha256 | `695a6ad67a551cdf3000a271cbc62722149ff7f578b58f4cc6ed584b7138288c` |
 | Trained by | `python external/control_features.py && python external/train_control.py` |
 | Library | scikit-learn 1.6.1 (requirements-dev.txt), HistGradientBoostingClassifier, 300 rounds, no early stopping, `random_state=0` |
 | Target | per-frame H / A / D, folded towards the control rule (external/control.py, 2 s, 2 touches) |

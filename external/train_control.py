@@ -26,7 +26,7 @@ classifier never saw. Without it, one model is trained on all 30 matches for BAR
 
 The model is a HistGradientBoostingClassifier: 300 rounds, no early stopping, at least 200 rows a
 leaf and an L2 penalty of 1 (seq/model.py's settings, not swept here). Held-out log loss is
-0.24 / 0.55 / 0.77 (IDSSE / Metrica / SkillCorner left out); v7's classifier, which read the ball
+0.24 / 0.53 / 0.76 (IDSSE / Metrica / SkillCorner left out); v7's classifier, which read the ball
 on its own, stopped early on a random 10% of rows and counted every row once, had
 0.27 / 0.54 / 1.08.
 """
