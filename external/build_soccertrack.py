@@ -11,7 +11,11 @@ ball status under `raw/<match>/`:
 
 It is a fourth tracking system beside TRACAB (IDSSE), Metrica and SkillCorner: positions come as
 pitch fractions to two decimals, i.e. on a 1.05 m x 0.68 m grid, with 22 players in almost every
-frame.
+frame. On that grid a player stands still in 87% of frames and jumps a metre in the rest, which
+no other provider's tracking does (their frame-to-frame jitter is 0.2 to 1 cm) and which the
+learned model reads as wild speeds (deep/shift.py: snapping any provider to this grid takes
+0.23 off its spellF1). So positions are smoothed with a 1 s moving average applied twice
+(SMOOTH_SECONDS; 0 keeps the grid), which turns the steps back into steady movement.
 
 Labels. `ballStatus` is HOME / AWAY / BALLOUT / NEUTRAL per frame. BALLOUT is D. NEUTRAL (a loose
 or contested ball, about 7% of frames, in runs of about 2 s) is held by the team that had the ball
@@ -33,6 +37,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FPS = 25
+SMOOTH_SECONDS = 1.0
 FRAME = re.compile(r'<frame matchTime="[^"]*" frameNumber="([^"]*)" eventPeriod="([^"]*)" ballStatus="([^"]*)"')
 PLAYER = re.compile(r'<(player|ball) playerId="([^"]*)" loc="\[([^,\]]*), ([^\]]*)\]"')
 STATUS = {"HOME": "H", "AWAY": "A", "BALLOUT": "D", "NEUTRAL": "N"}
@@ -42,6 +47,17 @@ def speed(xy, fps, lag=5):
     v = np.full(xy.shape[:-1], np.nan, np.float32)
     v[lag:] = np.linalg.norm(xy[lag:] - xy[:-lag], axis=-1) * fps / lag
     return v
+
+
+def smooth(xy, seconds, fps=FPS):
+    """Centred moving average over `seconds` along time, skipping missing frames."""
+    k = max(1, int(round(seconds * fps)) | 1)
+    ok = np.isfinite(xy[..., :1])
+    c = np.cumsum(np.concatenate([np.zeros_like(xy[:1]), np.where(ok, xy, 0)]), 0, dtype=np.float64)
+    m = np.cumsum(np.concatenate([np.zeros((1,) + ok.shape[1:]), ok.astype(np.float64)]), 0)
+    n, h = len(xy), k // 2
+    lo, hi = np.clip(np.arange(n) - h, 0, n), np.clip(np.arange(n) + h + 1, 0, n)
+    return np.where(ok, (c[hi] - c[lo]) / np.maximum(m[hi] - m[lo], 1), np.nan).astype(np.float32)
 
 
 def hold_neutral(lab):
@@ -106,6 +122,10 @@ def build(meta_path, data_path):
         a, b = int(idx[0]), int(idx[-1])
         assert b - a + 1 == len(idx), "a period's frames are not contiguous"
         labels[a:b + 1] = hold_neutral(labels[a:b + 1])
+        if SMOOTH_SECONDS:
+            for _ in range(2):
+                players[a:b + 1, :, :2] = smooth(players[a:b + 1, :, :2], SMOOTH_SECONDS)
+                ball[a:b + 1, :2] = smooth(ball[a:b + 1, :2], SMOOTH_SECONDS / 2)
         players[a:b + 1, :, 2] = speed(players[a:b + 1, :, :2], FPS)
         ball[a:b + 1, 2] = speed(ball[a:b + 1, :2], FPS)
         halves.append((a, b))

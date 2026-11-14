@@ -84,7 +84,7 @@ def lose(xy, rng, share, seconds, fps=25):
         on = True
         while i < n:
             run = 1 + int(rng.exponential(off * (1 - share) / share if on else off))
-            if not on:
+            if not on and i + run > 0:
                 out[max(i, 0):i + run, k] = np.nan
             i, on = i + run, not on
     return out
