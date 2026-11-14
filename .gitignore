@@ -62,3 +62,6 @@ __pycache__/
 venv/
 env/
 .DS_Store
+
+# -- training logs (deep/run_folds.sh, deep/train.py) -----------------------------------------
+logs/

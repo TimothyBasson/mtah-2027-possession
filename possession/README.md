@@ -6,7 +6,7 @@ This model is separate from `hmm/`. The plan is to compare and combine the two a
 uv run python possession/run.py                    # -> evaluation/results/possession.csv (BAR-ATH)
 uv run python external/heldout.py                  # THE score: per provider, fitted without it
 uv run python external/score.py                    # every outside match, in-sample
-uv run python possession/model.py --fit            # refit DEAD_FIT on all 30 outside matches
+uv run python possession/model.py --fit            # refit DEAD_FIT and TEAM_FIT on all 30 outside matches
 uv run python viz/combined/make_combined.py --match all --explain --open   # see how it works
 ```
 
@@ -21,6 +21,8 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 3. **Priors from football, not from our data**, such as possession counts and stoppage lengths.
 4. **BAR-ATH is left alone.** The public 5 minutes are a final sanity check, never a target.
 5. **Every idea goes in the log below**, with its held-out score, kept or dropped.
+6. **A change counts from +0.01 on the held-out mean with no provider down.** Providers disagree
+   by up to 0.025 on the same change.
 
 ## Experiment log (held-out mean over the three providers, `external/heldout.py`)
 
@@ -33,6 +35,163 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-11 | **+ acceleration**: 80th percentile of players' \|change of speed\|, ±3 s, as a fifth stoppage signal | **0.282** | **0.735** | **0.898** | 0.790 | **yes** |
 | 2026-11-11 | a missing stoppage signal adds nothing instead of forcing dead (review of #22) | 0.282 | 0.735 | 0.898 | 0.790 | yes: same mean, the principled rule |
 | 2026-11-12 | **three signals**: drop the 80th-percentile speed and the 10 s median (table below) | **0.282** | **0.736** | **0.898** | 0.790 | **yes**: as good with two fewer |
+| 2026-11-12 | **team model**: logistic on width, length, push and speed difference, each over the next 2 s and the last 2 s, instead of the spread's sign (below) | **0.392** | **0.775** | 0.898 | **0.854** | **yes** |
+| 2026-11-12 | **Viterbi decode**: the best H/A/D path on the two probabilities, a change of team costing 5 and to or from dead 20, instead of cutting each at even odds and absorbing short runs | **0.404** | **0.780** | 0.899 | 0.856 | **yes** |
+| 2026-11-12 | the same, the two costs picked held out from 2, 5 x 20, 40 | 0.405 | 0.782 | 0.901 | 0.856 | no: the folds pick three different pairs, the surface is flat |
+| 2026-11-12 | **which goal a team defends**, read from the two teams against each other, not against halfway (a bug: wrong in a half of 9 of the 30 matches, which flipped push and dropped a forward as the keeper) | **0.414** | **0.783** | 0.899 | **0.861** | **yes** |
+| 2026-11-12 | **two more stoppage signals**: players on or over a boundary line, and both teams' width summed, each ±1 s | **0.435** | **0.802** | **0.914** | 0.864 | **yes** |
+| 2026-11-12 | restart taker as a team signal: home minus away players on a boundary line, over the last 2 / 5 / 10 s | 0.435 | | | | no: frame accuracy 0.846 → 0.847, width already says it |
+| 2026-11-12 | decode variations: dead log-odds shifted by −1 / −0.5 / +0.5 / +1; team odds shifted 0.5 s earlier, 0.5 s or 1 s later; team evidence halved or doubled; costs 2-10 and 10-30 | 0.405-0.437, picked held out 0.432 | | | | no: nothing clears +0.01 and the folds disagree |
+| 2026-11-12 | look-ahead stoppage signals (on a line, width, median speed, acceleration over the next 1-5 s, to start stoppages earlier), with and without players tracked | 0.436-0.439 | 0.804-0.810 | 0.914-0.918 | 0.865 | no: under +0.01, IDSSE falls 0.003-0.008 |
+| 2026-11-12 | team model at more scales: push and width over 0.6 s or 2-5 s as well; goal-side marking; without length | 0.432-0.439 | 0.801-0.803 | 0.914 | 0.861-0.866 | no: under +0.01 |
+| 2026-11-12 | start every decoded stoppage 0.5 / 1 / 1.5 / 2 / 3 s earlier (1.5 s picked in all three folds) | 0.440 | 0.807 | 0.912 | 0.869 | no: +0.005, up on all three but under +0.01; alive/dead falls |
+| 2026-11-12 | players knocked out as BAR-ATH's tracker loses them (`heldout.py --knock score`), shipped weights: what the model loses to missing players | 0.419 | 0.792 | 0.912 | 0.851 | a measurement, not a change |
+| 2026-11-12 | weights refitted on knocked-out tracking, scored on knocked-out tracking (`--knock both`) | 0.423 | 0.793 | 0.913 | 0.850 | no: recovers 0.004 of the 0.016, under +0.01; on full tracking that fit scores 0.436 / 0.802 / 0.915 / 0.862 (`--knock fit`) |
+
+**Team model** (who has the ball, players only). The spread lean was one number with its cutoff
+at zero, read over 2 s either side, so it answered a turnover about 2 s late. Now a logistic
+model, fitted like the stoppage model and refitted per held-out fold, reads four signals
+(`features.team_signals`, `TEAM_SIGNALS`), each home minus away with the keepers left out:
+
+- **width** (sd of the players across the pitch): the side with the ball stretches the pitch, the
+  side without it narrows to protect the middle
+- **length** (the same along the pitch)
+- **push**: both teams' mean velocity toward the goal home attacks. Everyone moves the way the
+  ball is going
+- **speed difference**: the side without the ball chases
+
+Each is read twice, over the 2 s after the frame and the 2 s before, so eight weights and an
+intercept. The after-window carries the weight and the before-window gets the opposite sign
+(width +2.17 / −0.37, length +0.60 / −0.50, push +0.91 / −0.46): what the teams do next says who
+has the ball now, and a team that is *becoming* wider has just won it. That is the turnover
+signal, and it is what places turnovers on time. Speed difference is −0.32 / −0.18. The intercept
+(+0.16) is home advantage: home has the ball 51-53% of live frames on the outside matches.
+
+Per held-out provider, spread lean → team model:
+
+| held out | spellF1 | macroF1 | alive/dead | team |
+|---|---|---|---|---|
+| IDSSE | 0.237 → 0.371 | 0.757 → 0.810 | 0.914 | 0.769 → 0.852 |
+| Metrica | 0.309 → 0.460 | 0.729 → 0.779 | 0.875 | 0.804 → 0.889 |
+| SkillCorner | 0.300 → 0.345 | 0.721 → 0.736 | 0.905 | 0.798 → 0.821 |
+
+How the signals were chosen. Frame by frame on live frames, held out by provider (accuracy of the
+sign, mean of the three), each signal alone over 2 s either side: width 0.805, spread 0.784,
+length 0.714, goal-side marking 0.696, speed difference 0.654, each team's push 0.60, territory
+0.559, relative centroid 0.517, back-line height 0.507. Width alone, after and before: 0.822.
+Then end to end (held-out spellF1 / team, on a research copy of the pipeline, 3 s windows):
+
+| signals (each after and before) | spellF1 | team |
+|---|---|---|
+| width | 0.354 | 0.834 |
+| width, length | 0.354 | 0.833 |
+| width, push | 0.385 | 0.847 |
+| width, length, push | 0.389 | 0.850 |
+| spread, push | 0.381 | 0.841 |
+| width, length, push, territory | 0.390 | 0.850 |
+| width, length, push, goal-side marking | 0.388 | 0.849 |
+| **width, length, push, speed difference (kept)** | **0.400** | **0.856** |
+| the same with each team's push separately | 0.401 | 0.856 |
+| those four, territory and back-line height | 0.403 | 0.857 |
+
+Windows of 1 / 1.5 / 2 / 2.5 / 3 s scored 0.404 / 0.408 / 0.407 / 0.405 / 0.400, so the existing
+2 s stays. Taking each half's median out of a shape signal (to remove formation) lost 0.010
+frame accuracy and was dropped. As with the stoppage model, which signals and the window were
+chosen on all 30 matches; only the weights are refitted held out. SkillCorner gains least: its
+10 fps broadcast tracking extrapolates off-camera players, which blurs push.
+
+On BAR-ATH (check only): 138 / 141 possessions per half (was 99 / 113; the public window's
+density suggests about 360 in all), mean 14.3 / 13.1 s, 38% / 42% dead, home 65% / 60% of live
+frames; public 5 minutes macroF1 0.826 → 0.858, spellF1 0.352 → 0.538, 15 possessions against 17.
+
+**Viterbi decode** (`model.viterbi`). Until now each model was cut at even odds and runs under
+2 s / 3 s were absorbed. Now the labels are the single best H/A/D path: each frame scores the log
+of its label's probability from the two models, a change of team costs 5 and a change to or from
+dead costs 20. A lone frame can't flip the label, a run of evidence can, and the change lands
+where the evidence turns. The costs are in the same units as the models' log-odds summed over
+frames, and frames 0.04 s apart share most of their evidence, so they are not transition
+probabilities. Per held-out provider (spellF1): IDSSE 0.371 → 0.385, Metrica 0.460 → 0.475,
+SkillCorner 0.345 → 0.354. On a research copy of the pipeline, held-out spellF1 over team cost 2 /
+3.5 / 5 / 8 and dead cost 10 / 20 / 40 / 80 stayed between 0.401 and 0.410: flat, so 5 and 20
+were fixed rather than tuned. `decode=absorb` brings back the old clean-up.
+On BAR-ATH (check only): 129 / 141 possessions per half, 39% / 43% dead; public 5 minutes macroF1
+0.860, spellF1 0.538, 15 possessions against 17.
+
+**Which goal a team defends** (`features.own_goal`) was read from which side of halfway its
+players stood on average over the half. A side that dominates a half averages beyond halfway, so
+both teams were given the same goal in a half of 9 of the 30 outside matches. There push pointed
+the wrong way and the "keeper" left out was the furthest forward. Now the team standing nearer
+x=0 defends that end. BAR-ATH was read correctly either way. Per held-out provider (spellF1,
+team): IDSSE 0.385 → 0.402, 0.853 → 0.860; Metrica 0.475 → 0.484, 0.892 → 0.899; SkillCorner
+0.354 → 0.356, 0.822 → 0.824. Refitted, push carries more (+1.20 / −0.57) and length less
+(+0.24 / +0.02). The signal tables above were made before this fix.
+
+**Two more stoppage signals.** Swapping in the true dead frames was worth about 0.10 spellF1
+(below), so the stoppage model was revisited after the decode. Thirteen players-only signals were
+each added to the three speed signals and scored frame by frame, held out (accuracy 0.864, dead F1
+0.792 before):
+
+| added, ±1 s | accuracy | dead F1 |
+|---|---|---|
+| **players within 0.5 m of a touchline or goal line, or beyond it** | 0.874 | 0.808 |
+| **both teams' width (sd across the pitch), summed** | 0.874 | 0.807 |
+| players inside either penalty area | 0.871 | 0.803 |
+| players tracked | 0.866 | 0.794 |
+| all players' mean velocity, or how aligned their velocities are | 0.865 | 0.793 |
+| nearest player to a touchline; fastest player; 20th-percentile speed; share standing still; mean distance to the nearest opponent; both teams' length | 0.864-0.865 | 0.792-0.793 |
+| change in the number tracked | 0.858 | 0.777 |
+| **on a line + width (kept)** | **0.887** | **0.826** |
+| on a line + width + penalty areas | 0.887 | 0.827 |
+
+A player on a line is taking a throw-in or a corner, or fetching the ball: it pushes toward dead
+(+0.78). Summed width pushes toward live (−0.78): in play both sides spread to use and to cover
+the pitch, and at a stoppage they close up around the restart or walk back into shape. Per
+held-out provider (spellF1, alive/dead): IDSSE 0.402 → 0.424, 0.921 → 0.932; Metrica 0.484 →
+0.506, 0.870 → 0.889; SkillCorner 0.356 → 0.375, 0.906 → 0.922.
+
+Do they stand on the same footing on BAR-ATH? Checked, no tuning. Share of frames with a player
+on a line (all / alive / dead) and median summed width in metres (all / alive / dead): IDSSE
+0.28 / 0.12 / 0.48 and 23.5 / 24.9 / 21.9; Metrica 0.24 / 0.15 / 0.42 and 25.4 / 26.1 / 23.7;
+SkillCorner 0.21 / 0.12 / 0.43 and 23.7 / 24.6 / 21.5; BAR-ATH whole match 0.23 and 24.2, and in
+its public minutes 0.19 alive against 0.35 dead, 28.6 alive against 21.3 dead. Same levels, same
+direction. BAR-ATH (check only): 121 / 137 possessions per half, 41% / 42% dead; public 5 minutes
+macroF1 0.846, spellF1 0.516, 14 possessions against 17 (0.860 and 0.538 before; one possession
+of 17 is worth more than that gap).
+
+**Missing players.** BAR-ATH is the match that is scored, and its tracker loses players; IDSSE
+and Metrica never do. Measured on BAR-ATH's tracking alone, no labels: 22 are tracked on 50% of
+graded frames, 21 on 26%, 20 or fewer on 23%; 18 times an hour most of them go at once (14 or
+fewer tracked, 8.6 on average, median 2.7 s, mean 10.4 s), 5% of frames; outside those bursts
+0.85 of the 22 are missing on average, in runs of median 3 s. That is 7% of player-frames.
+`external/score.py drop_players` reproduces it on the outside matches (6.8% of player-frames,
+two or more missing on 23% of frames, 14 or fewer tracked on 5%), and `heldout.py --knock` uses
+it when scoring, fitting or both. Its shape is `possession/research/exp9.py`'s on
+`claude/project-thread-uvbxom`, with BAR-ATH's rates in place of that script's 11%.
+
+| weights fitted on | scored on | IDSSE | Metrica | SkillCorner | mean |
+|---|---|---|---|---|---|
+| full tracking (shipped) | full | 0.424 | 0.506 | 0.375 | 0.435 |
+| full tracking (shipped) | knocked out | 0.403 | 0.493 | 0.361 | 0.419 |
+| knocked out | knocked out | 0.407 | 0.501 | 0.362 | 0.423 |
+| knocked out | full | 0.426 | 0.509 | 0.372 | 0.436 |
+
+So **0.435 is on full tracking; with BAR-ATH's gaps the same model scores 0.419** (macroF1
+0.792, alive/dead 0.912, team 0.851). The loss is on the team side (0.864 → 0.851); the
+stoppage model barely moves. Refitting on knocked-out tracking recovers 0.004, under the +0.01
+bar, so the shipped weights stay. SkillCorner's off-camera players are extrapolated, so its
+"full" tracking is already kinder than a real feed.
+
+**Where the rest of the error is.** With the Viterbi labels, swapping in the true team wherever
+both are alive gives held-out spellF1 0.80-0.86; swapping in the true dead frames gives 0.47-0.58.
+So the team side is still most of the gap. By the true possession's length, the team call is
+right on 96% / 90% / 90% of frames (IDSSE / Metrica / SkillCorner) in possessions over 16 s, about
+75% in those of 4-8 s, and no better than a coin toss in those under 4 s, which are 14% of
+IDSSE's live frames and 7% of the others'. A possession of a touch or two never changes the
+teams' shape. Without the ball those are out of reach, and they are half of IDSSE's possessions.
+No other team-level signal added to the four kept (frame accuracy 0.842 held out): box
+containment, range instead of sd, back-line and front-line width, distance to the nearest
+opponent, free men, closing speed, which centroid leads the other. Gradient boosting on all of
+them over four windows reached 0.850, so the four are close to what team-level shape can say.
 
 Stoppage model, per held-out provider (spellF1, alive/dead): IDSSE 0.199 → 0.217, 0.844 → 0.883;
 Metrica 0.271 → 0.299, 0.849 → 0.865; SkillCorner 0.280 → 0.284, 0.874 → 0.889. Frame by frame
@@ -108,35 +267,66 @@ Before the acceleration signal, on BAR-ATH, as a check only: 101 / 108 possessio
 public 5 minutes macroF1 0.814, spellF1 0.336, 8 possessions against 17. Fewer possessions and
 more dead than before: the model now merges more, which the next work on turnovers should balance.
 
-## v0: players only, no ball
+## The model: players only, no ball
 
 The model never reads the ball. Tim's `hmm/` works from the ball, so the two see the match through
 different eyes and should make different mistakes, which is what makes combining them worth it.
+`model.explain(F)` returns `p_home` (P(home has it | alive)) and `p_dead` per frame beside the
+labels; those two are what a combination would take.
+
+| held out (`external/heldout.py`) | spellF1 | macroF1 | alive/dead | team |
+|---|---|---|---|---|
+| IDSSE (7) | 0.424 | 0.837 | 0.932 | 0.864 |
+| Metrica (3) | 0.506 | 0.800 | 0.889 | 0.899 |
+| SkillCorner (20) | 0.375 | 0.770 | 0.922 | 0.829 |
+| mean of the three | 0.435 | 0.802 | 0.914 | 0.864 |
 
 On each frame:
-- **Who:** the more spread-out team has the ball. Spread is each team's mean distance from its own
-  centre, averaged over 2 s either side of the frame. The keeper, taken as the team's deepest player
-  toward its own goal, is left out: he adds several metres that depend on where play is, not on who
-  has the ball.
-- **Dead:** a stoppage model reads three players-only signals and calls the frame dead above even
-  odds (`DEAD_SIGNALS`, `DEAD_FIT` in `model.py`):
+- **Who** (`TEAM_SIGNALS`, `TEAM_FIT`): a logistic model on four signals, home minus away with the
+  keepers left out, each over the next 2 s and the last 2 s: width, length, push (both teams'
+  velocity toward the goal home attacks) and mean speed. The team with the ball stretches the
+  pitch, everyone moves the way the ball is going, and the side without it chases. `team=spread`
+  brings back the old rule (the more spread-out team, 2 s either side).
+- **Dead** (`DEAD_SIGNALS`, `DEAD_FIT`): a logistic model on five signals:
   - median player speed over 0.5 s either side: the typical player walks at a stoppage
   - speed over the next 2 s minus the last 2 s: everyone slows into a stoppage and speeds up out
   - the 80th percentile of players' |change of speed| over 3 s either side: in play players keep
     changing pace as they react to the ball; at a stoppage they jog or walk steadily
-  Its weights are a logistic regression on the 30 outside matches, each provider counted equally.
-  The fitted weights (`DEAD_FIT["w"]`, after the intercept): median −1.46, speed change −0.48,
-  acceleration −1.58. All point the same way, and acceleration carries the most. The
-  80th-percentile speed and 10 s median were dropped once acceleration made them redundant (above). A missing signal adds nothing either way. The viewer's Dead-ball
-  model toggle shows each one's push for any frame. `dead=median` brings back the old rule (median under 1.2 m/s).
-- **No blips:** within each half, alive/dead and the team lean are cleaned separately: an alive
-  run under 2 s or a dead run under 3 s flips, and so does a home or away run of the lean under
-  2 s, shortest first (`absorb_short`; `uv run python possession/model.py` checks it). Without
-  this, a moment of walking inside a possession turned it D and split it in two. Cleaning the two
-  apart means a dead blip can't move a turnover: the team changes where the lean does.
+  - players on or over a boundary line, 1 s either side: a throw-in or corner taker, or someone
+    fetching the ball
+  - both teams' width, summed, 1 s either side: in play both sides spread; at a stoppage they
+    close up
+  `dead=median` brings back the first rule (median speed under 1.2 m/s).
+- Both models' weights are fitted on the 30 outside matches, each provider counted equally
+  (`uv run python possession/model.py --fit`), and refitted without the held-out provider for
+  every score above. A missing signal adds nothing either way.
+- **Labels** (`model.viterbi`): the best H/A/D path on the two probabilities, a change of team
+  costing 5 and to or from dead 20, within each half. With no team evidence (a side untracked)
+  possession stays with the team that had it. `decode=absorb` brings back the old clean-up
+  (even-odds cuts, runs under 2 s / 3 s absorbed).
 - Graded frames before each kickoff are D on BAR-ATH.
 
 Windows look forward as well as back (the task is offline) and stop at the edge of each half.
+
+What it gets wrong:
+- **Brief possessions.** A possession of a touch or two (under about 4 s) never changes the
+  teams' shape, and the team call there is a coin toss. They are half of IDSSE's possessions.
+  Each one missed also merges its two neighbours. This is the largest part of the remaining gap
+  and likely needs the ball.
+- **Turnover timing.** On long possessions the call is 69% right in the first half-second and
+  over 90% after 2 s on IDSSE and Metrica: shape still answers a turnover late.
+- **Stoppages start late.** The players slow down after the whistle, not before it. Look-ahead
+  signals did not fix it (log above).
+- **SkillCorner.** Its off-camera players are extrapolated, which blurs push; it gains least.
+- **Signal choice was made on all 30 matches**; only the weights are refitted held out.
+
+## v0, as first built (kept for the record; the numbers below are from 2026-11-05 to 11-11)
+
+The first version: the more spread-out team has the ball (spread is each team's mean distance from
+its own centre over 2 s either side, keepers left out), the frame is dead when the median player
+speed is under 1.2 m/s, and alive runs under 2 s, dead runs under 3 s and team runs under 2 s
+are absorbed (`absorb_short`), alive/dead and the team lean cleaned separately so a dead blip
+can't move a turnover.
 
 | outside matches | spellF1 | macroF1 | alive/dead | team |
 |---|---|---|---|---|
@@ -204,18 +394,6 @@ roughly 360 possessions, so 255 is about 30% too few, where 520 was about 45% to
 
 This model is one half of a combined model with `hmm/`, not a replacement for the best single
 model.
-
-What it gets wrong:
-- **Missed turnovers.** Absorbing short runs fixed the over-splitting (520 possessions on BAR-ATH
-  down to 255), and showed what it was hiding: the lean misses turnovers, so the model now makes
-  about 30% too few possessions on BAR-ATH and about half the true count on the outside matches.
-  Looser minimums won't recover them; a sharper turnover signal would.
-- **Fixed minimums.** The 2 s / 3 s cutoffs suit this model's runs. They would need re-picking
-  before being put on `hmm/` or a combined model, which have fewer short false runs.
-- **Late changes.** Shape takes a couple of seconds to change after a turnover, and the 2 s window
-  adds to that.
-- **Style.** A team keeping the ball deep looks compact, and a high press looks stretched.
-- **One number for who.** The team call is still the spread alone, with a fixed cutoff at zero.
 
 ## Ideas to try (research, 2026-11-05)
 
