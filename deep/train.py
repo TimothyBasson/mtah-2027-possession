@@ -186,6 +186,8 @@ def main():
                     help="share of training windows drawn with players lost in runs, as on BAR-ATH")
     ap.add_argument("--ptr", type=float, default=0.0,
                     help="v4: point at the player on the ball mid-network; weight of that loss")
+    ap.add_argument("--stage", action="store_true",
+                    help="the v4 pointer stage even with --ptr 0: the control that has the stage but no ball teaching")
     ap.add_argument("--bvel", type=float, default=0.3, help="v4: ball velocity loss")
     ap.add_argument("--touch", type=float, default=0.3, help="v4: ball struck/stopped loss")
     ap.add_argument("--free", type=float, default=0.2, help="v4: ball-to-nearest-player distance loss")
@@ -204,7 +206,7 @@ def main():
             assert m["name"] == k["name"]
             m["knocked"] = k["halves"]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
-    net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru, ptr=a.ptr > 0)
+    net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
     out = os.path.join(D.ROOT, "data", "cache", "deep", a.tag, a.fold)
