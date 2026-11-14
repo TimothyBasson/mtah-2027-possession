@@ -74,11 +74,33 @@ def keep_columns(names, drop):
     return [i for i, n in enumerate(names) if not any(d in n for d in drop)]
 
 
-def rows(matches, names):
+def load_augmented(tag, names, keep):
+    """{match: (X, Xs)} from external/broadcast.py's cache for tag, columns as in names[keep]."""
+    out = {}
+    for path in sorted(glob.glob(os.path.join(CACHE, "control_{}+*.npz".format(tag)))):
+        z = np.load(path)
+        if list(z["names"]) != list(names):
+            sys.exit("{}: columns differ from the plain features".format(path))
+        out[os.path.basename(path)[len("control_") + len(tag) + 1:-4]] = (z["X"][:, keep],
+                                                                          z["Xs"][:, keep])
+    if not out:
+        sys.exit("no augmented features for {}: run external/broadcast.py --tag {}".format(tag, tag))
+    return out
+
+
+def rows(matches, names, augmented=None, mode="replace"):
+    """Training rows. With augmented ({match: (X, Xs)} from external/broadcast.py), a match that
+    has a broadcast-like copy is trained on that copy instead (mode "replace") or on both ("add"),
+    with the same labels."""
     X, y = [], []
     for n in names:
         a, b, labels, _ = matches[n]
         g = np.flatnonzero(labels >= 0)[::STEP]
+        if augmented and n in augmented:
+            X += [augmented[n][0][g], augmented[n][1][g]]
+            y += [labels[g], SWAP[labels[g]]]
+            if mode == "replace":
+                continue
         X += [a[g], b[g]]
         y += [labels[g], SWAP[labels[g]]]
     return np.vstack(X), np.concatenate(y)
@@ -102,10 +124,16 @@ def main():
                     "columns whose names contain any of them (an ablation)")
     ap.add_argument("--out", help="model path (default {}) or, with --loso, the posteriors' "
                     "file name in the cache".format(os.path.relpath(MODEL_PATH, ROOT)))
+    ap.add_argument("--augment", help="tag of external/broadcast.py features: train the IDSSE and "
+                    "Metrica matches on their broadcast-like copies. Held-out matches are always "
+                    "scored on their own features")
+    ap.add_argument("--augment-mode", choices=("replace", "add"), default="replace",
+                    help="train on the copies instead of the originals, or on both")
     a = ap.parse_args()
     matches = load_matches()
     names = next(iter(matches.values()))[3]
     keep = keep_columns(names, [d for d in a.drop.split(",") if d])
+    augmented = load_augmented(a.augment, names, keep) if a.augment else None
     if len(keep) < len(names):
         print("leaving out {} of {} columns".format(len(names) - len(keep), len(names)))
         matches = {n: (x[:, keep], xs[:, keep], y, nm) for n, (x, xs, y, nm) in matches.items()}
@@ -114,7 +142,7 @@ def main():
         out = {}
         for k in SETS:
             train = [n for n in matches if not n.startswith(k)]
-            X, y = rows(matches, train)
+            X, y = rows(matches, train, augmented, a.augment_mode)
             t = time.time()
             model = fit(X, y)
             prior = np.bincount(y, minlength=3) / len(y)
@@ -127,7 +155,7 @@ def main():
         np.savez_compressed(path, **out)
         print("->", path)
         return
-    X, y = rows(matches, list(matches))
+    X, y = rows(matches, list(matches), augmented, a.augment_mode)
     t = time.time()
     model = fit(X, y)
     print("{} rows, {} iterations, {:.0f} s".format(len(y), model.n_iter_, time.time() - t))
