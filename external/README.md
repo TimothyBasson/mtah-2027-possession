@@ -94,6 +94,29 @@ Before the short runs were absorbed (`min_team=0 min_dead=0`): 0.187 / 0.212 / 0
 It never reads the ball, so `--seen` doesn't change these. The ball-based nearest-team v0 before it
 scored 0.057 spellF1 on all 10 at `--seen 0.59`.
 
+### Where its mistakes are: `errors.py`
+
+`uv run python external/errors.py` predicts each provider held out, as `heldout.py` does, and puts
+every wrong graded frame and every unmatched true possession in one bucket. On the model above
+(2026-11-14, providers weighted equally; columns are mean, IDSSE, Metrica, SkillCorner):
+
+| | mean | IDSSE | Metrica | SkillCorner |
+|---|---|---|---|---|
+| graded frames wrong | 19.1% | 14.9% | 19.9% | 22.7% |
+| wrong team, within 2 s of a turnover | 5.5% | 6.0% | 4.8% | 5.8% |
+| wrong team, mid-possession | 2.6% | 1.2% | 1.0% | 5.6% |
+| stoppage called in open play | 4.2% | 1.0% | 9.2% | 2.5% |
+| true possessions matched at IoU 0.5 | 35.5% | 33.4% | 41.9% | 31.1% |
+| merged into a prediction over twice as long | 26.2% | 30.3% | 20.7% | 27.6% |
+| no frame of their own team: other team predicted | 25.7% | 28.8% | 23.7% | 24.6% |
+| no frame of their own team: stoppage predicted throughout | 3.3% | 2.2% | 4.1% | 3.6% |
+| predicted / true possessions | 0.70 | 0.54 | 0.63 | 0.92 |
+| true changes of team found within 10 s | | 52.4% | 55.0% | 56.4% |
+
+A change of team is counted within a half only, so the second-half kick-off is not a turnover.
+Unmatched possessions with no frame of their own team are almost all the other team's, not a
+stoppage, so that loss belongs to the team model.
+
 The old v3 model these numbers used to describe (0.431 across all 10, ball-based) was never committed
 and is lost. It is still the best single-model score seen here: this v0 is a players-only lens
 meant to be combined with `hmm/`, not a replacement for it.
@@ -296,4 +319,4 @@ matches and labels BAR-ATH, so none of this is in the submission.** `seq/feature
 the (frames, slots) team map `hmm/clues.team_by_frame` gives, so that path can use the same keeper
 correction as `hmm_v6`. Several features (`p_tracked`, the defensive lines, the 6-player floor)
 depend on tracking quality the outside sets do not show, and how they behave on BAR-ATH's
-fragmented slots is unchecked. `uv.lock` does not include the `seq` group yet.
+fragmented slots is unchecked. `uv.lock` includes the `seq` group (`uv sync --group seq`).

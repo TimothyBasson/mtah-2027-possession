@@ -146,6 +146,6 @@ to find. BAR-ATH's public window has 2 of 17 possessions under 2 s, against 20 t
 - The model that labels BAR-ATH is a single run (seed 0); its held-out twin scored 0.519, the other seed 0.506.
 - The outside labels are not the organisers' rule (`external/README.md`); 0.519 is not a
   leaderboard prediction.
-- `torch` is a new dependency and is not in `uv.lock`.
+- `torch` is a new dependency, locked in `uv.lock` under the `deep` group (`uv sync --group deep`).
 - A learned model can pick up a provider's tracking quirks. Holding a provider out guards
   against that, and the BAR-ATH public window agrees, but that window is five minutes.
