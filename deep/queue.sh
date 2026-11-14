@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run a list of training jobs four at a time, one thread each. Safe to rerun: finished jobs are
+# Run a list of training jobs three at a time (JOBS=n to change; each holds the 3 GB tensor cache), one thread each. Safe to rerun: finished jobs are
 # skipped and unfinished ones resume from their checkpoint. Each finished fold is copied to
 # /mnt/project-files/deep/ when that folder exists, because the cloud container does not last.
 #   sh deep/queue.sh deep/jobs.txt      # lines of: TAG FOLD [train.py options]
@@ -15,9 +15,7 @@ one() {
     mkdir -p "/mnt/project-files/deep/$tag/$fold" && cp "$out"/*.npz "$out/net.pt" "/mnt/project-files/deep/$tag/$fold/"
   fi
 }
-grep -v '^#' "$1" | grep . | while read -r line; do
-  while [ "$(jobs -r | wc -l)" -ge 4 ]; do sleep 20; done
-  # shellcheck disable=SC2086
-  one $line &
-done
-wait
+case "$1" in
+  --one) shift; one "$@" ;;
+  *) grep -v '^#' "$1" | grep . | xargs -P "${JOBS:-3}" -L 1 sh "$0" --one ;;
+esac
