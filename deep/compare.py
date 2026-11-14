@@ -47,6 +47,23 @@ def against(mine, other):
              "mine live, other dead": g & (a != "D") & (b == "D")}
     for name, m in kinds.items():
         print(f"{name:24s} {m.sum() / g.sum():6.1%} of graded frames; ball missing on {np.mean(~seen[m]):.0%} of them")
+    # how long the two name different teams for at a stretch: short runs are boundary timing or a
+    # brief possession one of them misses, a long one is a possession given to the wrong team
+    rows = []
+    for hi, (s, e) in enumerate(halves):
+        i = s
+        for k, grp in itertools.groupby((live & (a != b))[s:e + 1]):
+            m = len(list(grp))
+            if k:
+                rows.append((m / 25, hi + 1, (i - s) / 25, seen[i:i + m].mean(), a[i], b[i]))
+            i += m
+    length = np.array([r[0] for r in rows])
+    print(f"other team (both live): {len(rows)} runs, {length.sum():.0f} s in all")
+    for lo, hi in ((0, 1), (1, 2), (2, 5), (5, 10), (10, np.inf)):
+        m = (length >= lo) & (length < hi)
+        print(f"  {lo:>2} to {hi:<3} s: {m.sum():4d} runs, {length[m].sum():5.0f} s ({length[m].sum() / length.sum():.0%})")
+    for r in sorted(rows, reverse=True)[:5]:
+        print(f"  longest: {r[0]:4.1f} s, half {r[1]} at {int(r[2] // 60):02d}:{r[2] % 60:04.1f}, ball seen {r[3]:.0%}, mine {r[4]}, other {r[5]}")
     print(f"team agreement where both live: {np.mean(a[live] == b[live]):.3f}"
           f" (ball seen {np.mean(a[live & seen] == b[live & seen]):.3f}, missing {np.mean(a[live & ~seen] == b[live & ~seen]):.3f})")
 
@@ -84,7 +101,7 @@ def sweep(tag):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="v2")
-    ap.add_argument("--mine", default=os.path.join(ROOT, "evaluation", "results", "deep_v2.csv"))
+    ap.add_argument("--mine", default=os.path.join(ROOT, "evaluation", "results", "deep.csv"))
     ap.add_argument("--against")
     ap.add_argument("--sweep", action="store_true")
     a = ap.parse_args()

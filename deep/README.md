@@ -45,8 +45,8 @@ came from one uninterrupted run of `train.py --fold none --steps 2000 --tag v2` 
 0); checkpoints now carry torch's generator as well, so a resumed run would match too. `v1.pt` is
 no longer shipped: v2 replaces it, and `predict.py --tag v1` shows what the fix alone does.
 
-**Against `hmm` v7 on BAR-ATH, no labels read** (`compare.py --against evaluation/results/hmm_v7.csv`,
-asked for in the review of #29):
+**Against `hmm` v7 on BAR-ATH, no labels read** (`run.py`, `hmm/decode.py`, then
+`compare.py --against evaluation/results/hmm_v7.csv`; asked for in the review of #29):
 
 | | `deep` v2 | `hmm` v7 |
 |---|---|---|
@@ -55,12 +55,40 @@ asked for in the review of #29):
 | public 5 minutes (check only, 17 possessions) | spellF1 0.826, macroF1 0.918, 14 possessions | 0.606, 0.783, 16 |
 
 The two agree on 86.5% of graded frames: 84.5% where the ball is seen (59% of frames) and 89.4%
-where it is missing. Where both call the ball live they name the same team on 89.4%. The
-disagreements are 5.3% of frames on the team (93% of those with the ball in view), 5.1% where
+where it is missing. Where both call the ball live they name the same team on 89.4% as well (a
+coincidence of two different counts: 0.8939 of 64,643 frames and 0.8936 of the both-live frames).
+The disagreements are 5.3% of frames on the team (93% of those with the ball in view), 5.1% where
 `deep` says dead and `hmm` live, and 3.0% the other way. So the two count about the same number
-of possessions (281 and 289) and differ mostly on who has a ball that the tracker can see, which
-is where a combination has something to decide. The public window favours `deep` on macroF1 by
-more than its spellF1 noise allows us to say for spells.
+of possessions (281 and 289) and differ mostly on who has a ball that the tracker can see.
+
+Those team disagreements are 183 short runs, 340 s in all: 50 under 1 s, 67 of 1 to 2 s, 58 of
+2 to 5 s, 8 of 5 to 10 s (the longest 8.0 s, at 48:28 of the second half) and none longer. So
+neither model has given a long possession to the wrong team where the other has it right; the
+difference is brief possessions and where a change is placed, with the ball in view.
+
+On the public window the bootstrap intervals overlap (`run_evaluation.py --bootstrap 1000`):
+`deep` v2 spellF1 0.826 (0.63 to 0.95), `hmm` v7 0.606 (0.44 to 0.76). Nothing in `deep/` was
+chosen on that window.
+
+**Against `hmm` v7 held out, on the same 30 matches.** `hmm` v7 from `external/score_control.py
+--weights 0.15` (its classifier trained without the provider scored, its tables counted on the
+others, its hand-set weights as shipped, ball at 59% seen); `deep` v2 from `folded.py` with the
+shipped decode in every fold. "Folded" scores against the outside labels folded towards the
+challenge's controlled-possession rule (`external/control.py`), which `hmm` v7's classifier is
+trained on and `deep` is not.
+
+| spellF1 | IDSSE | Metrica | SkillCorner | mean |
+|---|---|---|---|---|
+| `deep` v2, labels as they are | 0.549 | 0.635 | 0.398 | 0.527 |
+| `hmm` v7, labels as they are | 0.523 | 0.769 | 0.376 | 0.556 |
+| `deep` v2, folded labels | 0.675 | 0.720 | 0.451 | 0.615 |
+| `hmm` v7, folded labels | 0.609 | 0.798 | 0.428 | 0.612 |
+
+Neither is ahead everywhere. `deep` leads on IDSSE and SkillCorner (27 of the 30 matches) under
+both labellings, without the ball; `hmm` leads on Metrica's three matches by 0.08 to 0.13, which
+is all of its lead in the mean on the labels as they are. On the folded labels, the nearer of the
+two to what BAR-ATH is scored on, the means are level (0.615 and 0.612). The two err in different
+places, which is the case for combining them rather than choosing.
 
 **Is the decode merging possessions?** (`compare.py --sweep`) The review noted 281 possessions
 against about 350 if the whole match ran at the public window's density. Every setting, the same
@@ -78,12 +106,13 @@ in all three folds, with BAR-ATH's count beside its held-out score:
 | 4 | 2 s and 3 s | 0.532 | 0.621 | 0.420 | 0.524 | 235 (8.6 s) |
 
 (286 here is 281 once the frames before each kickoff are set to D.) From 235 to 332 possessions
-the held-out mean stays within 0.521 to 0.528, inside the 0.013 seed spread, so the outside
-matches cannot say how finely to cut: IDSSE wants a cheaper switch, SkillCorner a dearer one.
-Getting to 350 needs no decode at all and costs 0.03. `hmm` v7 lands on 289 from the ball, by a
-different route, and 350 is five minutes extrapolated to a match. So the shipped setting stays;
-cost 2 with 1 s runs (304 possessions, 0.528) is as good a choice, and nothing here should be
-picked on the public window.
+the held-out mean stays within 0.521 to 0.528, and the providers pull opposite ways: IDSSE wants
+a cheaper switch, SkillCorner a dearer one. That disagreement, not noise, is why the outside
+matches cannot say how finely to cut (the settings are compared on the same probabilities, so
+the differences are paired and small ones are real). Getting to 350 needs no decode at all and
+costs 0.03. `hmm` v7 lands on 289 from the ball, by a different route, and 350 is five minutes
+extrapolated to a match. So the shipped setting stays; cost 2 with 1 s runs (304 possessions,
+0.528) is as good a choice, and nothing here should be picked on the public window.
 
 **Players missing as on BAR-ATH** (`predict.py --knock`: `external/score.py drop_players`, about
 7% of player-frames lost in runs and bursts, speeds recomputed):
