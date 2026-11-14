@@ -63,3 +63,20 @@ def test_exported_trees_reproduce_scikit_learn(tmp_path):
     path = tmp_path / "m.npz"
     trees.export(model, path)
     assert np.allclose(trees.predict_proba(trees.load(path), X), model.predict_proba(X), atol=1e-9)
+
+
+def test_joint_features_leave_out_the_ball_alone_and_swap_with_the_teams():
+    from hmm.control import BALL_ALONE, STRIDE, hold, joint_features
+    px, py, team, bx, by = _toy_match()
+    args = (bx, by, (105.0, 68.0), 25, [(0, 400)])
+    X, names, frames = joint_features(px, py, team, *args)
+    assert list(frames) == list(range(0, 400, STRIDE)) and X.shape == (len(frames), len(names))
+    assert len(set(names)) == len(names)
+    assert not [n for n in names if any(b in n for b in BALL_ALONE) or n.startswith("k_")]
+    assert "gap" in names and "p_width_diff" in names and "b_gap" in names
+    Xs = joint_features(px, py, team, *args, swap=True)[0]
+    Y = joint_features(px, py, 1 - team, *args)[0]
+    assert np.array_equal(np.isnan(Xs), np.isnan(Y))
+    assert np.allclose(np.nan_to_num(Xs), np.nan_to_num(Y))
+    held = hold(np.arange(len(frames)), 400)
+    assert list(held[:8]) == [0, 0, 0, 1, 1, 1, 1, 1] and held[-1] == len(frames) - 1

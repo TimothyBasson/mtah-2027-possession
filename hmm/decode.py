@@ -49,12 +49,26 @@ making a change of team cheaper where a second classifier sees one (helps the ra
 folded ones, and costs SkillCorner). The trees run in numpy (hmm/trees.py); only training needs
 scikit-learn.
 
+v8 changes what the control classifier reads and how it is trained (hmm/control.py
+joint_features, external/train_control.py), and folds brief possessions after decoding:
+- It no longer reads what the ball does on its own (seen or not, its speed). Two of the three
+  outside providers freeze or hide the ball in a stoppage, and the classifier had learned that.
+- It also reads the team-shape features of seq/features.py: all 22 players, not only the ones by
+  the ball, so it has something to go on where the ball is missing or noisy.
+- The three providers count equally in training, the trees are regularised, and nothing is
+  stopped early.
+- A decoded possession under MIN_POSSESSION_SECONDS with the other team on both sides goes back
+  to that team (fold_brief_possessions).
+With the classifier trained with each set left out, spellF1 against the control-folded labels goes
+from v7's 0.609 / 0.798 / 0.428 to V8_IDSSE / V8_METRICA / V8_SKILLCORNER (external/README.md).
+
 The gap clue counts a goalkeeper slot near a goal for the team defending that goal, not the team
 the metadata gives the slot: the tracker sometimes carries one keeper under the other keeper's
 slot (hmm/clues.py).
 
-    python -m hmm.decode                    # writes evaluation/results/hmm_v7.csv
-    python -m hmm.decode --no-control       # v6 again
+    python -m hmm.decode                    # writes evaluation/results/hmm_v8.csv
+    python -m hmm.decode --no-control       # v6 again (v7 is commit fe457a3: its classifier read
+                                            # columns the v8 features leave out)
     python -m hmm.decode --no-control --no-width   # v5 again
     python -m hmm.decode --weight 0.1 --hand-gap   # v4 again; either flag alone takes that one
                                             # change back out, to tell them apart
@@ -91,8 +105,7 @@ from hmm.clues import (  # noqa: E402
     KEEPER_ON_BALL, MISSING_AFTER_LINE, N_DISTANCE_BINS, N_GAP_BINS, N_PLACES, ball_is_usable,
     ball_place_category, cache_key, gap_distance_category, keeper_slots, load_distances,
     mirror_gap_distance, read_positions, speed_category, team_by_frame, width_category)
-from hmm.control import control_log_ratio  # noqa: E402
-from hmm.control import features as control_features  # noqa: E402
+from hmm.control import control_log_ratio, hold, joint_features  # noqa: E402
 from hmm.model import (  # noqa: E402
     A, D, H, STATES, baum_welch, build_log_emit, forward_backward, rate_log_trans, viterbi)
 from starter.baseline import RESULTS_DIR, team_of_each_track, write_submission  # noqa: E402
@@ -273,6 +286,12 @@ CACHE_DIR = os.path.join(DATA_DIR, "cache")
 CONTROL_MODEL = os.path.join(ROOT, "hmm", "models", "control_state.npz")
 CONTROL_WEIGHT = 0.15
 
+# v8: a possession briefer than this with the other team on both sides is given back to that team
+# after decoding (fold_brief_possessions). The challenge changes possession only on controlled
+# possession, for which DATA_POINTS.md gives "about 2 s" as one test; a decoded spell this short
+# between two spells of the other team is a touch, not control. Numbers in external/README.md.
+MIN_POSSESSION_SECONDS = 1.5
+
 
 def gap_table():
     """log p(gap bin | state), states x gap bins."""
@@ -410,13 +429,36 @@ def place_placebo(gap, place, speed, flight, log_trans, log_start, segments, kic
     return out
 
 
+def fold_brief_possessions(path, min_frames):
+    """Copy of a state path with every H or A run shorter than min_frames that has the other team
+    on both sides given back to that team. Repeats until nothing changes, since folding one run
+    joins its neighbours. Runs next to a stoppage are left alone."""
+    path = np.array(path, copy=True)
+    while min_frames > 1:
+        edges = np.flatnonzero(path[1:] != path[:-1]) + 1
+        starts, stops = np.r_[0, edges], np.r_[edges, len(path)]
+        changed = False
+        for i in range(1, len(starts) - 1):
+            a, b = starts[i], stops[i]
+            before, after = path[a - 1], path[b]
+            if (b - a < min_frames and path[a] != D and before == after and before != D
+                    and before != path[a]):
+                path[a:b] = before
+                changed = True
+        if not changed:
+            break
+    return path
+
+
 def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIGHT, extra=(),
-           direct=None):
+           direct=None, min_possession=0):
     """Labels for every video frame: one Viterbi path per half, X everywhere else.
 
     clues is a list of (obs, log_table), each obs covering every video frame, all at `weight`.
     extra is a list of (obs, log_table, weight) for clues with a weight of their own. direct is a
-    (frames, 3) array added to the log emissions as it is (the control clue, already weighted)."""
+    (frames, 3) array added to the log emissions as it is (the control clue, already weighted).
+    min_possession, in frames, folds briefer possessions between two spells of the other team
+    (fold_brief_possessions); 0 leaves the path as Viterbi gives it."""
     labels = np.full(len(clues[0][0]), "X", dtype="<U1")
     for lo, hi in segments:
         log_emit = build_log_emit([(obs[lo:hi], table, weight) for obs, table in clues]
@@ -424,7 +466,8 @@ def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIG
         if direct is not None:
             log_emit = log_emit + direct[lo:hi]
         pin_dead_before_kickoff(log_emit, lo, hi, kickoffs)
-        labels[lo:hi] = STATES[viterbi(log_emit, log_trans, log_start)]
+        labels[lo:hi] = STATES[fold_brief_possessions(viterbi(log_emit, log_trans, log_start),
+                                                      min_possession)]
     return labels
 
 
@@ -454,16 +497,21 @@ def load_control(game=GAME, data_dir=None, model_path=CONTROL_MODEL):
     model = trees.load(model_path)
     out = np.zeros((n_frames, 3))
     args = (px, py, team, ball_x, ball_y, pitch, FPS, halves)
-    X, names = control_features(*args)
-    Xs, _ = control_features(*args, swap=True)
+    X, names, frames = joint_features(*args)
+    Xs = joint_features(*args, swap=True)[0]
     missing = set(model["names"]) - set(names)
     if missing:
         sys.exit("the control model needs feature columns hmm/control.py no longer makes: {}"
                  .format(sorted(missing)))
     cols = [list(names).index(n) for n in model["names"]]  # the model's columns, in its order
     X, Xs = X[:, cols], Xs[:, cols]
+    inside = np.zeros(n_frames, bool)
     for lo, hi in halves:
-        out[lo:hi] = control_log_ratio(model, X[lo:hi], Xs[lo:hi])
+        inside[lo:hi] = True
+    scored = inside[frames]
+    ratio = np.zeros((len(frames), 3))
+    ratio[scored] = control_log_ratio(model, X[scored], Xs[scored])
+    out[inside] = hold(ratio, n_frames)[inside]
     os.makedirs(CACHE_DIR, exist_ok=True)
     np.save(cache_path, out)
     return out
@@ -633,7 +681,7 @@ def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", help="default evaluation/results/hmm_v7.csv (hmm_v6.csv with "
+    parser.add_argument("--out", help="default evaluation/results/hmm_v8.csv (hmm_v6.csv with "
                         "--no-control), with the variant flags in the name if any is set")
     parser.add_argument("--no-control", action="store_true",
                         help="ablation: without the control classifier, which is v6")
@@ -641,6 +689,10 @@ def main():
                         help="exported classifier (default hmm/models/control_state.npz)")
     parser.add_argument("--control-weight", type=float, default=CONTROL_WEIGHT,
                         help="weight on the control clue (default {})".format(CONTROL_WEIGHT))
+    parser.add_argument("--min-possession", type=float, default=MIN_POSSESSION_SECONDS,
+                        help="seconds under which a possession between two spells of the other "
+                             "team is folded (default {}; 0 for none)".format(
+                                 MIN_POSSESSION_SECONDS))
     parser.add_argument("--weight", type=float, default=WEIGHT,
                         help="emission weight (v5: {}, v4: {})".format(WEIGHT, WEIGHT_V4))
     parser.add_argument("--hand-gap", action="store_true",
@@ -684,18 +736,22 @@ def main():
     extra = [] if args.no_width else [(width, width_table(), WIDTH_WEIGHT)]
     direct = None if args.no_control else args.control_weight * load_control(
         model_path=args.control_model)
+    fold = 0 if args.no_control else int(round(args.min_possession * FPS))
     labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight, extra=extra,
-                    direct=direct)
+                    direct=direct, min_possession=fold)
     ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),
                                            ("_cw{:g}".format(args.control_weight),
                                             not args.no_control
                                             and args.control_weight != CONTROL_WEIGHT),
+                                           ("_mp{:g}".format(args.min_possession),
+                                            not args.no_control
+                                            and args.min_possession != MIN_POSSESSION_SECONDS),
                                            ("_handgap", args.hand_gap),
                                            ("_nowidth", args.no_width),
                                            ("_fitplace", args.fit_place)) if on)
     path = write_submission(
         args.out or os.path.join(RESULTS_DIR, "hmm_v{}{}.csv".format(
-            6 if args.no_control else 7, ablation)), labels)
+            6 if args.no_control else 8, ablation)), labels)
     print("-> {}".format(os.path.relpath(path, ROOT)))
     summarise(labels, segments)
     report_dead_runs(labels, place, segments, load_smart_tagging())

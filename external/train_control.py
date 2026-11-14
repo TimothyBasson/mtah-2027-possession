@@ -43,9 +43,10 @@ sys.path.insert(0, os.path.join(ROOT, "external"))
 from control import control_labels  # noqa: E402
 from control_features import CACHE  # noqa: E402
 from hmm import trees  # noqa: E402
+from hmm.control import hold  # noqa: E402
 
 SETS = ("idsse", "metrica", "skillcorner")
-STEP = 5
+ITERATIONS = 300
 MODEL_PATH = os.path.join(ROOT, "hmm", "models", "control_state.npz")
 SWAP = np.array([1, 0, 2])  # H <-> A, D stays
 
@@ -55,15 +56,17 @@ def code(labels):
 
 
 def load_matches():
+    """{match: (X, Xs, label codes on the cached frames, column names, frames, frames in the match)}"""
     matches = {}
-    for path in sorted(glob.glob(os.path.join(CACHE, "control_*_*.npz"))):
-        name = os.path.basename(path)[len("control_"):-4]
+    for path in sorted(glob.glob(os.path.join(CACHE, "control_v8_*_*.npz"))):
+        name = os.path.basename(path)[len("control_v8_"):-4]
         if not name.startswith(SETS):
             continue
         z = np.load(path)
         labels = control_labels(dict(np.load(os.path.join(ROOT, "data", "external",
                                                           name + ".npz"))))
-        matches[name] = (z["X"], z["Xs"], code(labels), list(z["names"]))
+        matches[name] = (z["X"], z["Xs"], code(labels)[z["frames"]], list(z["names"]),
+                         z["frames"], len(labels))
     if not matches:
         sys.exit("no features in {}: run external/control_features.py first".format(CACHE))
     return matches
@@ -75,20 +78,33 @@ def keep_columns(names, drop):
 
 
 def rows(matches, names):
-    X, y = [], []
+    """(X, y, weight): every graded cached frame of these matches, in both team orientations. The
+    weights make each provider count the same, however many matches it has: unweighted, IDSSE and
+    SkillCorner would outvote Metrica's three."""
+    X, y, w = [], [], []
+    graded = {k: sum(int(np.sum(matches[n][2] >= 0)) for n in names if n.startswith(k))
+              for k in SETS}
     for n in names:
-        a, b, labels, _ = matches[n]
-        g = np.flatnonzero(labels >= 0)[::STEP]
+        a, b, labels = matches[n][:3]
+        g = np.flatnonzero(labels >= 0)
         X += [a[g], b[g]]
         y += [labels[g], SWAP[labels[g]]]
-    return np.vstack(X), np.concatenate(y)
+        w.append(np.full(2 * len(g), 1.0 / graded[n.split("_")[0]]))
+    w = np.concatenate(w)
+    return np.vstack(X), np.concatenate(y), w / w.mean()
 
 
-def fit(X, y):
+def fit(X, y, weight):
+    """No early stopping and a fixed seed, so a refit on the same rows gives the same trees. The
+    leaf floor and the L2 penalty are seq/model.py's, taken as they were and not swept here."""
     from sklearn.ensemble import HistGradientBoostingClassifier
     return HistGradientBoostingClassifier(
-        max_iter=300, learning_rate=0.1, max_leaf_nodes=63, early_stopping=True,
-        validation_fraction=0.1, random_state=0).fit(X, y)
+        max_iter=ITERATIONS, learning_rate=0.1, max_leaf_nodes=63, min_samples_leaf=200,
+        l2_regularization=1.0, early_stopping=False, random_state=0).fit(X, y, sample_weight=weight)
+
+
+def class_shares(y, weight):
+    return np.bincount(y, weights=weight, minlength=3) / weight.sum()
 
 
 def posteriors(model, a, b):
@@ -108,32 +124,37 @@ def main():
     keep = keep_columns(names, [d for d in a.drop.split(",") if d])
     if len(keep) < len(names):
         print("leaving out {} of {} columns".format(len(names) - len(keep), len(names)))
-        matches = {n: (x[:, keep], xs[:, keep], y, nm) for n, (x, xs, y, nm) in matches.items()}
+        matches = {n: (m[0][:, keep], m[1][:, keep]) + m[2:] for n, m in matches.items()}
         names = [names[i] for i in keep]
     if a.loso:
         out = {}
         for k in SETS:
             train = [n for n in matches if not n.startswith(k)]
-            X, y = rows(matches, train)
+            X, y, w = rows(matches, train)
             t = time.time()
-            model = fit(X, y)
-            prior = np.bincount(y, minlength=3) / len(y)
+            model = fit(X, y, w)
+            prior = class_shares(y, w)
+            loss = []
             for n in (n for n in matches if n.startswith(k)):
-                out[n] = posteriors(model, matches[n][0], matches[n][1]).astype(np.float32)
+                a, b, labels, _, frames, n_frames = matches[n]
+                p = posteriors(model, a, b).astype(np.float32)
+                g = labels >= 0
+                loss.append(-np.mean(np.log(np.clip(p[g, labels[g]], 1e-6, 1))))
+                out[n] = hold(p, n_frames)
                 out["prior_" + n] = prior
-            print("{:12s} left out: {} rows, {} iterations, {:.0f} s".format(
-                k, len(y), model.n_iter_, time.time() - t), flush=True)
+            print("{:12s} left out: {} rows, {:.0f} s, held-out log loss {:.2f}".format(
+                k, len(y), time.time() - t, np.mean(loss)), flush=True)
         path = os.path.join(CACHE, a.out or "control_loso.npz")
         np.savez_compressed(path, **out)
         print("->", path)
         return
-    X, y = rows(matches, list(matches))
+    X, y, w = rows(matches, list(matches))
     t = time.time()
-    model = fit(X, y)
-    print("{} rows, {} iterations, {:.0f} s".format(len(y), model.n_iter_, time.time() - t))
+    model = fit(X, y, w)
+    print("{} rows, {:.0f} s".format(len(y), time.time() - t))
     path = a.out or MODEL_PATH
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    prior = np.bincount(y, minlength=3) / len(y)
+    prior = class_shares(y, w)
     trees.export(model, path, prior=prior, names=np.array(names))
     check = X[np.random.default_rng(0).choice(len(X), 20000, replace=False)]
     diff = np.abs(trees.predict_proba(trees.load(path), check) - model.predict_proba(check))
