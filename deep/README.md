@@ -64,6 +64,21 @@ provider down) in every view. SkillCorner gains least.
   confirms nor contradicts the 30-match result. Over the full match the two agree on 96.0% of
   graded frames (275 against 281 possessions, median 7.1 s against 6.8 s).
 
+- **BAR-ATH without labels** (review of #35). Per half bt gives 126 / 149 possessions and v2
+  130 / 151; 13% / 13% of bt's are under 2 s (v2 14% / 11%) and 37% / 40% under 5 s (v2 42% /
+  42%). Both call 44 to 48% of graded frames dead, against 20% in the public window, so the
+  window's 17 possessions do not scale to the match by frame count: per live minute the window
+  has 4.2 possessions and bt 4.8. The two disagree on 4.0% of graded frames, and less, not more,
+  where players are missing: 2.2% with 15 or fewer tracked, 2.6% with 16 to 18, 4.2% with 21 or
+  more. Half of the disagreement is bt live where v2 is dead.
+- **The decode suits bt** (`compare.py --tag bt --sweep`, one setting in all folds): the shipped
+  cost 4 with 1 s minimums scores 0.545, the best of the 20 settings 0.546 (cost 2). A lower
+  minimum does not help: 0.543 at 0.5 s or none.
+- **The pointer when the carrier is not tracked** (review of #35): the target then names the
+  nearest player still tracked. With players knocked out as on BAR-ATH bt loses 0.014 (0.540 to
+  0.526) and v2 loses 0.013 (0.529 to 0.516), so the pointer is no more fragile than the rest.
+  Teaching it only where a tracked player is within 3 m of the ball is untried.
+
 **How the no-ball rule is kept.**
 
 - `PossessionNet.forward(x, mask)` is handed the players and nothing else; the ball enters only
