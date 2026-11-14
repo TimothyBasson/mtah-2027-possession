@@ -228,3 +228,21 @@ to find. BAR-ATH's public window has 2 of 17 possessions under 2 s, against 20 t
 - `torch` is a new dependency, locked in `uv.lock` under the `deep` group (`uv sync --group deep`).
 - A learned model can pick up a provider's tracking quirks. Holding a provider out guards
   against that, and the BAR-ATH public window agrees, but that window is five minutes.
+
+## v4: trained on the folded labels (2026-11-14, not kept)
+
+`deep/train.py --labels control --tag v4`, otherwise as v2 (same folds, steps and seed), scored by
+`deep/folded.py --tag v4` with the shipped decode. The labels are folded towards the
+controlled-possession rule (`external/control.py`), as `hmm` v7's classifier is trained.
+
+| spellF1 | IDSSE | Metrica | SkillCorner | all 30 matches | provider mean |
+|---|---|---|---|---|---|
+| v2, labels as they are | 0.549 | 0.635 | 0.398 | 0.457 | 0.527 |
+| v4, labels as they are | 0.526 | 0.612 | 0.421 | 0.464 | 0.519 |
+| v2, folded labels | 0.675 | 0.720 | 0.451 | 0.530 | 0.615 |
+| v4, folded labels | 0.666 | 0.717 | 0.488 | 0.553 | 0.624 |
+
+SkillCorner gains 0.023 to 0.037 and the other two providers lose under both labellings, even on
+the folded labels v4 was trained towards. One seed. A provider is down, so v2 stays. Against
+`hmm` v7 nothing changes: v4 is still behind on all three Metrica matches (-0.157 raw, -0.081
+folded).
