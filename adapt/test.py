@@ -14,7 +14,9 @@ matches only); the hash covers the dropout table and the dropout and filling cod
 several seeds of the bar simulation, one row each.
 Decode is fixed, not picked: cost 4 with 1 s / 1 s runs against the labels as given, and 2 s / 3 s
 against the labels folded to controlled possession (external/control.py), as the evaluation
-review recommends. Mean over providers, each counting equally. Nothing is trained here, and any
+review recommends; "fold 1s" is the folded labels with the 1 s / 1 s decode, since the 2 s minimum
+was not adopted (its gain is SkillCorner's alone and BAR-ATH's public labels hold shorter
+possessions). Mean over providers, each counting equally. Nothing is trained here, and any
 base model's fold nets in the same layout can be scored the same way.
 
 Also printed: on frames that are truly live (H or A) and have fewer than 20 players tracked, how
@@ -36,7 +38,8 @@ sys.path[:0] = [HERE, os.path.join(ROOT, "deep"), os.path.join(ROOT, "external")
                 os.path.join(ROOT, "possession"), os.path.join(ROOT, "evaluation"), ROOT]
 
 RAW = dict(cost=4, min_team=1, min_dead=1)
-FOLDED = dict(cost=4, min_team=2, min_dead=3)
+FOLDED = dict(cost=4, min_team=2, min_dead=3)   # the 2 s minimum possession
+ROWS = (("raw", "raw", RAW), ("folded", "folded", FOLDED), ("fold 1s", "folded", RAW))
 
 
 def cache_key(cond, seed):
@@ -44,7 +47,7 @@ def cache_key(cond, seed):
     the code that fills gaps, so a refit or an edit never reuses old ones."""
     import hashlib
     h = hashlib.sha1()
-    for f in ("bar_ath_dropout.json", "dropout.py", "impute.py"):
+    for f in ("bar_ath_dropout.json", "dropout.py", "impute.py", os.path.join(ROOT, "external", "score.py")):
         with open(os.path.join(HERE, f), "rb") as fh:
             h.update(fh.read())
     return f"{cond}-s{seed}-{h.hexdigest()[:8]}"
@@ -87,7 +90,7 @@ def one(args):
     import data as D
     import decode
     import possession_metrics as pm
-    from net import PossessionNet
+    import net as N
     from train import predict_half
     base = os.path.join(ROOT, "data", "cache", "deep")
     d = np.load(os.path.join(ROOT, "data", "external", name + ".npz"))
@@ -98,8 +101,12 @@ def one(args):
     else:
         out = os.path.join(base, f"{tag}@{cache_key(cond, seed)}", fold, name + ".npz")
     if not os.path.exists(out):
-        net = PossessionNet(nfeat=D.NFEAT)
-        net.load_state_dict(torch.load(os.path.join(base, tag, fold, "net.pt")))
+        path = os.path.join(base, tag, fold, "net.pt")
+        if hasattr(N, "load_net"):  # the ball-taught code reads either kind of net
+            net = N.load_net(path, D.NFEAT)
+        else:
+            net = N.PossessionNet(nfeat=D.NFEAT)
+            net.load_state_dict(torch.load(path))
         probs = {}
         for i, (s, e) in enumerate(halves):
             X, M, bxy, _ = D.half_tensors(players, d["ball"], team, s, e, tuple(d["pitch"]), int(d["fps"]))
@@ -110,7 +117,9 @@ def one(args):
     probs = [z[f"p{i}"] for i in range(len(halves))]
     n = len(d["labels"])
     res = {}
-    for key, truth, dec in (("raw", d["labels"], RAW), ("folded", folded_labels(name, d), FOLDED)):
+    truths = dict(raw=d["labels"], folded=folded_labels(name, d))
+    for key, which, dec in ROWS:
+        truth = truths[which]
         pred = decode.labels_from(probs, halves, n, **dec)
         r = pm.evaluate(pm.label_codes(truth), pm.label_codes(pred), bootstrap_n=0)
         res[key] = (r["spell_f1_mean"], r["macro_f1"], r["alive_dead_f1"], r["team_acc_both_alive"])
@@ -147,7 +156,7 @@ def main():
             folds = sorted({f for f, _, _ in res})
             few = np.sum([r["few"] for _, _, r in res], 0)
             label = cond + (f" s{seed}" if "bar" in cond else "")
-            for key in ("raw", "folded"):
+            for key, _, _ in ROWS:
                 per = np.array([np.mean([r[key] for f, _, r in res if f == fold], 0) for fold in folds])
                 m = per.mean(0)
                 tail = ""

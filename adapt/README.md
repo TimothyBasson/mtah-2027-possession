@@ -44,9 +44,10 @@ return rates are calibrated, not measured (a lost player's situation is unseen):
 | simulated on Metrica (3) | 0.067 | 0.024 | 0.177 | 0.364 |
 | simulated on SkillCorner (20, frames it tracks) | 0.037 | 0.010 | 0.081 | 0.579 |
 
-The calibration grid (27 points, `--fit` prints them) has its best point inside it for the two
-settings that matter (standing means under 1.25 m/s; a moving player returns at 1 per second); the
-standing return rate makes no difference between 0.0005 and 0.005 per second. No point matches
+The calibration grid (27 points, `--fit` prints them) has its best point inside it for the
+standing threshold (1.25 m/s); the moving return rate (1 per second) is the lowest of this grid
+but beat 0.6 on the grid before it, so it is bracketed across the two; the standing return rate
+makes no difference between 0.0005 and 0.005 per second. No point matches
 BAR-ATH on all four numbers: this two-rate return cannot give both BAR-ATH's many complete frames
 and its many collapses. What is kept has too many frames with one to five players lost (under 20
 tracked: 0.20 against 0.15) and too few complete ones. Those extra thin frames fall partly on
@@ -86,6 +87,40 @@ spellF1; raw labels with cost 4 and 1 s / 1 s runs, folded labels with 2 s / 3 s
   (`bar_ath.py`) filling to 15 s changes 1.5% of v2's labels, which without labels is neither
   shown to help nor to be harmless; the public 5 minutes are unchanged at spellF1 0.826 (they
   have no thin frames). Do not put it in front of a submitted model on this evidence.
+
+## Training with players lost this way (2026-11-14, the ball-taught model)
+
+The ball-taught variant (`bt`: `train.py --ptr 0.5`, on `claude/project-thread-kknk3t`) retrained
+with half its training windows drawn from tracking that `dropout.simulate` had thinned (`btk`:
+`--knock 0.5 --knock-kind bar`, a simulation seed no test uses). Same folds, steps and seed; one
+training seed each. The change to `deep/train.py` and `deep/data.py` sits on that branch's code and
+is kept as a patch (`/mnt/project-files/adapt/btk-on-kknk3t.patch`) until that branch is on main;
+fold nets are in `/mnt/project-files/deep/btk/`.
+
+| | labels | full tracking | lost as on BAR-ATH, seeds 0 / 1 / 2 |
+|---|---|---|---|
+| `bt` | raw | 0.545 | 0.541 / 0.541 / 0.542 |
+| | folded, 2 s minimum | 0.641 | 0.639 / 0.635 / 0.638 |
+| | folded, 1 s minimum | 0.626 | 0.623 / 0.621 / 0.624 |
+| `btk` | raw | 0.545 | 0.543 / 0.545 / 0.542 |
+| | folded, 2 s minimum | 0.642 | 0.642 / 0.641 / 0.639 |
+| | folded, 1 s minimum | 0.626 | 0.625 / 0.626 / 0.625 |
+
+Per provider, full tracking, raw: `bt` 0.582 / 0.651 / 0.402, `btk` 0.579 / 0.648 / 0.409.
+
+- On full tracking the two are the same. With players lost, `btk` is 0.002 to 0.003 ahead on
+  every labelling, which is what the loss cost `bt` in the first place: training on it removes a
+  cost that was already inside the seed spread. One training seed, below the +0.01 bar, IDSSE and
+  Metrica 0.003 down on full tracking: not a gain to claim.
+- The thin live frames are not a missing-player problem. Both models call 24% of them dead, and
+  **with every player visible they call the same frames dead 23% of the time** (`bt` 22.7% with
+  full tracking, 24.3% with players lost). Those frames sit beside stoppages (restarts, the
+  moment play resumes), where the model is unsure whoever is tracked. Losing players adds 1.6
+  points, about 0.05% of a match's frames.
+
+So the question this folder was opened for is answered: the way BAR-ATH loses players costs the
+learned model about 0.003, and neither filling gaps nor training on the losses has anything
+larger to win back.
 
 ## The unseen-provider cost is not about missing players
 
