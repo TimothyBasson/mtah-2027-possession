@@ -66,7 +66,12 @@ def batch(train, rng, B, T, a):
     provs = sorted({m["provider"] for m in train})
     Xs, Ms, ys, bs, es, ws = [], [], [], [], [], []
     while len(Xs) < B:
-        prov = provs[rng.integers(len(provs))]
+        if a.share:  # e.g. soccertrack=0.15: that provider's share of windows, the rest split equally
+            w = np.array([a.share.get(q, np.nan) for q in provs])
+            w[np.isnan(w)] = (1 - np.nansum(w)) / max(1, np.isnan(w).sum())
+            prov = provs[rng.choice(len(provs), p=w / w.sum())]
+        else:
+            prov = provs[rng.integers(len(provs))]
         ms = [m for m in train if m["provider"] == prov]
         m = ms[rng.integers(len(ms))]
         hi = rng.integers(len(m["halves"]))
@@ -150,12 +155,14 @@ def main():
     ap.add_argument("--style", type=float, default=0.0,
                     help="share of training windows changed to look like another tracking system")
     ap.add_argument("--without", nargs="*", default=[], help="providers left out altogether, e.g. soccertrack")
+    ap.add_argument("--share", nargs="*", default=[], help="provider=share of training windows, e.g. soccertrack=0.15")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--tag", default="v2")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
+    a.share = {k: float(v) for k, v in (kv.split("=") for kv in a.share)}
     torch.set_num_threads(a.threads)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
