@@ -78,7 +78,7 @@ def half_tensors(players, ball, team, a, b, pitch, fps=25):
     return X, M, bxy / np.array([52.5, 34.0], np.float32), a + idx
 
 
-def load_match(path, knock=False):
+def load_match(path, knock=False, control=False):
     """[(X, mask, y, ball)] per half, y in 0 H, 1 A, 2 D, -1 ungraded; plus what scoring needs.
     With knock, players are first lost in runs and bursts as BAR-ATH's tracker loses them
     (external/score.py drop_players), under another seed than the one scoring uses."""
@@ -91,6 +91,11 @@ def load_match(path, knock=False):
         from score import drop_players
         players = drop_players(players, halves, int(d["fps"]), "train " + os.path.basename(path))
     lab = d["labels"]
+    if control:  # the training target folded towards the challenge's controlled-possession rule
+        import sys
+        sys.path[:0] = [ROOT, os.path.join(ROOT, "external")]
+        from control import control_labels
+        lab = control_labels(d)
     code = np.full(len(lab), -1, np.int64)
     for i, c in enumerate(CLASSES):
         code[lab == c] = i
@@ -102,13 +107,13 @@ def load_match(path, knock=False):
                 spans=halves, labels=lab)
 
 
-def load_all(knock=False):
+def load_all(knock=False, control=False):
     import pickle
-    cache = os.path.join(ROOT, "data", "cache", "deep_v2_knock.pkl" if knock else "deep_v2.pkl")
+    cache = os.path.join(ROOT, "data", "cache", "deep_v2" + "_knock" * knock + "_control" * control + ".pkl")
     if os.path.exists(cache):
         with open(cache, "rb") as f:
             return pickle.load(f)
-    ms = [load_match(p, knock) for p in external_paths()]
+    ms = [load_match(p, knock, control) for p in external_paths()]
     os.makedirs(os.path.dirname(cache), exist_ok=True)
     with open(cache + f".{os.getpid()}", "wb") as f:  # folds trained side by side write it at once
         pickle.dump(ms, f, protocol=4)

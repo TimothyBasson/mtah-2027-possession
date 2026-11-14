@@ -137,6 +137,8 @@ def main():
     ap.add_argument("--ball", type=float, default=0.5, help="weight of the where-is-the-ball loss")
     ap.add_argument("--edge", type=float, default=0.3)
     ap.add_argument("--spell", type=float, default=0.0, help="power of the short-possession loss weight")
+    ap.add_argument("--labels", default="raw", choices=("raw", "control"),
+                    help="control: train on labels folded towards the controlled-possession rule (external/control.py)")
     ap.add_argument("--knock", type=float, default=0.0,
                     help="share of training windows drawn with players lost in runs, as on BAR-ATH")
     ap.add_argument("--d", type=int, default=128)
@@ -148,7 +150,7 @@ def main():
     torch.set_num_threads(a.threads)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
-    matches = D.load_all()
+    matches = D.load_all(control=a.labels == "control")
     if a.knock:
         for m, k in zip(matches, D.load_all(knock=True)):
             assert m["name"] == k["name"]
