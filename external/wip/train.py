@@ -8,6 +8,7 @@ ap = argparse.ArgumentParser(); ap.add_argument("out"); ap.add_argument("--drop"
 ap.add_argument("--bal", action="store_true"); ap.add_argument("--reg", action="store_true"); ap.add_argument("--raw", action="store_true")
 ap.add_argument("--iters", type=int, default=300); ap.add_argument("--leaf", type=int, default=200); ap.add_argument("--lr", type=float, default=0.1)
 ap.add_argument("--sets", default="idsse,metrica,skillcorner")
+ap.add_argument("--augment", help="tag of feat_aug.py copies: train IDSSE and Metrica on them"); ap.add_argument("--augment-mode", default="replace", choices=("replace", "add"))
 a = ap.parse_args()
 if __name__ == "__main__":
     from sklearn.ensemble import HistGradientBoostingClassifier
@@ -19,16 +20,26 @@ if __name__ == "__main__":
     D = {}
     for n in NAMES:
         z = Z[n]; D[n] = (z["X"][:, cols], z["Xs"][:, cols], code(z["yraw"] if a.raw else z["y"]), z["frames"])
+    AUG = {}
+    if a.augment:
+        for n in NAMES:
+            f = f"{J}/{a.augment}+{n}.npz"
+            if os.path.exists(f):
+                z = np.load(f); assert list(z["names"]) == names
+                AUG[n] = (z["X"][:, cols], z["Xs"][:, cols], code(z["yraw"] if a.raw else z["y"]), z["frames"])
+        assert AUG, "no augmented copies: run feat_aug.py"
     out = {}
     for k in a.sets.split(","):
         tr = [n for n in NAMES if not n.startswith(k)]
         X, y, w = [], [], []
         nprov = {s: sum(len(D[n][2]) for n in tr if n.startswith(s)) for s in SETS if s != k}
         for n in tr:
-            A, B, yy, _ = D[n]; g = yy >= 0
-            X += [A[g], B[g]]; y += [yy[g], SWAP[yy[g]]]
-            ww = 1.0 / nprov[n.split("_")[0]] if a.bal else 1.0
-            w += [np.full(2 * g.sum(), ww)]
+            both = n in AUG and a.augment_mode == "add"
+            for A, B, yy, _ in ([AUG[n]] if n in AUG else []) + ([D[n]] if n not in AUG or both else []):
+                g = yy >= 0
+                X += [A[g], B[g]]; y += [yy[g], SWAP[yy[g]]]
+                ww = 1.0 / nprov[n.split("_")[0]] / (2 if both else 1) if a.bal else 1.0
+                w += [np.full(2 * g.sum(), ww)]
         X = np.vstack(X); y = np.concatenate(y); w = np.concatenate(w); w = w / w.mean()
         t = time.time()
         kw = dict(min_samples_leaf=a.leaf, l2_regularization=1.0) if a.reg else {}

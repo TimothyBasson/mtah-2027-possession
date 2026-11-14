@@ -301,3 +301,36 @@ the (frames, slots) team map `hmm/clues.team_by_frame` gives, so that path can u
 correction as `hmm_v6`. Several features (`p_tracked`, the defensive lines, the 6-player floor)
 depend on tracking quality the outside sets do not show, and how they behave on BAR-ATH's
 fragmented slots is unchecked. `uv.lock` includes the `seq` group (`uv sync --group seq`).
+
+## Training the control classifier on broadcast-like copies (`broadcast.py`), 2026-11-14
+
+`external/broadcast.py` degrades the IDSSE and Metrica matches towards SkillCorner's broadcast
+tracking (through 10 fps and back with build.py's interpolation, Gaussian jitter on the 10 fps ball
+samples, ball bursts, optionally players far from the ball dropped), and
+`train_control.py --loso --augment TAG` trains those matches on the copies. Held-out matches are
+always scored on their own features. Sizes come from SkillCorner's tracking without labels: its
+ball's velocity change has quartiles 0.64 / 1.35 m/s against IDSSE's 0.00 / 0.38, and a jitter of
+0.08 m per axis on the 10 fps samples gives 0.74 / 1.25. In graded frames SkillCorner tracks 22
+players (extrapolated ones are kept), so "far players dropped" matches nothing in these files.
+
+Folded spellF1 at weight 0.15, each provider held out (`score_control.py`):
+
+| classifier | IDSSE | Metrica | SkillCorner | mean | SkillCorner log loss |
+|---|---|---|---|---|---|
+| v7 | 0.609 | 0.798 | 0.428 | 0.612 | 1.08 |
+| 10 fps resample only (`ball_sigma=0 ball_seen=1`) | 0.611 | 0.797 | 0.430 | 0.613 | 1.02 |
+| 10 fps + ball jitter 0.08 m + bursts (defaults), copies replace | 0.611 | 0.802 | 0.450 | 0.621 | 0.75 |
+| the same, copies added to the originals | 0.614 | 0.796 | 0.445 | 0.618 | 0.83 |
+| the same + far players dropped (`far_metres=25`), replace | 0.609 | 0.804 | 0.450 | 0.621 | 0.79 |
+| v7 with `--drop seen,ball_speed,bspeed,ball_dv` | 0.601 | 0.794 | 0.458 | 0.618 | 0.72 |
+| that + defaults, replace | 0.605 | 0.793 | 0.456 | 0.618 | 0.69 |
+| joint control + seq classifier (`wip/train.py j1`, as in wip/README.md) | 0.631 | 0.812 | 0.482 | 0.641 | 0.74 |
+| that + defaults, replace (`wip/feat_aug.py bc`, `wip/train.py --augment bc`) | 0.639 | 0.813 | 0.484 | 0.645 | 0.72 |
+
+What it shows. The gain on plain v7 is the ball jitter, not the frame rate: the resample alone is
+worth 0.002. It is in alive/dead, not in naming the team: the held-out SkillCorner classifier calls
+21% of frames dead instead of 16% (truth 29%), and its team accuracy stays at 0.836. So the jitter
+does what dropping the ball-speed columns does (a ball that never sits exactly still stops meaning
+"stoppage"), without that drop's cost on IDSSE and Metrica, and on top of the dropped columns it adds
+nothing. On the joint classifier it is worth +0.004 on the mean with no provider down, which is
+inside the noise of three Metrica matches. Each row is one seed and one draw of the noise.
