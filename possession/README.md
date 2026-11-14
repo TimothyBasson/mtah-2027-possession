@@ -35,6 +35,7 @@ uv run python viz/combined/make_combined.py --match all --explain --open   # see
 | 2026-11-11 | **+ acceleration**: 80th percentile of players' \|change of speed\|, ±3 s, as a fifth stoppage signal | **0.282** | **0.735** | **0.898** | 0.790 | **yes** |
 | 2026-11-11 | a missing stoppage signal adds nothing instead of forcing dead (review of #22) | 0.282 | 0.735 | 0.898 | 0.790 | yes: same mean, the principled rule |
 | 2026-11-12 | **three signals**: drop the 80th-percentile speed and the 10 s median (table below) | **0.282** | **0.736** | **0.898** | 0.790 | **yes**: as good with two fewer |
+| 2026-11-12 | spread lean only: 1 s lean window and 1 s minimum possession (were 2 s, 2 s), from a football-prior grid ("Where the mistakes are" below) | 0.287 | 0.736 | 0.899 | 0.790 | yes on the spread lean; not carried over: the team model and Viterbi decode (above) replaced both settings |
 | 2026-11-12 | **team model**: logistic on width, length, push and speed difference, each over the next 2 s and the last 2 s, instead of the spread's sign (below) | **0.392** | **0.775** | 0.898 | **0.854** | **yes** |
 | 2026-11-12 | **Viterbi decode**: the best H/A/D path on the two probabilities, a change of team costing 5 and to or from dead 20, instead of cutting each at even odds and absorbing short runs | **0.404** | **0.780** | 0.899 | 0.856 | **yes** |
 | 2026-11-12 | the same, the two costs picked held out from 2, 5 x 20, 40 | 0.405 | 0.782 | 0.901 | 0.856 | no: the folds pick three different pairs, the surface is flat |
@@ -266,6 +267,75 @@ and their window lengths were chosen on all 30 matches. The ablations say those 
 Before the acceleration signal, on BAR-ATH, as a check only: 101 / 108 possessions per half, mean 18.1 / 16.5 s, 43% / 44% dead;
 public 5 minutes macroF1 0.814, spellF1 0.336, 8 possessions against 17. Fewer possessions and
 more dead than before: the model now merges more, which the next work on turnovers should balance.
+
+## Where the mistakes were, on the spread lean (2026-11-12)
+
+Measured on the model before the team model and the Viterbi decode, which were built in parallel
+and replaced both settings below; `external/errors.py` runs on whatever the model now is.
+
+On the model as it now stands (team model, Viterbi decode, five stoppage signals), the same
+breakdown: wrong frames 25.4% → 19.1%; wrong team near a turnover 7.1% → 5.5%, mid-possession
+5.1% → 2.6%; stoppage called in open play 4.9% → 4.2% (Metrica still 9.2%); true possessions
+matched 20% → 36%, merged 35% → 26%, none of that team's frames 34% → 29% (25.7% with the other team predicted there, 3.3% with a
+stoppage predicted throughout, so this loss is the team model's); predicted per true
+possession 0.59 → 0.70; true turnovers found within 10 s 38% → 55%, now on time (median switch
+−0.2 to +0.5 s). What is left is mostly the brief possessions and Metrica's open-play stoppages.
+
+`uv run python external/errors.py` predicts each provider held out and sorts every wrong graded
+frame, and every true possession it fails to match at IoU 0.5. With the 2 s settings (columns:
+mean, IDSSE, Metrica, SkillCorner):
+
+| graded frames wrong | 25.4% | 22.1% | 26.7% | 27.4% |
+|---|---|---|---|---|
+| wrong team, within 2 s of a true turnover | 7.1% | 8.0% | 6.6% | 6.9% |
+| wrong team, mid-possession | 5.1% | 4.2% | 4.4% | 6.6% |
+| stoppage called in open play | 4.9% | 1.3% | 10.3% | 3.2% |
+| stoppage called, within 2 s of a true edge | 0.9% | 0.3% | 1.6% | 0.8% |
+| missed stoppage: start / middle / end | 7.4% | 8.3% | 3.8% | 10.0% |
+
+| true possessions (IoU 0.5) | mean | IDSSE | Metrica | SkillCorner |
+|---|---|---|---|---|
+| matched | 20.4% | 16.5% | 23.4% | 21.1% |
+| merged into a prediction over twice as long | 34.5% | 40.2% | 29.2% | 34.1% |
+| no prediction for that team overlaps it at all | 34.3% | 36.0% | 33.1% | 33.8% |
+| split / shifted | 10.9% | 7.3% | 14.3% | 11.0% |
+| predicted / true possessions | 0.59 | 0.46 | 0.56 | 0.75 |
+
+- Half the errors are the team, half the stoppage. The team errors cluster at turnovers: the
+  model finds 38% of true changes of team within 10 s, and those it finds come 0.6-2 s late.
+- A third of true possessions get no frame of their own team at all. True possessions are short
+  (median 3.7 / 5.9 / 5.8 s; 20-30% under 2 s, 38-53% under 4 s), and a team's shape doesn't
+  change in a one-second possession, so spread can't see these whatever the smoothing.
+- Metrica's "stoppage in open play" (10%) is the largest single bucket on any provider.
+
+**Is the smoothing causing the merging?** The lean window and the minimum runs were set by hand
+and never scored held out. Grid from football, not from the data: lean window 0.5 / 1 / 2 / 3 s
+either side (a team reshapes within 1-3 s of a turnover), minimum possession 0 / 0.5 / 1 / 2 / 3 s
+(a controlled touch and pass takes about a second), minimum stoppage 1 / 3 / 5 s (the quickest
+restart, a quick throw-in, takes a few seconds). Held-out spellF1, each provider in its own fold,
+providers equal (minimum stoppage 3 s; 1 s is 0.008-0.012 worse everywhere, 5 s the same as 3 s):
+
+| lean window \ min possession | 0 | 0.5 | 1 | 2 | 3 |
+|---|---|---|---|---|---|
+| 0.5 s | 0.286 | 0.287 | 0.287 | 0.285 | 0.282 |
+| 1 s | 0.286 | 0.287 | **0.287** | 0.284 | 0.281 |
+| 2 s (was) | 0.283 | 0.283 | 0.283 | **0.282** | 0.280 |
+| 3 s | 0.280 | 0.280 | 0.280 | 0.279 | 0.279 |
+
+macroF1 is 0.735-0.737 across the whole grid. Picked on the other two providers, the folds chose
+(1, 1, 3), (0.5, 1, 5) and (0.5, 0.5, 3): different points, but all on the same short plateau.
+The middle of it, 1 s and 1 s, raises every provider (IDSSE 0.237 → 0.243, Metrica 0.309 →
+0.317, SkillCorner 0.300 → 0.301) and would have been adopted, with the minimum alive run at 1 s
+too, since it is the same setting. It was not carried over: the Viterbi decode replaced both
+(`MIN_TEAM` is 2 s again and only used by the "absorb" decode). 0.287 was picked after seeing
+this grid, so it is not a nested score.
+
+**So no: the smoothing isn't the cause.** The whole grid spans 0.279-0.287, possessions predicted
+per true one go only 0.59 → 0.62, merged 34.5% → 33.6%, and turnovers found within 10 s 38% →
+41%. The ceiling on these knobs is about +0.005; the merging comes from the spread signal not
+seeing turnovers, which is where the next work goes (faster turnover signals). On BAR-ATH (check
+only), for this superseded spread-lean model and not the model as it now stands: 223 possessions of mean 17.2 s (was 212 of 18.0 s); public 5 minutes macroF1 0.824 (was
+0.826), spellF1 0.352 (same), 8 possessions against 17.
 
 ## The model: players only, no ball
 

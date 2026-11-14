@@ -81,6 +81,10 @@ short runs absorbed: held-out mean 0.282 / 0.736 / 0.898 / 0.790). The experimen
 
 Before the acceleration signal: held-out mean 0.266 / 0.712 / 0.879 / 0.790. With all five signals (before dropping the two redundant ones): 0.282 / 0.735 / 0.898 / 0.790.
 
+`errors.py` breaks the held-out mistakes down by kind (wrong team near a turnover or mid-possession,
+stoppages called or missed) and says why each unmatched true possession failed; results in
+`possession/README.md`.
+
 `score.py` in-sample (weights fitted on all 30): IDSSE 0.244, Metrica 0.311, SkillCorner 0.300,
 all 30 0.288 spellF1. Before the stoppage model (median speed under 1.2 m/s): held-out mean 0.250,
 all 30 0.260. The experiment log is in `possession/README.md`.
@@ -296,4 +300,4 @@ matches and labels BAR-ATH, so none of this is in the submission.** `seq/feature
 the (frames, slots) team map `hmm/clues.team_by_frame` gives, so that path can use the same keeper
 correction as `hmm_v6`. Several features (`p_tracked`, the defensive lines, the 6-player floor)
 depend on tracking quality the outside sets do not show, and how they behave on BAR-ATH's
-fragmented slots is unchecked. `uv.lock` does not include the `seq` group yet.
+fragmented slots is unchecked. `uv.lock` includes the `seq` group (`uv sync --group seq`).
