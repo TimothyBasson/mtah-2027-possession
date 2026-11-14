@@ -46,7 +46,8 @@ def main():
     ap.add_argument("--tag", default="v2")
     ap.add_argument("--jobs", type=int, default=2)
     a = ap.parse_args()
-    paths = {os.path.basename(p)[:-4]: p for p in sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))}
+    paths = {os.path.basename(p)[:-4]: p for p in sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
+             if os.path.basename(p).startswith(sh.SETS)}
     state = dict(paths=paths, tables=sc.tables(paths), loso=dict(np.load(os.path.join(sc.CACHE, "control_loso.npz"))),
                  weights=[sc.dec.CONTROL_WEIGHT], fold_seconds=sc.CONTROL_SECONDS)
     with Pool(a.jobs, initializer=sc._init, initargs=(state,)) as pool:

@@ -101,3 +101,58 @@ Combination c with everything fitted and counted on all 30 outside matches:
 | `possession/` | 0.846 | 0.516 | 14 |
 
 With 17 possessions these spellF1 values cannot be told apart.
+
+## `deep/` as one more clue in `hmm` v7 (2026-11-14)
+
+`combined/deep_in_hmm.py` decodes `hmm` v7 exactly as `external/score_control.py` does and adds
+one per-frame term to every state's score: a weight times (log of `deep/` v2's probability of the
+state, from the fold net that never saw the match's provider, minus the log of the class share).
+Nothing under `hmm/` or `deep/` changes. The bar set beforehand: the weight is picked on the other
+two providers, and every provider, Metrica included, has to go up against `hmm` v7. spellF1,
+"folded" as in `external/control.py`.
+
+One weight on every frame (`python combined/deep_in_hmm.py`):
+
+| weight | 0 (`hmm` v7) | 0.05 | 0.1 | 0.2 | 0.4 |
+|---|---|---|---|---|---|
+| IDSSE, labels as they are | 0.523 | 0.555 | 0.561 | 0.570 | 0.586 |
+| Metrica | 0.769 | 0.766 | 0.761 | 0.738 | 0.702 |
+| SkillCorner | 0.376 | 0.387 | 0.399 | 0.407 | 0.412 |
+| IDSSE, folded | 0.609 | 0.650 | 0.665 | 0.685 | 0.701 |
+| Metrica | 0.798 | 0.807 | 0.822 | 0.803 | 0.781 |
+| SkillCorner | 0.428 | 0.444 | 0.459 | 0.470 | 0.473 |
+
+Held out, the weight picked for Metrica is the largest (the other two providers keep gaining) and
+Metrica drops: 0.702 against 0.769 on the labels as they are, 0.781 against 0.798 folded. This
+version does not clear the bar.
+
+A weight where the ball is usable and another where it is not (`--gated`, written usable/not).
+The ball is usable in 59% of in-play frames on IDSSE and SkillCorner (dropped to match BAR-ATH)
+and 63% on Metrica.
+
+| weights | 0/0 (`hmm` v7) | 0/0.1 | 0/0.2 | 0/0.4 | 0/0.8 | 0.05/0.2 | 0.05/0.4 | 0.05/0.8 |
+|---|---|---|---|---|---|---|---|---|
+| IDSSE, labels as they are | 0.523 | 0.560 | 0.577 | 0.594 | 0.606 | 0.583 | 0.597 | 0.606 |
+| Metrica | 0.769 | 0.773 | 0.773 | 0.769 | 0.759 | 0.766 | 0.761 | 0.750 |
+| SkillCorner | 0.376 | 0.387 | 0.390 | 0.387 | 0.379 | 0.397 | 0.393 | 0.384 |
+| IDSSE, folded | 0.609 | 0.648 | 0.664 | 0.677 | 0.680 | 0.676 | 0.685 | 0.687 |
+| Metrica | 0.798 | 0.801 | 0.802 | 0.798 | 0.788 | 0.807 | 0.802 | 0.794 |
+| SkillCorner | 0.428 | 0.440 | 0.441 | 0.435 | 0.423 | 0.452 | 0.446 | 0.433 |
+
+Held out, weights picked on the other two providers, paired by match against `hmm` v7:
+
+| | labels as they are | folded labels |
+|---|---|---|
+| IDSSE | 0.577 against 0.523 (+0.054, se 0.006, up 7/7) | 0.676 against 0.609 (+0.067, se 0.006, up 7/7) |
+| Metrica | 0.750 against 0.769 (-0.018, se 0.004, up 0/3) | 0.802 against 0.798 (+0.004, se 0.006, up 2/3) |
+| SkillCorner | 0.379 against 0.376 (+0.002, se 0.003, up 11/20) | 0.446 against 0.428 (+0.019, se 0.004, up 17/20) |
+| provider mean | 0.569 against 0.556 | 0.641 against 0.611 |
+
+Reading. On the folded labels, the target `hmm` v7 is built for and the closest to the challenge's
+rule, the gated combination clears the bar: no provider down, mean up 0.030, though Metrica's
++0.004 is inside its noise. On the labels as they are it does not: the weight picked for Metrica
+is too large and Metrica drops 0.018. The mildest gated setting, 0/0.2 (`deep/` speaks only where
+there is no usable ball), is up on every provider under both labellings (+0.054 / +0.004 / +0.014
+as they are, +0.055 / +0.004 / +0.013 folded), but that setting was read off this table with all
+three providers in view, so it is a suggestion, not a held-out result. What is solid: `deep/`
+adds a lot on IDSSE and nothing measurable either way on Metrica at small weights.
