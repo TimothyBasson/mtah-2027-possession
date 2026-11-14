@@ -4,8 +4,11 @@
     python viz/combined/make_combined.py --pred evaluation/results/baseline_smooth50.csv --start 1:20:05 --open
     uv run python viz/combined/make_combined.py --match all --open
     uv run python viz/combined/make_combined.py --match all --explain --open
+    uv run python viz/combined/make_combined.py --deep --open
 
 --explain shows possession/'s labels with how it reached them, clue by clue, under the strips.
+--deep shows the learned model (deep/) at work, stage by stage: what it reads from the players, its
+score for every frame, where it guesses the ball is, each smoothing step and the possessions out.
 
 --match plays an outside match from data/external/ (external/README.md) instead, or with 'all', writes
 a page for BAR-ATH and every outside match with a dropdown to switch between them. Those matches
@@ -45,7 +48,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "viz", "replay"))
-from games import DATA_DIR, GAME, GAMES, require, source_frames  # noqa: E402
+from games import DATA_DIR, GAME, GAMES, require, source_frames, video_path  # noqa: E402
 from make_replay import FPS, PUBLIC_GT, clock_spec, parse_time, read_labels, read_teams  # noqa: E402
 
 # Params
@@ -156,8 +159,6 @@ def explain(match):
     import features
     import model
     import run
-    sys.path.insert(0, os.path.join(ROOT, "evaluation"))
-    import possession_metrics as pm
     F, labels = run.frames(match)
     x = model.explain(F)
     tenths = lambda v: base64.b64encode(np.clip(np.rint(np.nan_to_num(v) * 10), -127, 127)
@@ -173,13 +174,71 @@ def explain(match):
         out["dead"] = {"signals": list(x["dead"]["signals"]), "fit": x["dead"]["fit"],
                        "x": [hundredths(v) for v in x["dead"]["x"].T]}
     if labels is not None:
-        spells = lambda l: int(1 + (l[l != "X"][1:] != l[l != "X"][:-1]).sum())
-        r = pm.evaluate(pm.label_codes(labels), pm.label_codes(x["pred"]), bootstrap_n=0)
-        out["scores"] = [["spellF1", round(r["spell_f1_mean"], 3)], ["macroF1", round(r["macro_f1"], 3)],
-                         ["alive/dead F1", round(r["alive_dead_f1"], 3)],
-                         ["team acc", round(r["team_acc_both_alive"], 3)],
-                         ["spells (model / truth)", "{} / {}".format(spells(x["pred"]), spells(labels))]]
+        out["scores"] = scores(labels, x["pred"])
     return "".join(x["pred"]), out
+
+
+def scores(truth, pred):
+    """The headline metrics of pred against truth, both arrays of H / A / D / X per frame."""
+    import numpy as np
+    sys.path.insert(0, os.path.join(ROOT, "evaluation"))
+    import possession_metrics as pm
+    truth, pred = np.asarray(truth), np.asarray(pred)
+    spells = lambda l: int(1 + (l[l != "X"][1:] != l[l != "X"][:-1]).sum())
+    r = pm.evaluate(pm.label_codes(truth), pm.label_codes(pred), bootstrap_n=0)
+    return [["spellF1", round(r["spell_f1_mean"], 3)], ["macroF1", round(r["macro_f1"], 3)],
+            ["alive/dead F1", round(r["alive_dead_f1"], 3)],
+            ["team acc", round(r["team_acc_both_alive"], 3)],
+            ["spells (model / truth)", "{} / {}".format(spells(pred[truth != "X"]), spells(truth))]]
+
+
+def deep(match, truth, tag):
+    """The learned model's labels for a match (None = BAR-ATH) and what it produced at each stage,
+    from deep/explain.py's file, which is computed here if it is missing (that needs torch).
+
+    Per half, at the model's 5 fps and base64: the H, A, D probabilities (uint8, 250 = 1), where the
+    ball head puts the ball (int16, thousandths of the pitch), the chance of a change of label
+    within 0.4 s (uint8, 250 = 1) and how far the ball guess is from the tracked ball (uint8,
+    0.2 m steps, 255 where the ball is not tracked). Per video frame: the label before smoothing
+    and after the switching cost; the label after short runs are absorbed is the page's estimate."""
+    import numpy as np
+    path = os.path.join(ROOT, "data", "cache", "deep", tag, "viz", (match or "bar_ath") + ".npz")
+    if os.path.exists(path):
+        z = np.load(path)
+    else:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("deep_explain", os.path.join(ROOT, "deep", "explain.py"))
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except ImportError as error:
+            raise SystemExit("no {} and it can't be computed here ({}). Run deep/explain.py where torch "
+                             "is installed and copy the file over.".format(path, error))
+        z = module.explain(match, tag)
+    b64 = lambda a, kind: base64.b64encode(np.ascontiguousarray(a).astype(kind).tobytes()).decode()
+    n_halves = len(z["halves"])
+    pitch = np.array(GAMES[GAME]["pitch"], np.float32)
+    if match:
+        pitch = np.load(os.path.join(DATA_DIR, "external", match + ".npz"))["pitch"].astype(np.float32)
+    err = np.concatenate([z["err%d" % i] for i in range(n_halves)])
+    live = np.concatenate([z["p%d" % i][:, 2] for i in range(n_halves)]) < 0.5
+    seen = np.isfinite(err)
+    cost, min_team, min_dead = (float(v) for v in z["decode"])
+    out = {"tag": tag, "step": int(z["step"]), "reach": int(z["reach"]),
+           "decode": {"cost": cost, "min_team": min_team, "min_dead": min_dead},
+           "halves": [[int(a), int(b)] for a, b in z["halves"]],
+           "p": [b64(np.rint(z["p%d" % i] * 250), np.uint8) for i in range(n_halves)],
+           "ball": [b64(np.clip(np.rint(z["ball%d" % i] / pitch * 1000), -32000, 32000), "<i2")
+                    for i in range(n_halves)],
+           "edge": [b64(np.rint(z["edge%d" % i] * 250), np.uint8) for i in range(n_halves)],
+           "err": [b64(np.where(np.isfinite(z["err%d" % i]), np.clip(np.rint(np.nan_to_num(z["err%d" % i]) * 5), 0, 254), 255), np.uint8)
+                   for i in range(n_halves)],
+           "raw": "".join(z["raw"]), "switch": "".join(z["switch"]),
+           # the ball head only learned from live play, so that is where its error means something
+           "ball_err": round(float(np.median(err[seen & live])), 1) if (seen & live).any() else None}
+    if truth and any(c in truth for c in "HAD"):
+        out["scores"] = scores(list(truth), z["final"])
+    return "".join(z["final"]), out
 
 
 def write_page(payload, out_path, video_path, chunk_dir=CHUNK_DIR):
@@ -206,6 +265,10 @@ if __name__ == '__main__':
     parser.add_argument("--explain", action="store_true",
                         help="show possession/'s output with its working: each clue's lean, the guess "
                              "before smoothing, wrong frames and, on outside matches, the scores")
+    parser.add_argument("--deep", nargs="?", const="v2", metavar="TAG",
+                        help="show the learned model in deep/ at work, stage by stage: its score for "
+                             "every frame, its ball guess, each smoothing step and the possessions out "
+                             "(TAG is the model version, default v2)")
     parser.add_argument("--gt", default=PUBLIC_GT,
                         help="ground truth CSV (default: the public 5 minutes); 'none' to hide")
     parser.add_argument("--out", help="where to write the page (default: data/viz/...)")
@@ -215,15 +278,17 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     gt = None if args.gt.lower() == "none" else args.gt
-    if args.explain and args.pred:
-        parser.error("--explain shows the model's own labels; drop --pred")
+    if (args.explain or args.deep) and args.pred:
+        parser.error("--explain and --deep show the model's own labels; drop --pred")
+    if args.explain and args.deep:
+        parser.error("--explain is possession/'s working and --deep the learned model's: one page each")
     matches = [args.match]
     if args.match == "all":
         if args.pred or args.out:
             parser.error("--match all can't take --pred or --out: frames and paths differ per game")
         matches = [None] + sorted(os.path.basename(f)[:-4] for f in
                                   glob.glob(os.path.join(DATA_DIR, "external", "*.npz")))
-    suffix = "_" + os.path.splitext(os.path.basename(args.pred))[0] if args.pred else "_explain" if args.explain else ""
+    suffix = "_" + os.path.splitext(os.path.basename(args.pred))[0] if args.pred else "_explain" if args.explain else "_deep" if args.deep else ""
     outs = [args.out or os.path.join(OUT_DIR, "match" + ("_" + m if m else "") + suffix + ".html")
             for m in matches]
     games = [[m or "BAR-ATH", os.path.basename(o)] for m, o in zip(matches, outs)]
@@ -237,10 +302,15 @@ if __name__ == '__main__':
             if args.rebuild or not os.path.exists(chunk_path((n_frames - 1) // CHUNK)):
                 print("writing tracking chunks to {} (once; takes a minute)".format(CHUNK_DIR))
                 write_chunks(n_frames)
-            payload, chunk_dir, video = build(args.pred, gt), CHUNK_DIR, require(["video"])[0]
+            payload, chunk_dir, video = build(args.pred, gt), CHUNK_DIR, video_path()
+            if not os.path.isfile(video):
+                print("note: no video at {}; the page will look for it there".format(video))
         if args.explain:
             payload["pred"], payload["explain"] = explain(match)
             payload["pred_name"] = "possession model"
+        if args.deep:
+            payload["pred"], payload["deep"] = deep(match, payload["truth"], args.deep)
+            payload["pred_name"] = "learned model " + args.deep
         if len(games) > 1:
             payload["games"] = games
         write_page(payload, out, video, chunk_dir)

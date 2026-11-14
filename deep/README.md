@@ -9,6 +9,7 @@ python deep/train.py --fold idsse      # and metrica, skillcorner: one provider 
 python deep/decode.py --tag v2         # THE score: held-out mean spellF1
 python deep/train.py --fold none --steps 2000   # all 30 matches -> copy net.pt to deep/models/v2.pt
 python deep/run.py                     # BAR-ATH -> evaluation/results/deep.csv
+python deep/explain.py --match all     # each stage's output, for viz/combined/make_combined.py --deep
 ```
 
 ## v2 (2026-11-13): the pitch turned the right way, 0.529
