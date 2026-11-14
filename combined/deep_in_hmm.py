@@ -49,6 +49,10 @@ def one(args):
     clues = [(gap_distance_category(ball_is_usable(bx, by, pitch), d_home, d_away), gap_t),
              (place, dec.place_table()), (sh.speed_cats(d), speed_t), (sh.flight_cats(d, ball), flight_t)]
     extra = [(sh.width_cats(d), width_t, dec.WIDTH_WEIGHT)]
+    # The control classifier's training shares, also used for deep/: both are trained on the same
+    # two providers, so the dead share is the same (0.295 / 0.340 / 0.409 by held-out provider) and
+    # the only difference is that these are made equal for home and away, where the labels deep/
+    # saw are within 0.02 of that. At a weight of 0.2 that is under 0.015 in the log score.
     prior = np.log(loso["prior_" + name])
     ratio = np.log(np.clip(loso[name], 1e-6, 1)) - prior
     p = np.load(os.path.join(ROOT, "data", "cache", "deep", tag, name.split("_")[0], name + ".npz"))
