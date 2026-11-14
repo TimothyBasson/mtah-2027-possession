@@ -15,8 +15,14 @@ hmm/trees.py. It holds only tree arrays, the 248 feature names and the class pri
 The v7 model (94 columns, sha256 `4223a1c4...`) is at commit fe457a3; the v8 features leave out
 columns it needs, so this decoder cannot run it.
 
-v7's file came out byte-identical when retrained with the pinned scikit-learn. That has not been
-repeated for v8: it was trained once, on 4 threads.
+**A refit is not byte-identical.** v7's file was. A second fit of v8 from the same cached features,
+same code and same pinned scikit-learn (4 threads both times) gave sha256 `318d4069...`: the same
+900 trees in shape and count, equal up to tree 189, then leaf values that differ in the last
+float digits, and from there a few different splits. On two matches' features the two models'
+probabilities differ by 0.013 at most and 0.00001 on average, and name the same state on every
+row. The likely cause is the order threads add up the weighted histograms in (v7 had no sample
+weights). So the submission is reproducible from this committed file, which is what the decoder
+reads, and not from a retrain.
 `train_control.py` prints the sha256 so that you can check.
 
 Training data sources (external/README.md has how to fetch them):
