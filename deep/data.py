@@ -30,17 +30,23 @@ def external_paths():
     return sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
 
 
+def home_defends_left(players, team, a, b):
+    """Whether home defends x = 0 in frames a..b. The two teams against each other, not against
+    halfway: a side that dominates a half averages beyond halfway and would be turned the wrong
+    way (possession/features.own_goal)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        x = players[a:b + 1, :, 0]
+        return bool(np.nanmean(x[:, team == 0]) < np.nanmean(x[:, team == 1]))
+
+
 def half_tensors(players, ball, team, a, b, pitch, fps=25):
     """One half -> (X (T, SLOTS, NFEAT), mask (T, SLOTS), ball (T, 2), frames (T,)), canonical frame."""
     L, W = pitch
     xy = players[a:b + 1, :, :2].astype(np.float32).copy()
     sp = players[a:b + 1, :, 2].astype(np.float32).copy()
     bxy = ball[a:b + 1, :2].astype(np.float32).copy()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        # the two teams against each other, not against halfway: a side that dominates a half
-        # averages beyond halfway and would be turned the wrong way (possession/features.own_goal)
-        home_left = np.nanmean(xy[:, team == 0, 0]) < np.nanmean(xy[:, team == 1, 0])
+    home_left = home_defends_left(players, team, a, b)
     xy -= np.array([L / 2, W / 2], np.float32)
     bxy -= np.array([L / 2, W / 2], np.float32)
     if not home_left:  # turn the pitch half a turn
