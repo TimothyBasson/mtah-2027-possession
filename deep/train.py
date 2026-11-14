@@ -19,9 +19,11 @@ import torch.nn.functional as F
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data as D  # noqa: E402
+import trackers as TR  # noqa: E402
 from net import PossessionNet  # noqa: E402
 
-VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3}  # last n matches of each training provider
+VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3, "soccertrack": 1}  # last n matches of each training provider
+PAD = 50  # frames of context either side of a raw window, for smoothing and velocities
 
 
 def split(matches, fold):
@@ -73,6 +75,12 @@ def batch(train, rng, B, T, a):
         n = len(h["y"])
         s = rng.integers(0, max(1, n - T))
         X, M, y, ball = h["X"][s:s + T], h["M"][s:s + T], h["y"][s:s + T], h["ball"][s:s + T]
+        f0, f1 = s * D.STEP - PAD, (s + T) * D.STEP + PAD
+        if "raw" in m and rng.random() < a.style and f0 >= 0 and f1 <= len(m["raw"][hi]["xy"]):
+            # the same window as another tracking system might have recorded it (deep/trackers.py)
+            r = m["raw"][hi]
+            X, M = D.window_tensors(TR.apply(r["xy"][f0:f1], TR.style(rng), rng, (0.0, 0.0), r["fps"]), r["team"], r["fps"])
+            X, M = X[PAD // D.STEP:PAD // D.STEP + T], M[PAD // D.STEP:PAD // D.STEP + T]
         if "w" not in h or h.get("wp") != a.spell:
             h["w"], h["wp"] = spell_weights(h["y"], a.spell), a.spell
         ws.append(h["w"][s:s + T])
@@ -139,6 +147,9 @@ def main():
     ap.add_argument("--spell", type=float, default=0.0, help="power of the short-possession loss weight")
     ap.add_argument("--knock", type=float, default=0.0,
                     help="share of training windows drawn with players lost in runs, as on BAR-ATH")
+    ap.add_argument("--style", type=float, default=0.0,
+                    help="share of training windows changed to look like another tracking system")
+    ap.add_argument("--without", nargs="*", default=[], help="providers left out altogether, e.g. soccertrack")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
@@ -153,7 +164,11 @@ def main():
         for m, k in zip(matches, D.load_all(knock=True)):
             assert m["name"] == k["name"]
             m["knocked"] = k["halves"]
+    matches = [m for m in matches if m["provider"] not in a.without]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
+    if a.style:
+        for m in train:
+            m["raw"] = D.load_raw(os.path.join(D.ROOT, "data", "external", m["name"] + ".npz"))
     net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
