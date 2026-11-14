@@ -6,7 +6,7 @@ yardstick come from `external/control.py`, which is scoring, not a model input).
 
 ```bash
 python adapt/dropout.py --fit --check                    # measure BAR-ATH, calibrate, compare
-python adapt/test.py --tag v2 --cond full old bar bar+fill15
+python adapt/test.py --tag v2 --cond full old bar bar+fill15 --seed 0 1 2
 python adapt/bar_ath.py --tag v2 --fill 15               # what filling changes on BAR-ATH itself
 ```
 
@@ -40,12 +40,18 @@ return rates are calibrated, not measured (a lost player's situation is unseen):
 | | player-frames missing | 14 or fewer tracked | under 20 | all 22 |
 |---|---|---|---|---|
 | BAR-ATH | 0.076 | 0.053 | 0.149 | 0.518 |
-| simulated on IDSSE (7) | 0.076 | 0.047 | 0.215 | 0.413 |
-| simulated on Metrica (3) | 0.066 | 0.023 | 0.174 | 0.370 |
-| simulated on SkillCorner (20, frames it tracks) | 0.037 | 0.010 | 0.080 | 0.582 |
+| simulated on IDSSE (7) | 0.077 | 0.049 | 0.217 | 0.412 |
+| simulated on Metrica (3) | 0.067 | 0.024 | 0.177 | 0.364 |
+| simulated on SkillCorner (20, frames it tracks) | 0.037 | 0.010 | 0.081 | 0.579 |
 
-The simulation has somewhat more frames with one or two lost and fewer total collapses than
-BAR-ATH; SkillCorner comes out milder, its players being placed further apart in stoppages.
+The calibration grid (27 points, `--fit` prints them) has its best point inside it for the two
+settings that matter (standing means under 1.25 m/s; a moving player returns at 1 per second); the
+standing return rate makes no difference between 0.0005 and 0.005 per second. No point matches
+BAR-ATH on all four numbers: this two-rate return cannot give both BAR-ATH's many complete frames
+and its many collapses. What is kept has too many frames with one to five players lost (under 20
+tracked: 0.20 against 0.15) and too few complete ones. Those extra thin frames fall partly on
+live play, so the simulation is, if anything, harder on live play than BAR-ATH is. SkillCorner
+comes out milder, its players standing further apart in stoppages.
 
 ## The test (2026-11-14, `deep` v2 fold nets, fixed decode, held out by provider)
 
@@ -57,25 +63,29 @@ spellF1; raw labels with cost 4 and 1 s / 1 s runs, folded labels with 2 s / 3 s
 | | folded | 0.672 | 0.723 | 0.489 | 0.628 |
 | old knock-out (`old`) | raw | 0.543 | 0.620 | 0.392 | 0.519 |
 | | folded | 0.664 | 0.706 | 0.480 | 0.617 |
-| lost as BAR-ATH loses them (`bar`) | raw | 0.546 | 0.635 | 0.396 | 0.526 |
-| | folded | 0.666 | 0.720 | 0.486 | 0.624 |
-| `bar`, gaps to 5 s filled | raw / folded | | | | 0.526 / 0.624 |
-| `bar`, gaps to 15 s filled | raw | 0.547 | 0.637 | 0.398 | 0.527 |
-| | folded | 0.669 | 0.722 | 0.490 | 0.627 |
-| `bar`, gaps to 60 s filled | raw / folded | | | | 0.528 / 0.627 |
+| lost as BAR-ATH loses them (`bar`), seeds 0 / 1 / 2 | raw | | | | 0.526 / 0.523 / 0.527 |
+| | folded | | | | 0.624 / 0.624 / 0.626 |
+| `bar`, gaps to 15 s filled, seeds 0 / 1 / 2 | raw | | | | 0.527 / 0.525 / 0.528 |
+| | folded | | | | 0.627 / 0.625 / 0.624 |
 
-- Losing players the way BAR-ATH does costs 0.001 (raw) to 0.004 (folded), not the 0.008 to 0.013
-  the old test charged. The players it loses are mostly standing in a stoppage, where the answer
-  is "dead" whoever is visible.
-- In the simulation 21% of graded frames with under 20 tracked are live play, and the model calls
-  24% of those dead (4% of other live frames). That is the remaining exposure: about 3% of
-  BAR-ATH's frames if the same share holds there, which cannot be checked without labels.
+(Per provider, seed 0: `bar` 0.546 / 0.635 / 0.396 raw and 0.667 / 0.720 / 0.486 folded.)
+
+- Losing players the way BAR-ATH does costs 0.002 raw (three seeds: 0.000 to 0.004) and 0.003
+  folded (0.002 to 0.004). The seeds differ by up to 0.004, so read this as "missing players are
+  not the main problem", not as a measured cost; the old test's 0.008 to 0.011 is one seed of a
+  different simulation. The players BAR-ATH loses are mostly standing in a stoppage, where the
+  answer is "dead" whoever is visible.
+- In the simulation about 21% of graded frames with under 20 tracked are live play, and the model
+  calls 24 to 25% of those dead (4 to 5% of other live frames). That is the remaining exposure:
+  about 3% of BAR-ATH's frames if the same share holds there, which cannot be checked without
+  labels.
 - Filling gaps (`impute.fill`, straight line between where a track ends and where the nearest
-  reachable track of the same team starts) wins back what there is: +0.001 raw, +0.003 folded at
-  15 s. That is below the +0.01 bar, so it is not adopted as a gain. It is harmless and can sit in
-  front of whichever base model wins. On BAR-ATH itself (`bar_ath.py`), filling to 15 s changes
-  1.5% of v2's labels, mostly in frames with under 20 tracked; the public 5 minutes are unchanged
-  at spellF1 0.826 (they have no such frames).
+  reachable track of the same team starts) does nothing measurable: +0.001 raw and +0.001 folded
+  over three seeds, inside the seed spread, and the thin live frames are called dead just as
+  often with it (25%, counted on the same frames). It is not adopted. On BAR-ATH itself
+  (`bar_ath.py`) filling to 15 s changes 1.5% of v2's labels, which without labels is neither
+  shown to help nor to be harmless; the public 5 minutes are unchanged at spellF1 0.826 (they
+  have no thin frames). Do not put it in front of a submitted model on this evidence.
 
 ## The unseen-provider cost is not about missing players
 

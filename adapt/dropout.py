@@ -169,7 +169,8 @@ def fit():
                  losses=loss.tolist(), bar_ath=target)
     paths = fully_tracked()
     best = None
-    grid = [(thr, slow, moving) for thr in (1.0, 1.25) for slow in (0.002, 0.005) for moving in (0.6, 1.0)]
+    grid = [(thr, slow, moving) for thr in (1.0, 1.25, 1.5) for slow in (0.0005, 0.002, 0.005)
+            for moving in (1.0, 2.0, 4.0)]
     with ProcessPoolExecutor(4) as ex:
         tables = [dict(table, slow_below=thr, return_per_second_slow=slow, return_per_second_moving=moving)
                   for thr, slow, moving in grid]

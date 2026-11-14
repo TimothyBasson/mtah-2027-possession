@@ -9,7 +9,9 @@ Conditions (what is done to the held-out match's tracking before the saved fold 
     bar+fillN   bar, then adapt/impute.py fill with gaps up to N seconds joined
     (old+fillN and full+fillN work too)
 
-Probabilities go to data/cache/deep/<tag>@<cond>/<fold>/<match>.npz (held-out matches only).
+Probabilities go to data/cache/deep/<tag>@<cond>-s<seed>-<hash>/<fold>/<match>.npz (held-out
+matches only); the hash covers the dropout table and the dropout and filling code. --seed takes
+several seeds of the bar simulation, one row each.
 Decode is fixed, not picked: cost 4 with 1 s / 1 s runs against the labels as given, and 2 s / 3 s
 against the labels folded to controlled possession (external/control.py), as the evaluation
 review recommends. Mean over providers, each counting equally. Nothing is trained here, and any
@@ -37,24 +39,36 @@ RAW = dict(cost=4, min_team=1, min_dead=1)
 FOLDED = dict(cost=4, min_team=2, min_dead=3)
 
 
-def apply(cond, d, name):
-    """(players, team) for one condition."""
+def cache_key(cond, seed):
+    """Folder name for a condition's probabilities: they depend on the dropout table, the seed and
+    the code that fills gaps, so a refit or an edit never reuses old ones."""
+    import hashlib
+    h = hashlib.sha1()
+    for f in ("bar_ath_dropout.json", "dropout.py", "impute.py"):
+        with open(os.path.join(HERE, f), "rb") as fh:
+            h.update(fh.read())
+    return f"{cond}-s{seed}-{h.hexdigest()[:8]}"
+
+
+def apply(cond, d, name, seed=0):
+    """(players, team, players before any filling) for one condition."""
     import dropout
     import impute
     players, team = d["players"], d["team"]
     halves = [tuple(int(v) for v in h) for h in d["halves"]]
     fps = int(d["fps"])
+    before = players
     for part in cond.split("+"):
         if part == "old":
             from score import drop_players
-            players = drop_players(players, halves, fps, name)
+            players = before = drop_players(players, halves, fps, name)
         elif part == "bar":
-            players = dropout.simulate(players, halves, fps, name)
+            players = before = dropout.simulate(players, halves, fps, name, seed=seed)
         elif part.startswith("fill"):
             players, team = impute.fill(players, team, halves, fps, float(part[4:]))
         elif part != "full":
             raise SystemExit("unknown condition " + part)
-    return players, team
+    return players, team, before
 
 
 def folded_labels(name, d):
@@ -67,7 +81,7 @@ def folded_labels(name, d):
 
 
 def one(args):
-    tag, cond, fold, name = args
+    tag, cond, fold, name, seed = args
     import torch
     torch.set_num_threads(1)
     import data as D
@@ -78,10 +92,11 @@ def one(args):
     base = os.path.join(ROOT, "data", "cache", "deep")
     d = np.load(os.path.join(ROOT, "data", "external", name + ".npz"))
     halves = [tuple(int(v) for v in h) for h in d["halves"]]
-    out = os.path.join(base, f"{tag}@{cond}", fold, name + ".npz")
-    players, team = apply(cond, d, name + ".npz")
-    if cond == "full" and not os.path.exists(out):
+    players, team, before = apply(cond, d, name + ".npz", seed)
+    if cond == "full":
         out = os.path.join(base, tag, fold, name + ".npz")
+    else:
+        out = os.path.join(base, f"{tag}@{cache_key(cond, seed)}", fold, name + ".npz")
     if not os.path.exists(out):
         net = PossessionNet(nfeat=D.NFEAT)
         net.load_state_dict(torch.load(os.path.join(base, tag, fold, "net.pt")))
@@ -100,7 +115,7 @@ def one(args):
         r = pm.evaluate(pm.label_codes(truth), pm.label_codes(pred), bootstrap_n=0)
         res[key] = (r["spell_f1_mean"], r["macro_f1"], r["alive_dead_f1"], r["team_acc_both_alive"])
         if key == "raw":
-            tracked = np.isfinite(players[..., 0]).sum(1)
+            tracked = np.isfinite(before[..., 0]).sum(1)  # before filling, so rows compare
             live = np.isin(truth, ["H", "A"])
             few = (tracked < 20) & (tracked > 0)
             res["few"] = (int((live & few).sum()), int((live & few & (pred == "D")).sum()),
@@ -113,6 +128,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="v2")
     ap.add_argument("--cond", nargs="+", default=["full", "old", "bar"])
+    ap.add_argument("--seed", type=int, nargs="+", default=[0], help="seeds of the bar simulation")
     ap.add_argument("--workers", type=int, default=4)
     a = ap.parse_args()
     base = os.path.join(ROOT, "data", "cache", "deep", a.tag)
@@ -126,10 +142,11 @@ def main():
     print(f"{'condition':12s} labels   IDSSE  Metrica  SkillC   mean  | macroF1 alive/dead team | "
           "live frames with <20 tracked: share of graded, called dead (other live frames)")
     with ProcessPoolExecutor(a.workers) as ex:
-        for cond in a.cond:
-            res = list(ex.map(one, [(a.tag, cond, fold, name) for fold, name in jobs]))
+        for cond, seed in [(c, s) for c in a.cond for s in (a.seed if "bar" in c else [0])]:
+            res = list(ex.map(one, [(a.tag, cond, fold, name, seed) for fold, name in jobs]))
             folds = sorted({f for f, _, _ in res})
             few = np.sum([r["few"] for _, _, r in res], 0)
+            label = cond + (f" s{seed}" if "bar" in cond else "")
             for key in ("raw", "folded"):
                 per = np.array([np.mean([r[key] for f, _, r in res if f == fold], 0) for fold in folds])
                 m = per.mean(0)
@@ -137,7 +154,7 @@ def main():
                 if key == "raw":
                     tail = (f" | {few[2] and few[0] / max(few[2], 1):.2f} of the <20 frames are live; "
                             f"called dead {few[1] / max(few[0], 1):.2f} ({few[4] / max(few[3], 1):.2f})")
-                print(f"{cond:12s} {key:7s} " + "  ".join(f"{x:.3f}" for x in per[:, 0]) + f"  {m[0]:.3f}  | "
+                print(f"{label:14s} {key:7s} " + "  ".join(f"{x:.3f}" for x in per[:, 0]) + f"  {m[0]:.4f}  | "
                       + "  ".join(f"{x:.3f}" for x in m[1:]) + tail, flush=True)
 
 
