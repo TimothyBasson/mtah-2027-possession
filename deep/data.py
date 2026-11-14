@@ -109,7 +109,13 @@ def load_match(path, knock=False, control=False):
 
 def load_all(knock=False, control=False):
     import pickle
-    cache = os.path.join(ROOT, "data", "cache", "deep_v2" + "_knock" * knock + "_control" * control + ".pkl")
+    name = "deep_v2" + "_knock" * knock
+    if control:  # the fold's settings are part of the name: other settings are other labels
+        import sys
+        sys.path[:0] = [ROOT, os.path.join(ROOT, "external")]
+        from control import CONTROL_SECONDS, MIN_TOUCHES
+        name += f"_control{CONTROL_SECONDS:g}s{MIN_TOUCHES}"
+    cache = os.path.join(ROOT, "data", "cache", name + ".pkl")
     if os.path.exists(cache):
         with open(cache, "rb") as f:
             return pickle.load(f)
