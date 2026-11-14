@@ -246,3 +246,36 @@ SkillCorner gains 0.023 to 0.037 and the other two providers lose under both lab
 the folded labels v4 was trained towards. One seed. A provider is down, so v2 stays. Against
 `hmm` v7 nothing changes: v4 is still behind on all three Metrica matches (-0.157 raw, -0.081
 folded).
+
+## Decode settings and averaged copies on the controlled-possession labels (2026-11-14)
+
+`python deep/variants.py` decodes held-out probabilities at 12 settings (the same on every match)
+and scores them against the outside labels as they are and folded towards the
+controlled-possession rule (`external/control.py`). Full table in the script's output; cost 4 shown,
+the cost barely matters. spellF1 as IDSSE / Metrica / SkillCorner / provider mean.
+
+| source, shortest possession / stoppage | labels as they are | folded labels |
+|---|---|---|
+| v2, 1 s / 1 s (shipped) | 0.549 / 0.635 / 0.398 / 0.527 | 0.675 / 0.720 / 0.451 / 0.615 |
+| v2, 2 s / 2 s | 0.532 / 0.621 / 0.420 / 0.525 | 0.672 / 0.723 / 0.489 / 0.628 |
+| v2, 3 s / 3 s | 0.475 / 0.580 / 0.431 / 0.495 | 0.627 / 0.683 / 0.517 / 0.609 |
+| v2 + a second seed, 1 s / 1 s | 0.556 / 0.634 / 0.402 / 0.531 | 0.679 / 0.719 / 0.456 / 0.618 |
+| v4 (trained on folded labels), 1 s / 1 s | 0.526 / 0.612 / 0.421 / 0.519 | 0.666 / 0.717 / 0.488 / 0.624 |
+| v2 + v4, 1 s / 1 s | 0.538 / 0.628 / 0.414 / 0.527 | 0.672 / 0.726 / 0.474 / 0.624 |
+| ball-taught (`/mnt/project-files/deep/bt`), 1 s / 1 s | 0.582 / 0.651 / 0.402 / 0.545 | 0.687 / 0.738 / 0.453 / 0.626 |
+| ball-taught, two seeds, 1 s / 1 s | 0.584 / 0.649 / 0.404 / 0.546 | 0.694 / 0.735 / 0.456 / 0.628 |
+| ball-taught, two seeds, 2 s / 2 s | 0.554 / 0.636 / 0.431 / 0.540 | 0.698 / 0.738 / 0.501 / 0.646 |
+
+- **A 2 s minimum is a SkillCorner effect, not kept.** On the folded labels it gains 0.013 in the
+  mean, all of it on SkillCorner (+0.038); IDSSE and Metrica do not move (-0.003, +0.003). On the
+  labels as they are it loses on IDSSE and Metrica. BAR-ATH's public labels do contain possessions
+  under 2 s (0.8 s and 1.3 s among 17; the folded outside labels keep 4 to 10% under 2 s, the raw
+  ones 21 to 33%), and on the public window the 2 s minimum gives 12 possessions against 14 for
+  the shipped decode and 17 true (0.759 against 0.826, noise). The shipped 1 s / 1 s stays.
+- **Averaging two seeds is worth 0.001 to 0.004.** Fine for a final file, not an improvement.
+- **v4 and v2 + v4 do not beat v2** on any view with a provider not down.
+- **The ball-taught variant is the one real gain here**: against v2 at the shipped decode it is
+  up on every provider on both views (+0.018 raw, +0.011 folded). It is another thread's model;
+  these are its shared held-out probabilities scored by this script.
+- Picking the setting per provider on the other two providers is unstable (SkillCorner gets
+  1 s / 1 s because IDSSE and Metrica are flat), which is why the rows above use one setting.
