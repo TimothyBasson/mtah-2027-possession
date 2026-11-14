@@ -189,3 +189,25 @@ to find. BAR-ATH's public window has 2 of 17 possessions under 2 s, against 20 t
 - `torch` is a new dependency, locked in `uv.lock` under the `deep` group (`uv sync --group deep`).
 - A learned model can pick up a provider's tracking quirks. Holding a provider out guards
   against that, and the BAR-ATH public window agrees, but that window is five minutes.
+
+## Pretraining on movement alone (2026-11-14): not kept
+
+`pretrain.py` trains the same network with no labels and no ball on all 31 matches, BAR-ATH and
+the held-out provider included: tracks are hidden for 2 to 30 s, and sometimes every player for
+1 to 3 s, and the net says where each team's hidden players are (a 30 x 20 map per team; the
+loss falls from 6.4, a uniform guess, to 5.2 in 2,000 steps). `train.py --init pre` then trains
+the ball-taught model (`bt`) from those weights; `--ssl 0.3` also keeps the hidden-player loss on,
+on unlabelled windows of every provider. Held out by provider, `paired.py bt,bts1 pt`:
+
+| folded labels, 2 s minimum | IDSSE | Metrica | SkillCorner | mean |
+|---|---|---|---|---|
+| `bt`, two seeds | 0.694 | 0.736 | 0.497 | 0.642 |
+| `pt`: `bt` from the pretrained start, one seed | 0.669 (0 of 7 up) | 0.728 | 0.513 (18 of 20 up) | 0.636 |
+| `ptc`: `pt` with the hidden-player loss kept on | 0.636 (0 of 7 up) | not run | not run | |
+| players missing as on BAR-ATH (`predict.py --knock`): `bt` seed 0 / `pt` | 0.674 / 0.657 | 0.700 / 0.700 | 0.489 / 0.500 | 0.621 / 0.619 |
+
+On the labels as they are, shipped decode: 0.545 against 0.540. Seeing the held-out provider's
+movement without labels does not close the unseen-provider gap: IDSSE loses 0.025 on every match,
+SkillCorner gains 0.016, and the mean moves by less than the bar of 0.01 in the wrong direction.
+Keeping the task on during training is worse still. Fold nets and probabilities:
+`/mnt/project-files/deep/{pre,pt,ptc}/`.
