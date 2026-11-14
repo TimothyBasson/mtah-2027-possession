@@ -27,7 +27,7 @@ from train import predict_half  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tag", default="v1")
+    ap.add_argument("--tag", default="v2")
     ap.add_argument("--out", required=True)
     ap.add_argument("--knock", action="store_true")
     ap.add_argument("--threads", type=int, default=1)
