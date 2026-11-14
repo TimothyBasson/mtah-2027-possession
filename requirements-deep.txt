@@ -1,0 +1,2 @@
+# deep/ (the learned possession model). CPU is enough: inference on the match takes seconds.
+torch==2.15.0

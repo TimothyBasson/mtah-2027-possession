@@ -18,11 +18,16 @@ starter = [
     "matplotlib",
     "notebook",
 ]
-# seq/ and external/score_seq.py; mirrors requirements-seq.txt. Not in default-groups, and not in
-# uv.lock until `uv lock` is next run.
+# seq/ and external/score_seq.py; mirrors requirements-seq.txt. Not in default-groups:
+# `uv sync --group seq`.
 seq = [
     "scikit-learn==1.6.1",
     "threadpoolctl==3.7.0",
+]
+# deep/ (the learned players-only model); mirrors requirements-deep.txt. Not in default-groups:
+# `uv sync --group deep`, or pip install -r.
+deep = [
+    "torch==2.15.0",
 ]
 
 [tool.uv]

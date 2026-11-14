@@ -85,6 +85,16 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
 .lanes .ln{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 .lanes .ln b{color:var(--text);font-weight:600}
 .lanes canvas{width:100%;height:16px;display:block;cursor:grab;touch-action:none;border-radius:2px;background:var(--bg)}
+.lanes canvas.tall{height:34px}
+/* The learned model's steps, with their values at the playhead (make_combined.py --deep). */
+.panel>.steps{font-size:12px;line-height:1.45;color:var(--muted);overflow:auto}
+.steps .row{display:flex;gap:8px;margin-bottom:2px}
+.steps .n{flex:none;width:7.4em;font-weight:600;color:var(--text);white-space:nowrap}
+.steps .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.steps .t b{color:var(--text);font-weight:600}
+.steps .pbar{display:inline-flex;width:90px;height:9px;border-radius:2px;overflow:hidden;vertical-align:-1px;margin-right:6px;background:var(--none)}
+.steps .pbar i{display:block;height:100%}
+.novideo .panel>.steps{font-size:13px;flex:none}.novideo .steps .t{white-space:normal}.novideo .steps .row{margin-bottom:5px}
 [hidden]{display:none!important}
 .seg{display:inline-flex}.seg button{font-size:12px;padding:2px 10px;border-radius:0;margin-left:-1px}
 .seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
@@ -132,6 +142,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
       <label class="tg"><input type="checkbox" id="showTrack" checked> Tracking on video</label>
       <label class="tg"><input type="checkbox" id="showIds" checked> Slot numbers</label>
       <label class="tg" title="Each team's centre, and its average distance from it: the model's who-has-the-ball clue"><input type="checkbox" id="showSpread"> Team spread</label>
+      <label class="tg" id="modelToggle" hidden title="The pitch as the learned model reads it: no slot numbers, an arrow for each player's velocity (one second of travel), a green ring where a player is speeding up and a red one where he is braking, and a dashed ring where the model guesses the ball is"><input type="checkbox" id="showModel" checked> Model view</label>
       <label class="tg" id="deadToggle" hidden title="The stoppage model: four player-speed signals, each pushing towards dead or in play, added into a probability; above 0.5 the frame is dead"><input type="checkbox" id="showDead"> Dead-ball model</label>
       <div class="keys" id="keys"></div>
     </div>
@@ -148,6 +159,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
       <div class="stat" id="predbox"><div class="l" id="predlabel">Your estimate</div><div class="v"><span id="pred">–</span><span class="agree" id="agree"></span></div></div>
     </div>
     <div class="legend" id="legend"></div>
+    <div class="steps" id="steps" hidden></div>
   </div>
 </div>
 </main>
@@ -160,8 +172,39 @@ const side = s => D.teams[s];
 const name = { H: D.names.H, A: D.names.A };
 const LABEL = l => ({ H: [name.H, '--home'], A: [name.A, '--away'], D: ['Dead ball', '--dead'] }[l] || ['–', '--muted']);
 // Fixed, bright colours for drawing on the video, which is the same in light and dark mode.
-const ON_VIDEO = { H: '#4EA3F5', A: '#FF8A50', ball: '#FFE04A' };
+const ON_VIDEO = { H: '#4EA3F5', A: '#FF8A50', ball: '#FFE04A', guess: '#F06CF0' };
 const HAS_TRUTH = !!D.truth && /[HAD]/.test(D.truth);
+
+// ---- the learned model's output (make_combined.py --deep) ---------------------------------
+// Per half, at the model's 5 fps: H / A / D probabilities, the ball guess, the chance of a change
+// nearby, and the ball guess's distance from the tracked ball. Read at a video frame by linear
+// interpolation, which is also how deep/decode.py raises the probabilities to 25 fps.
+const DX = D.deep && (() => {
+  const bytes = b => Uint8Array.from(atob(b), c => c.charCodeAt(0)), S = D.deep.step;
+  const halves = D.deep.halves.map(([a, b], i) => ({ a, b, p: bytes(D.deep.p[i]), edge: bytes(D.deep.edge[i]),
+    err: bytes(D.deep.err[i]), ball: new Int16Array(bytes(D.deep.ball[i]).buffer) }));
+  const at = v => {
+    const h = halves.find(h => v >= h.a && v <= h.b); if (!h) return null;
+    const n = h.edge.length, t = Math.min((v - h.a) / S, n - 1), i = Math.floor(t);
+    return [h, i, Math.min(i + 1, n - 1), t - i];
+  };
+  const mix = (arr, w, k, [, i, j, f]) => arr[i * w + k] * (1 - f) + arr[j * w + k] * f;
+  // runs of the final label: [first frame, last frame, label, number among possessions or 0]
+  const runs = []; let nposs = 0;
+  for (let v = 0; v < NF; v++) {
+    const l = D.pred[v];
+    if (runs.length && runs[runs.length - 1][2] === l) runs[runs.length - 1][1] = v;
+    else runs.push([v, v, l, 'HA'.includes(l) ? ++nposs : 0]);
+  }
+  const run = v => { let lo = 0, hi = runs.length - 1;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; runs[m][0] <= v ? lo = m : hi = m - 1; }
+    return runs[lo]; };
+  return { ...D.deep, nposs, run,
+    probs: v => { const q = at(v); return q && [0, 1, 2].map(k => mix(q[0].p, 3, k, q) / 250); },
+    ball: v => { const q = at(v); return q && [0, 1].map(k => mix(q[0].ball, 2, k, q)); },
+    edge: v => { const q = at(v); return q && mix(q[0].edge, 1, 0, q) / 250; },
+    err: v => { const q = at(v); if (!q) return null; const e = q[0].err[q[3] < 0.5 ? q[1] : q[2]]; return e === 255 ? null : e / 5; } };
+})();
 
 function mmss(sec, decimals) {
   const q = Math.pow(10, decimals); sec = Math.floor(sec * q + 1e-6) / q;
@@ -218,7 +261,7 @@ $('sub').title = $('sub').textContent = NOVIDEO
 $('lhome').textContent = name.H + ' slots';
 $('laway').textContent = name.A + ' slots';
 if (!D.pred) { $('predbox').style.display = 'none'; $('hudPred').style.display = 'none'; }
-else $('predlabel').textContent = 'Your estimate (' + D.pred_name + ')';
+else $('predlabel').textContent = D.deep ? 'Model\'s answer (' + D.pred_name + ')' : 'Your estimate (' + D.pred_name + ')';
 if (!HAS_TRUTH) $('hudTruth').style.display = 'none';
 $('legend').innerHTML = [
   ['background:var(--home)', name.H + ' slot (number = slot ID, not a player)'],
@@ -311,6 +354,14 @@ function drawVideo(f) {
     }
   }
   if (f.ball) ring(f.ball[0] / 1000, f.ball[1] / 1000, ON_VIDEO.ball, false, 0.6);
+  const g = DX && $('showModel').checked && DX.ball(cur);
+  if (g) {  // where the learned model guesses the ball is; faint in a stoppage, which it never learned from
+    oc.globalAlpha = DX.probs(cur)[2] > 0.5 ? 0.35 : 1;
+    const [u, v, r] = ring(g[0] / 1000, g[1] / 1000, ON_VIDEO.guess, true, 1.3);
+    oc.lineWidth = 4; oc.strokeStyle = 'rgba(0,0,0,.7)'; oc.strokeText('ball guess', u, v - r * 0.45 - 10);
+    oc.fillStyle = ON_VIDEO.guess; oc.fillText('ball guess', u, v - r * 0.45 - 10);
+    oc.globalAlpha = 1;
+  }
 }
 
 // ---- top-down pitch ---------------------------------------------------------------------
@@ -348,15 +399,59 @@ function drawPitch(f, v) {
     cx.beginPath(); cx.arc(u, v, 13, 0, Math.PI * 2);
     if (est) { cx.fillStyle = css('--grass'); cx.fill(); cx.strokeStyle = C[team]; cx.lineWidth = 2.5; cx.stroke(); }
     else { cx.fillStyle = C[team]; cx.fill(); }
-    cx.fillStyle = est ? C[team] : CL[team]; cx.fillText(s, u, v + 0.5);
+    if (!MODEL_VIEW()) { cx.fillStyle = est ? C[team] : CL[team]; cx.fillText(s, u, v + 0.5); }
   }
   cx.textBaseline = 'alphabetic';
+  if (MODEL_VIEW()) drawModel(f, v, C);
   if ($('showSpread').checked) drawSpread(f, C, v);
   if (DEADM && $('showDead').checked) drawDead(v);
   if (f.ball) {
     cx.fillStyle = css('--ball'); cx.strokeStyle = css('--grass'); cx.lineWidth = 2;
     cx.beginPath(); cx.arc(f.ball[0] / 1000 * W, f.ball[1] / 1000 * PH, 6, 0, Math.PI * 2); cx.fill(); cx.stroke();
   }
+}
+
+// The pitch as the learned model reads it (deep/data.py): each player is a position, a velocity
+// and a change of speed, with a team but no identity, and the ball is not there. Velocity is over
+// 0.2 s either side and the change of speed over the same, as the model computes them. The dashed
+// ring is the model's own guess of where the ball is, which it learned as a second task in training.
+const MODEL_VIEW = () => DX && $('showModel').checked;
+function drawModel(f, frame, C) {
+  const LAG = 5, [L, Wm] = D.pitch;
+  const at = d => { const g = frameData(frame + d); return g && g.slots && new Map(g.slots.map(([s, x, y]) => [s, [x / 1000 * L, y / 1000 * Wm]])); };
+  const m2 = at(-2 * LAG), m1 = at(-LAG), p1 = at(LAG), m0 = at(0);
+  const speed = (a, b) => { const s = a && b ? Math.hypot(b[0] - a[0], b[1] - a[1]) * FPS / LAG : 99; return s <= 12 ? s : null; };
+  for (const [s, x, y] of f.slots) {
+    const a = m1 && m1.get(s), b = p1 && p1.get(s), u = x / 1000 * W, v = y / 1000 * PH, team = side(s);
+    if (!a || !b) continue;
+    const vx = (b[0] - a[0]) * FPS / (2 * LAG), vy = (b[1] - a[1]) * FPS / (2 * LAG), sp = Math.hypot(vx, vy);
+    if (sp > 12) continue;                                   // a track jumping, as the model drops it
+    const before = speed(m2 && m2.get(s), a), after = speed(m0 && m0.get(s), b);
+    const change = before !== null && after !== null ? (after - before) * FPS / (2 * LAG) : 0;
+    if (Math.abs(change) > 1.5) {
+      cx.strokeStyle = css(change > 0 ? '--ok' : '--bad'); cx.lineWidth = 3;
+      cx.beginPath(); cx.arc(u, v, 18, 0, Math.PI * 2); cx.stroke();
+    }
+    if (sp < 0.5) continue;
+    const ex = u + vx / L * W, ey = v + vy / Wm * PH, ang = Math.atan2(ey - v, ex - u);   // one second of travel
+    cx.strokeStyle = cx.fillStyle = C[team]; cx.lineWidth = 3;
+    cx.beginPath(); cx.moveTo(u + 13 * Math.cos(ang), v + 13 * Math.sin(ang)); cx.lineTo(ex, ey); cx.stroke();
+    cx.beginPath(); cx.moveTo(ex + 9 * Math.cos(ang), ey + 9 * Math.sin(ang));
+    cx.lineTo(ex + 7 * Math.cos(ang + 2.2), ey + 7 * Math.sin(ang + 2.2));
+    cx.lineTo(ex + 7 * Math.cos(ang - 2.2), ey + 7 * Math.sin(ang - 2.2)); cx.fill();
+  }
+  const g = DX.ball(frame);
+  if (!g) return;
+  const gu = g[0] / 1000 * W, gv = g[1] / 1000 * PH;
+  cx.globalAlpha = DX.probs(frame)[2] > 0.5 ? 0.35 : 1;     // faint in a stoppage: it only learned from live play
+  cx.strokeStyle = css('--ball'); cx.lineWidth = 1.5; cx.setLineDash([4, 4]);
+  if (f.ball) { cx.beginPath(); cx.moveTo(gu, gv); cx.lineTo(f.ball[0] / 1000 * W, f.ball[1] / 1000 * PH); cx.stroke(); }
+  cx.lineWidth = 3; cx.setLineDash([6, 5]);
+  cx.beginPath(); cx.arc(gu, gv, 16, 0, Math.PI * 2); cx.stroke(); cx.setLineDash([]);
+  cx.font = '600 15px -apple-system,sans-serif'; cx.textAlign = 'center';
+  cx.lineWidth = 4; cx.strokeStyle = css('--grass'); cx.strokeText('ball guess', gu, gv - 22);
+  cx.fillStyle = css('--ball'); cx.fillText('ball guess', gu, gv - 22);
+  cx.globalAlpha = 1;
 }
 
 // Team spread, as possession/model.py measures it: each team's mean distance from its own centre.
@@ -522,12 +617,10 @@ scrub(zoom, false);
 // down = away (or in play).
 const X = D.explain;
 const lanes = [];
+const wrong = (X || DX) && HAS_TRUTH && Array.from(D.pred, (p, i) => { const t = D.truth[i];
+  return t === 'X' || p === 'X' ? 'X' : t === p ? 'O' : 'W'; }).join('');
 if (X) {
-  $('explain').hidden = false;
-  if (X.scores) $('scores').innerHTML = X.scores.map(([k, v]) => k + ' <b>' + v + '</b>').join(' · ');
   const dec = b => Int8Array.from(atob(b), c => c.charCodeAt(0));
-  const wrong = Array.from(D.pred, (p, i) => { const t = D.truth ? D.truth[i] : 'X';
-    return t === 'X' || p === 'X' ? 'X' : t === p ? 'O' : 'W'; }).join('');
   const ask = kind => kind === 'team' ? ' · who has it' : ' · in play?';
   if (HAS_TRUTH) lanes.push({ lvl: 0, name: 'Mistakes, whole match', str: wrong, whole: true, note: 'Red where the model disagrees with the truth. Click to jump there.' });
   if (HAS_TRUTH) lanes.push({ lvl: 1, name: 'Mistakes here', str: wrong, note: 'Red where the model disagrees with the truth' });
@@ -537,18 +630,53 @@ if (X) {
     note: 'Every clue added up and weighted: what the smoothing works from' }));
   lanes.push({ lvl: 2, name: 'Guess before smoothing', str: X.raw, note: 'The best label for each frame on its own, before Viterbi smooths it' });
   each.forEach(([name, kind, b]) => lanes.push({ lvl: 2, name: name + ask(kind), kind, v: dec(b), note: 'One clue on its own, before weighting' }));
+}
+// The learned model's steps as lanes, in the order it works (make_combined.py --deep). Result: the
+// scores and the mistakes. Steps: its score for every frame, then each stage of the smoothing, then
+// the possessions. Extras: the mistakes around the playhead and the two things it learned on the side.
+if (DX) {
+  const pct = x => Math.round(x * 100) + '%', dc = DX.decode, secs = n => n + ' s';
+  const reach = DX.reach * DX.step / FPS;
+  $('level').innerHTML = '<button data-l="0">Result</button><button data-l="1">Steps</button><button data-l="2">Extras</button>';
+  $('barkey').innerHTML = '<span>Same two minutes as above · the numbers are the model\'s steps, listed beside the pitch · hover a name for what it is</span>';
+  if (HAS_TRUTH) lanes.push({ lvl: 0, name: 'Mistakes, whole match', str: wrong, whole: true, note: 'Red where the model disagrees with the truth. Click to jump there.' });
+  lanes.push({ lvl: 1, name: '4 · Score per frame', stack: true, tall: true,
+    note: 'The network\'s probability for each frame: home from the bottom, away from the top, dead ball in grey between. The bracket on top is how far the convolutions reach either side of the playhead (' + reach.toFixed(0) + ' s); the recurrent layer reads the whole half.',
+    here: v => { const p = DX.probs(v); return p ? 'home ' + pct(p[0]) + ' · dead ' + pct(p[2]) + ' · away ' + pct(p[1]) : 'not in a half'; } });
+  lanes.push({ lvl: 1, name: '5a · Best guess per frame', str: DX.raw, note: 'The likeliest label for each frame on its own, before any smoothing' });
+  lanes.push({ lvl: 1, name: '5b · After the switching cost', str: DX.switch,
+    note: 'The best path through the scores when every change of label costs ' + dc.cost + ' (in log-probability): flicker is not worth its cost' });
+  lanes.push({ lvl: 1, name: '5c · Short runs absorbed', str: D.pred,
+    note: 'Runs under ' + secs(dc.min_team) + ' (a team) or ' + secs(dc.min_dead) + ' (dead ball) join the longer neighbour. This is the answer.' });
+  lanes.push({ lvl: 1, name: '6 · Possessions', str: D.pred, spells: true, note: 'The answer cut into possessions: one block per unbroken spell, which is what spellF1 scores',
+    here: v => { const r = DX.run(v); return r[3] ? 'no. ' + r[3] + ' of ' + DX.nposs : ''; } });
+  if (HAS_TRUTH) lanes.push({ lvl: 2, name: 'Mistakes here', str: wrong, note: 'Red where the model disagrees with the truth' });
+  lanes.push({ lvl: 2, name: 'Change nearby', unit: DX.edge, col: '--text',
+    note: 'Training only: the model also learned to mark frames within 0.4 s of any change of label. Not used in the answer.',
+    here: v => { const e = DX.edge(v); return e === null ? '' : pct(e); } });
+  lanes.push({ lvl: 2, name: 'Ball guess off by', unit: v => { const e = DX.err(v); return e === null ? null : Math.min(1, e / 30); }, col: '--bad',
+    note: 'Training only: how far the model\'s guess of the ball is from the tracked ball, where the tracking has it (full height = 30 m or more). The ball is never an input.',
+    here: v => { const e = DX.err(v); return e === null ? 'ball not tracked' : e.toFixed(1) + ' m'; } });
+}
+if (lanes.length) {
+  $('explain').hidden = false;
+  const sc = (X || DX).scores;
+  if (sc) $('scores').innerHTML = (DX && !D.match ? 'Public 5 minutes: ' : '') + sc.map(([k, v]) => k + ' <b>' + v + '</b>').join(' · ');
   const box = $('lanes');
   for (const l of lanes) {
     l.label = document.createElement('div'); l.label.className = 'ln'; l.label.title = l.note || l.name;
-    l.cv = document.createElement('canvas'); l.cv.width = 1000; l.cv.height = 16;
+    l.cv = document.createElement('canvas'); l.cv.width = 1000; l.cv.height = l.tall ? 34 : 16;
+    if (l.tall) l.cv.className = 'tall';
+    l.cv.title = l.note || l.name;
     scrub(l.cv, l.whole);
     box.append(l.label, l.cv);
   }
-  let level = 0;
-  try { level = +localStorage.getItem('explainLevel') || 0; } catch (e) {}
+  const KEY = DX ? 'deepLevel' : 'explainLevel';
+  let level = DX ? 1 : 0;
+  try { const saved = localStorage.getItem(KEY); if (saved !== null) level = +saved || 0; } catch (e) {}
   const setLevel = n => {
     level = n;
-    try { localStorage.setItem('explainLevel', n); } catch (e) {}
+    try { localStorage.setItem(KEY, n); } catch (e) {}
     for (const b of $('level').children) b.classList.toggle('on', +b.dataset.l === n);
     for (const l of lanes) l.label.hidden = l.cv.hidden = l.lvl > n;
     $('barkey').hidden = n === 0;
@@ -559,7 +687,7 @@ if (X) {
 }
 const LANE_COL = { H: '--home', A: '--away', D: '--dead', W: '--bad', 1: '--ball' };
 function drawLanes(v) {
-  if (!X) return;
+  if (!lanes.length) return;
   const memo = {}, css = n => memo[n] || (memo[n] = getComputedStyle(document.documentElement).getPropertyValue(n).trim());
   const a = v - ZOOM, b = v + ZOOM;
   for (const l of lanes) {
@@ -571,11 +699,24 @@ function drawLanes(v) {
       for (let x = 0; x < W; x++) {
         const f0 = Math.floor(lo + x / W * (hi - lo)), f1 = Math.max(f0 + 1, Math.floor(lo + (x + 1) / W * (hi - lo)));
         if (f1 <= 0 || f0 >= NF) continue;
-        if (l.str) {
-          let k = l.str[Math.min(NF - 1, Math.max(0, Math.floor((f0 + f1) / 2)))];
+        const mid = Math.min(NF - 1, Math.max(0, Math.floor((f0 + f1) / 2)));
+        if (l.stack) {       // home from the bottom, away from the top, dead ball between
+          const p = DX.probs(mid);
+          if (!p) continue;
+          c.fillStyle = css('--dead'); c.fillRect(x, 0, 1, H);
+          c.fillStyle = css('--away'); c.fillRect(x, 0, 1, p[1] * H);
+          c.fillStyle = css('--home'); c.fillRect(x, H - p[0] * H, 1, p[0] * H);
+        } else if (l.unit) {  // a value from 0 to 1 as a bar from the bottom
+          const u = l.unit(mid);
+          if (u === null || u * H < 0.3) continue;
+          c.fillStyle = css(l.col); c.fillRect(x, H - u * H, 1, u * H);
+        } else if (l.str) {
+          let k = l.str[mid];
           if (l.whole) for (let f = Math.max(0, f0); f < Math.min(NF, f1); f++) if (l.str[f] === 'W') { k = 'W'; break; }
           if (!LANE_COL[k]) continue;
           c.fillStyle = css(LANE_COL[k]); c.fillRect(x, 0, 1, H);
+          // a gap where one spell ends and the next begins
+          if (l.spells && f1 < NF && l.str[Math.max(0, f0)] !== l.str[f1]) { c.fillStyle = css('--card'); c.fillRect(x, 0, 2, H); x++; }
         } else {
           let s = 0, n = 0;
           for (let f = Math.max(0, f0); f < Math.min(NF, f1); f++) { s += l.v[f]; n++; }
@@ -586,17 +727,66 @@ function drawLanes(v) {
         }
       }
       if (l.whole) l.drawn = c.getImageData(0, 0, W, H);
+      if (l.stack) {         // how far the convolutions reach either side of the playhead
+        const r = DX.reach * DX.step / (hi - lo) * W;
+        c.fillStyle = css('--text'); c.fillRect(W / 2 - r, 0, 2 * r, 2);
+        c.fillRect(W / 2 - r, 0, 2, 7); c.fillRect(W / 2 + r - 2, 0, 2, 7);
+      }
     }
     l.ctx.fillStyle = css('--text');
     l.ctx.fillRect(l.whole ? v / (NF - 1) * l.cv.width - 1 : l.cv.width / 2 - 1, 0, 2, l.cv.height);
     let here = '';
-    if (l.v) {
+    if (l.here) here = l.here(v);
+    else if (l.v) {
       const m = l.v[v] / 10, k = l.kind === 'team' ? (m > 0 ? 'home' : 'away') : (m > 0 ? 'dead' : 'in play');
       here = Math.abs(m) < 0.05 ? 'no lean' : k + ' ' + (m > 0 ? '+' : '−') + Math.abs(m).toFixed(1);
     } else if (!l.whole) here = l.name === 'Ball seen' ? (l.str[v] === '1' ? 'yes' : 'no') : (LABEL(l.str[v])[0] === '–' ? (l.str[v] === 'W' ? 'wrong' : l.str[v] === 'O' ? 'right' : '–') : LABEL(l.str[v])[0]);
+    if (l.spells) here = LABEL(l.str[v])[0] + (here ? ' · ' + here : '');
     l.label.innerHTML = l.name + (here ? ' <b>' + here + '</b>' : '');
   }
 }
+
+// ---- the learned model's steps, beside the pitch ------------------------------------------
+// The six steps of deep/ in order, each with what it has at the playhead, in place of the legend.
+const STEPS = DX && (() => {
+  const reach = (DX.reach * DX.step / FPS).toFixed(0), dc = DX.decode;
+  const rows = [
+    ['1 · Players in', 'in', 'What the network is given: for every tracked player a position, a velocity, a speed, a change of speed and a team. The ball is not an input. Model view draws it: arrows are velocity, green and red rings are speeding up and braking.'],
+    ['2 · As a group', null, 'Each frame\'s players are read as an unordered set (attention across the players, then pooled per team), so nothing depends on which slot is which player.',
+      'an unordered set per team: slot numbers are never used'],
+    ['3 · Across time', null, 'Twelve dilated convolutions join frames from 0.2 s apart up to 6.4 s apart, reaching ' + reach + ' s either side in all (the bracket on the score lane), and a two-way recurrent layer reads the whole half, forwards and backwards.',
+      '0.2 s steps, ' + reach + ' s either side, then the whole half both ways'],
+    ['4 · Frame score', 'score', 'The network\'s probability that this frame is home, away or dead ball, averaged over four views of the pitch (as it is, mirrored, teams swapped, both).'],
+    ['5 · Smoothing', 'smooth', 'From the best guess for the frame alone, to the best path when a change costs ' + dc.cost + ', to the answer once runs under ' + dc.min_team + ' s are absorbed.'],
+    ['6 · Possession', 'spell', 'The unbroken spell the playhead is in: who, how far into it, how long it lasts.'],
+    ['Training only', 'ball', 'In training the network also had to say where the ball is (a target, never an input) and whether a change of label is near, on tracking with 0.2 m of jitter, up to 15% of players hidden, the pitch mirrored and the teams swapped. The dashed ring is that ball guess.'
+      + (DX.ball_err === null ? '' : ' Over this match it is typically ' + DX.ball_err + ' m from the tracked ball in live play.')]];
+  const box = $('steps'), el = {};
+  for (const [n, id, note, fixed] of rows) {
+    const row = document.createElement('div'), a = document.createElement('span'), b = document.createElement('span');
+    row.className = 'row'; a.className = 'n'; b.className = 't'; a.textContent = n; row.title = note;
+    if (fixed) b.textContent = fixed; else el[id] = b;
+    row.append(a, b); box.append(row);
+  }
+  box.hidden = false; $('legend').hidden = true; $('modelToggle').hidden = false;
+  const word = l => { const [t, c] = LABEL(l); return l === 'X' ? '–' : '<b style="color:var(' + c + ')">' + t + '</b>'; };
+  return (v, f) => {
+    let nh = 0, na = 0;
+    if (f) for (const [s] of f.slots) side(s) === 'H' ? nh++ : na++;
+    el.in.innerHTML = f ? '<b>' + (nh + na) + '</b> tracked (' + nh + ' + ' + na + '), no ball: position, velocity, change of speed, team' : 'loading…';
+    const p = DX.probs(v), pc = x => Math.round(x * 100) + '%';
+    el.score.innerHTML = !p ? 'not in a half: nothing scored' :
+      '<span class="pbar"><i style="width:' + p[0] * 100 + '%;background:var(--home)"></i><i style="width:' + p[2] * 100 + '%;background:var(--dead)"></i><i style="width:' + p[1] * 100 + '%;background:var(--away)"></i></span>'
+      + name.H + ' <b>' + pc(p[0]) + '</b> · dead <b>' + pc(p[2]) + '</b> · ' + name.A + ' <b>' + pc(p[1]) + '</b>';
+    el.smooth.innerHTML = D.pred[v] === 'X' ? '–' : 'best guess ' + word(DX.raw[v]) + ' → switching cost ' + word(DX.switch[v]) + ' → answer ' + word(D.pred[v]);
+    const r = DX.run(v);
+    el.spell.innerHTML = r[2] === 'X' ? '–' : word(r[2]) + ', ' + ((v - r[0]) / FPS).toFixed(1) + ' s into ' + ((r[1] - r[0] + 1) / FPS).toFixed(1) + ' s'
+      + (r[3] ? ' · possession ' + r[3] + ' of ' + DX.nposs : '');
+    const e = DX.err(v);
+    el.ball.innerHTML = !p ? '–' : 'ball guess ' + (e === null ? 'shown; the tracking has no ball here' : '<b>' + e.toFixed(1) + ' m</b> from the tracked ball')
+      + (p[2] > 0.5 ? ' (stoppage: it only learned live play)' : '');
+  };
+})();
 
 // ---- read-outs --------------------------------------------------------------------------
 function hudRow(id, label, none) {
@@ -608,6 +798,7 @@ function readouts(v, f) {
   let nh = 0, na = 0;
   if (f) for (const [s] of f.slots) side(s) === 'H' ? nh++ : na++;
   $('nhome').textContent = f ? nh : '–'; $('naway').textContent = f ? na : '–';
+  if (STEPS) STEPS(v, f);
   $('vtime').textContent = videoTime(v);
   $('lvtime').textContent = (NOVIDEO ? 'Match time' : 'Video time') + ' · frame ' + v;
   $('gtime').textContent = gameClock(v);
@@ -668,6 +859,8 @@ $('speed').onchange = () => video.playbackRate = parseFloat($('speed').value);
 $('showTrack').onchange = $('showIds').onchange = () => render(cur);
 try { $('showSpread').checked = localStorage.getItem('showSpread') === '1'; } catch (e) {}
 if (DEADM) $('deadToggle').hidden = false;
+try { if (localStorage.getItem('showModel') === '0') $('showModel').checked = false; } catch (e) {}
+$('showModel').onchange = () => { try { localStorage.setItem('showModel', $('showModel').checked ? '1' : '0'); } catch (e) {} render(cur); };
 try { $('showDead').checked = localStorage.getItem('showDead') === '1'; } catch (e) {}
 $('showDead').onchange = () => { try { localStorage.setItem('showDead', $('showDead').checked ? '1' : '0'); } catch (e) {} render(cur); };
 $('showSpread').onchange = () => { try { localStorage.setItem('showSpread', $('showSpread').checked ? '1' : '0'); } catch (e) {} render(cur); };
