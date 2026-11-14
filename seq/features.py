@@ -35,7 +35,6 @@ REACH_SPEED = 6.0       # m/s a player closes on the ball at, for time-to-ball
 REACH_LEAD = 0.5        # s a player keeps their current velocity first
 CLIP_SECONDS = 30.0
 WINDOWS = (1.0, 3.0, 8.0)   # seconds, each taken before and after the frame
-LONG_WINDOWS = (20.0,)      # also taken for the signals in LONG: the slow picture of a possession
 
 
 def _nan(func, *args, **kw):
@@ -210,8 +209,6 @@ def base_signals(players, ball, team, pitch, fps):
     s["b_touch_last"] = np.nan_to_num(_carry(np.where(is_touch, side, np.nan), True))
     s["b_touch_next"] = np.nan_to_num(_carry(np.where(is_touch, side, np.nan), False))
     s["b_touch_since"] = _since(is_touch, fps, True)
-    s["b_touch_balance"] = side                  # windowed: home touches minus away touches
-    s["d_ball_vx"] = touches["vx"] * sign        # which goal the ball is travelling towards
     s["b_touch_until"] = _since(is_touch, fps, False)
 
     # -- the ball on its own --------------------------------------------------------------------
@@ -233,10 +230,6 @@ NO_WINDOWS = {"b_gap_last", "b_gap_next", "b_touch_last", "b_touch_next", "b_tou
               "b_touch_until", "k_seen_since", "k_seen_until", "k_edge_last", "k_edge_next",
               "p_tracked", "p_tracked_diff"}
 
-LONG = ("p_width_diff", "p_depth_diff", "p_spread_diff", "p_centre_gap", "p_centre_x", "p_drift",
-        "p_line_diff", "b_gap", "b_goalside_diff", "b_touch_balance", "d_ball_vx")
-
-
 def signal_columns(signals, fps, rows):
     """(columns [len(rows), d], names): each signal at these rows of its half, with its windows."""
     cols, names = [], []
@@ -245,7 +238,7 @@ def signal_columns(signals, fps, rows):
         names.append(name)
         if name in NO_WINDOWS:
             continue
-        for seconds in WINDOWS + (LONG_WINDOWS if name in LONG else ()):
+        for seconds in WINDOWS:
             w = int(round(seconds * fps))
             for before in (True, False):
                 cols.append(_window_mean(x, w, before)[rows])
