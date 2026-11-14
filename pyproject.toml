@@ -24,6 +24,11 @@ seq = [
     "scikit-learn==1.6.1",
     "threadpoolctl==3.7.0",
 ]
+# deep/ (the learned players-only model); mirrors requirements-deep.txt. Not in default-groups,
+# and not in uv.lock until `uv lock` is next run: `uv sync --group deep`, or pip install -r.
+deep = [
+    "torch==2.15.0",
+]
 
 [tool.uv]
 package = false

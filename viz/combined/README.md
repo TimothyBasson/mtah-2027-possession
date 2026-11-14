@@ -19,6 +19,7 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
 | `--start` | where the page opens: `7:27.4` (default, kickoff), `1:20:05`, `453.4` or `f11185`. Added to the URL as `#f<frame>`, which you can edit or share |
 | `--gt` | ground truth CSV, default the public 5 minutes; `none` to hide it |
 | `--explain` | show `possession/`'s labels and how it got them, in three levels you switch under the strips. **Simple** (default): the scores and a whole-match strip of mistakes to click through. **Why**: around the playhead, the mistakes, whether the model saw the ball (on outside matches after knocking it out to 59%, as `external/score.py --seen 0.59` does), and all clues together. **Every clue**: each clue's own lean and the guess before smoothing. Leans are log-odds, up for home or dead, down for away or in play. Pages are written as `data/viz/match[_<name>]_explain.html`. Needs numpy |
+| `--deep` | show the learned model in `deep/` at work, stage by stage (below). Pages are written as `data/viz/match[_<name>]_deep.html`. Reads `data/cache/deep/v2/viz/<match>.npz`, which `python deep/explain.py [--match all]` writes where torch is installed; the page itself then only needs numpy |
 | `--out` | output path, default `data/viz/match[_<pred>].html` |
 | `--rebuild` | rewrite the tracking chunks (see below) |
 | `--open` | open the page in your default browser when done |
@@ -36,7 +37,7 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
   player, and a dashed circle at the average distance from the centre, leaving out the keeper
   (ringed), with both numbers on the pitch. The team your estimate says has the ball is shaded. It
   is the who-has-the-ball clue in `possession/model.py` for this one frame; the model averages it
-  over 1 s either side.
+  over 2 s either side.
 - **Dead-ball model** (checkbox by the play controls, remembered, `--explain` pages): a panel on
   the pitch with the stoppage model in `possession/model.py` for this frame. Each of its three
   player-speed and acceleration signals shows its value and how far it pushes towards dead (right, grey) or in
@@ -56,6 +57,39 @@ Keyboard: space plays or pauses, ← / → step one frame, shift+← / → step 
 The page fits the window without scrolling: the video takes whatever height the strips, controls
 and panel leave. Narrow or very short windows (under 900 px wide or 480 px tall) switch to a
 scrolling column instead, so the video never shrinks to a thumbnail.
+
+## The learned model at work (`--deep`)
+
+```bash
+python deep/explain.py --match all                               # once, needs torch: about a minute a match
+uv run python viz/combined/make_combined.py --match all --deep --open
+```
+
+The page's estimate is the learned model's answer, and the model's six steps are on the page in
+the order it works, each with what it has at the playhead:
+
+- **Beside the pitch**, in place of the legend, the steps as a list: (1) how many players it is
+  given, (2) that they are read as a group, (3) how far it looks across time, (4) its score for
+  this frame as home, dead ball or away, (5) the label at each stage of the smoothing, (6) the
+  possession the playhead is in, how far into it and how long it is. A last line has the ball
+  guess, which the model only learned as a second task in training. Hover a step for what it does.
+- **Model view** (checkbox by the play controls, remembered, on by default): the pitch as the model
+  reads it. No slot numbers; an arrow on each player for his velocity (one second of travel); a
+  green ring where he is speeding up and a red one where he is braking; and a dashed ring, labelled
+  *ball guess*, where the model thinks the ball is, with a line to the tracked ball where the
+  tracking has one. On BAR-ATH the ball guess is drawn on the video too, in pink. It is faint
+  during a stoppage, because the model only learned the ball from live play.
+- **Under the strips**, three levels. **Result**: the scores and a whole-match strip of mistakes to
+  click through. **Steps** (default): *4 · Score per frame*, the three probabilities stacked (home
+  from the bottom, away from the top, dead ball between), with a bracket for how far the
+  convolutions reach either side of the playhead; *5a* the best guess for each frame alone, *5b*
+  after the switching cost, *5c* after runs under a second are absorbed, which is the answer; and
+  *6 · Possessions*, the answer cut into the spells that spellF1 scores. **Extras**: the mistakes
+  around the playhead, the model's chance of a change of label nearby, and how far the ball guess
+  is from the tracked ball.
+
+BAR-ATH is labelled by the network trained on all 30 outside matches. An outside match is labelled
+by the network that never saw its provider, so what you watch there is held out.
 
 ## How it is stored
 

@@ -1,15 +1,17 @@
-"""Possession per frame from the players alone, never the ball. The simplest version:
+"""Possession per frame from the players alone, never the ball.
 
-- who: the more spread-out team has the ball (attackers stretch, defenders compact)
+- who: the team with the ball stretches the pitch and both teams move toward the goal it attacks.
+  A small logistic model reads four shape and movement signals (TEAM_SIGNALS), each over the 2 s
+  after and the 2 s before the frame.
 - dead: a stoppage changes how the whole team moves, not just how fast. A small logistic model
-  reads three player-movement signals (DEAD_SIGNALS) and calls the frame dead above even odds. Its weights
-  are fitted on the outside matches; external/heldout.py refits them without the provider it scores.
+  reads five players-only signals (DEAD_SIGNALS).
+- labels: the best H/A/D path on those two probabilities (viterbi).
 
-Both are smoothed over a window centred on the frame, which is allowed because the task is
-offline. Windows stop at the edges of each half.
+Both models' weights are fitted on the outside matches; external/heldout.py refits them without
+the provider it scores. Windows look ahead as well as back, which is allowed because the task is
+offline, and stop at the edges of each half.
 
-This is the starting point to build on one idea at a time, each one kept only if it raises the
-score on the outside matches (external/score.py).
+Built one idea at a time, each kept only if it raises the held-out score (possession/README.md).
 """
 
 import itertools
@@ -23,12 +25,16 @@ from load import FPS, PITCH  # noqa: F401  (external/score.py repoints PITCH and
 
 HALVES = None  # [(first, last)] graded frames per half, set by the caller
 
-TEAM_WINDOW = 1.0  # s either side for the spread lean
+TEAM = "logit"     # "logit": the fitted model below; "spread": the more spread-out team has it
+TEAM_WINDOW = 2.0  # s after and s before the frame for each team signal (either side for "spread")
 DEAD_WINDOW = 0.5  # s either side for the walking test
 WALKING = 1.2      # m/s median player speed below which play is dead
 KEEPERS = 0        # 1 counts each team's deepest player (the keeper) in its spread
-MIN_TEAM = 1.0     # s: shorter H/A runs are absorbed into a neighbour
-MIN_DEAD = 3.0     # s: shorter D runs are absorbed into a neighbour
+DECODE = "viterbi"  # "viterbi": the best H/A/D path below; "absorb": cut each model at even odds, absorb short runs
+SWITCH_TEAM = 5.0  # what a change of team must outweigh, in log-odds summed over frames
+SWITCH_DEAD = 20.0  # the same for the ball going dead or coming alive
+MIN_TEAM = 2.0     # s, "absorb" only: shorter H/A runs are absorbed into a neighbour
+MIN_DEAD = 3.0     # s, "absorb" only: shorter D runs are absorbed into a neighbour
 DEAD = "logit"     # "logit": the fitted model below; "median": median speed under WALKING
 MAX_SPEED = 12.0   # m/s; faster is a tracked identity jumping, not a player (as hmm/clues.py)
 MAX_ACCEL = 8.0    # m/s^2; a sharper change of speed is tracking noise, not a player
@@ -39,12 +45,29 @@ DEAD_SIGNALS = (
     "median speed, +-0.5 s",          # the typical player walks at a stoppage
     "speed change, 2 s after - before",  # everyone slows into a stoppage, speeds up out of it
     "80th percentile |acceleration|, +-3 s",  # in play players keep changing pace; at a stoppage they don't
+    "players on or over a boundary line, +-1 s",  # someone is taking a throw-in or a corner, or fetching the ball
+    "both teams' width, summed, +-1 s",  # in play both sides spread to use and cover the pitch; at a stoppage they close up
 )
+ON_LINE = 0.5      # m inside a touchline or goal line still counts as on it
 # Logistic weights on the standardised signals: intercept, then one per signal, with each signal's
 # mean and sd. Fitted on all 30 outside matches, each provider weighted equally:
 #   uv run python possession/model.py --fit
-DEAD_FIT = {"w": [-1.381, -1.462, -0.481, -1.578],
-            "mu": [1.744, -0.002, 0.932], "sd": [0.995, 0.614, 0.374]}
+DEAD_FIT = {"w": [-1.312, -1.146, -0.482, -1.662, 0.775, -0.783],
+            "mu": [1.744, -0.002, 0.932, 0.301, 23.72], "sd": [0.995, 0.614, 0.374, 0.61, 5.025]}
+
+# Players-only who-has-it signals (features.team_signals), home minus away. Each is read twice:
+# over the TEAM_WINDOW after the frame and over the one before, because shape answers a turnover
+# late: what the teams do next says more about who has the ball now than what they just did.
+TEAM_SIGNALS = (
+    "width, home - away, m",           # the side with the ball stretches the pitch
+    "length, home - away, m",          # and is strung out along it
+    "push toward away's goal, m/s",    # both teams move the way the ball is going
+    "mean speed, home - away, m/s",    # the side without the ball chases
+)
+# As DEAD_FIT: intercept, then after and before for each signal in turn.
+TEAM_FIT = {"w": [0.174, 2.175, -0.49, 0.242, 0.016, 1.197, -0.567, -0.282, -0.197],
+            "mu": [-0.028, -0.028, 0.149, 0.154, 0.014, 0.017, 0.004, 0.004],
+            "sd": [4.046, 4.106, 2.647, 2.679, 1.792, 1.765, 0.468, 0.465]}
 
 
 def graded_mask(n):
@@ -82,8 +105,8 @@ def window_mean(x, seconds, ahead):
     return out
 
 
-def dead_signals(players):
-    """(frames, 3) array of DEAD_SIGNALS, NaN where nobody is tracked."""
+def dead_signals(players, team):
+    """(frames, 5) array of DEAD_SIGNALS, NaN where nobody is tracked."""
     s = players[:, :, 2].astype(float)
     s[s > MAX_SPEED] = np.nan
     acc = np.full(s.shape, np.nan)  # each player's change of speed, m/s^2, within each half
@@ -94,31 +117,35 @@ def dead_signals(players):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # nobody tracked
         q50, a80 = np.nanmedian(s, 1), np.nanpercentile(acc, 80, 1)
+        x, y = players[:, :, 0].astype(float), players[:, :, 1].astype(float)
+        edge = np.minimum(np.minimum(x, PITCH[0] - x), np.minimum(y, PITCH[1] - y))  # m inside the nearest line
+        on_line = np.where(np.isfinite(x).any(1), (edge < ON_LINE).sum(1), np.nan)
+        width = np.nanstd(y[:, team == 0], 1) + np.nanstd(y[:, team == 1], 1)
     return np.column_stack([smooth(q50, 0.5), window_mean(q50, 2, True) - window_mean(q50, 2, False),
-                            smooth(a80, 3)])
+                            smooth(a80, 3), smooth(on_line, 1), smooth(width, 1)])
 
 
-def dead_prob(X, fit=DEAD_FIT):
-    """P(dead) per frame. A missing signal (a window with nobody tracked, or past the edge of a
-    half) adds nothing either way, rather than forcing dead; with none at all it is the intercept."""
-    z = fit["w"][0] + np.nan_to_num((X - fit["mu"]) / fit["sd"]) @ np.array(fit["w"][1:])
-    return 1 / (1 + np.exp(-z))
+def team_signals(F):
+    """(frames, 8): each of TEAM_SIGNALS over the TEAM_WINDOW after the frame, then before it."""
+    raw = features.team_signals(F["players"], F["team"], HALVES)
+    return np.column_stack([window_mean(x, TEAM_WINDOW, ahead) for x in raw.T for ahead in (True, False)])
 
 
-def fit_dead(matches, l2=1e-3):
-    """DEAD_FIT from [(players, labels, halves)], each match's frames weighted so every provider
-    counts equally: [(provider, players, labels, halves)]. Newton's method on the log-likelihood."""
-    global HALVES
-    Xs, ys, ws = [], [], []
-    per = {}
-    for prov, *_ in matches:
-        per[prov] = per.get(prov, 0) + 1
-    for prov, players, labels, halves in matches:
-        HALVES = halves
-        g = np.isin(labels, ["H", "A", "D"])
-        X = dead_signals(players)[g]
+def logit(X, fit):
+    """Log-odds per frame from a fitted logistic. A missing signal (a window with nobody tracked,
+    or past the edge of a half) adds nothing either way; with none at all it is the intercept."""
+    return fit["w"][0] + np.nan_to_num((X - fit["mu"]) / fit["sd"]) @ np.array(fit["w"][1:])
+
+
+def fit_logistic(Xs, ys, provs, l2=1e-3):
+    """Logistic weights on standardised signals from per-match (X, y), each match's frames
+    weighted so every provider counts equally. Newton's method on the log-likelihood."""
+    per = {p: provs.count(p) for p in provs}
+    ws = []
+    for i, (X, y, prov) in enumerate(zip(Xs, ys, provs)):
         ok = np.isfinite(X).all(1)
-        Xs.append(X[ok]); ys.append((labels[g] == "D")[ok]); ws.append(np.full(ok.sum(), 1 / (per[prov] * ok.sum())))
+        Xs[i], ys[i] = X[ok], y[ok]
+        ws.append(np.full(ok.sum(), 1 / (per[prov] * ok.sum())))
     X, y, wt = np.vstack(Xs), np.concatenate(ys).astype(float), np.concatenate(ws)
     wt /= wt.sum()
     mu, sd = X.T @ wt, np.sqrt(((X - X.T @ wt) ** 2).T @ wt)
@@ -133,9 +160,20 @@ def fit_dead(matches, l2=1e-3):
 
 
 def fit(matches):
-    """Every fitted setting, from [(provider, players, labels, halves)]: what external/heldout.py
-    refits without the provider it scores."""
-    return {"dead_fit": fit_dead(matches)}
+    """Every fitted setting, from [(provider, players, labels, halves, team, pitch)]: what
+    external/heldout.py refits without the provider it scores. Dead against live on every labelled
+    frame; home against away on the frames either team has the ball."""
+    global HALVES, PITCH
+    dead, who, provs = ([], []), ([], []), []
+    for prov, players, labels, halves, team, pitch in matches:
+        HALVES, PITCH = halves, tuple(pitch)
+        features.PITCH = PITCH
+        provs.append(prov)
+        g = np.isin(labels, ["H", "A", "D"])
+        dead[0].append(dead_signals(players, team)[g]); dead[1].append(labels[g] == "D")
+        g = np.isin(labels, ["H", "A"])
+        who[0].append(team_signals(dict(players=players, team=team))[g]); who[1].append(labels[g] == "H")
+    return {"dead_fit": fit_logistic(*dead, provs), "team_fit": fit_logistic(*who, provs)}
 
 
 def absorb_short(labels, min_len):
@@ -156,20 +194,51 @@ def absorb_short(labels, min_len):
     return np.array([k for k, n in runs for _ in range(n)], dtype=labels.dtype)
 
 
+def viterbi(p_home, p_dead, switch_team, switch_dead):
+    """The H/A/D path (as 0/1/2) with the highest total log-probability, where each frame scores
+    log P(its label) from the two models and each change of label costs switch_team (H <-> A) or
+    switch_dead (to or from D). One frame's evidence can't flip the label; a run of it can, and
+    the change lands where the evidence turns rather than a fixed delay after."""
+    with np.errstate(divide="ignore"):
+        E = np.column_stack([np.log(1 - p_dead) + np.log(p_home), np.log(1 - p_dead) + np.log(1 - p_home),
+                             np.log(p_dead)]).clip(-50)
+    cost = np.array([[0, switch_team, switch_dead], [switch_team, 0, switch_dead], [switch_dead, switch_dead, 0]])
+    back = np.zeros((len(E), 3), np.int8)
+    score = E[0]
+    for i in range(1, len(E)):
+        via = score[:, None] - cost
+        back[i] = via.argmax(0)
+        score = via.max(0) + E[i]
+    path = np.empty(len(E), np.int8)
+    path[-1] = score.argmax()
+    for i in range(len(E) - 1, 0, -1):
+        path[i - 1] = back[i, path[i]]
+    return path
+
+
 def predict(F, params=None):
     return explain(F, params)["pred"]
 
 
 def explain(F, params=None):
-    """predict, with its working for the viewer: how much more spread out home is than away, in
-    metres (positive leans home), and the median player speed in m/s."""
+    """predict, with its working for the viewer and for combining with another model: the labels,
+    the frame-by-frame guess before clean-up, P(home | alive) and P(dead) per frame, and each
+    model's signals and log-odds."""
     p = dict(keepers=KEEPERS, team_window=TEAM_WINDOW, dead_window=DEAD_WINDOW, walking=WALKING,
-             min_team=MIN_TEAM, min_dead=MIN_DEAD, dead=DEAD, dead_fit=DEAD_FIT) | (params or {})
-    sh, sa = features.spread(F["players"], F["team"], HALVES, keepers=bool(p["keepers"]))
-    lean = smooth(sh - sa, p["team_window"])
+             min_team=MIN_TEAM, min_dead=MIN_DEAD, dead=DEAD, dead_fit=DEAD_FIT,
+             team=TEAM, team_fit=TEAM_FIT, decode=DECODE, switch_team=SWITCH_TEAM,
+             switch_dead=SWITCH_DEAD) | (params or {})
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # nobody tracked
         pace = smooth(np.nanmedian(F["players"][:, :, 2], 1), p["dead_window"])
+    if p["team"] == "logit":
+        team_x = team_signals(F)
+        lean = np.where(np.isfinite(team_x).any(1), logit(team_x, p["team_fit"]), np.nan)  # log-odds of home
+        home_p = 1 / (1 + np.exp(-np.nan_to_num(lean)))
+    else:
+        sh, sa = features.spread(F["players"], F["team"], HALVES, keepers=bool(p["keepers"]))
+        lean = smooth(sh - sa, p["team_window"])  # metres
+        home_p = np.where(np.nan_to_num(lean) >= 0, 1.0, 0.0)
     pred = np.where(lean >= 0, "H", "A")
     # No lean where a side is untracked for the whole window: possession stays with the team that
     # had it (CHALLENGE.md), so carry the last lean in this half, or the first one at its start.
@@ -179,37 +248,45 @@ def explain(F, params=None):
             last = ok[np.clip(np.searchsorted(ok, np.arange(b + 1 - a), "right") - 1, 0, None)]
             pred[a:b + 1] = pred[a:b + 1][last]
     if p["dead"] == "logit":
-        dead_x = dead_signals(F["players"])
-        dead_p = dead_prob(dead_x, p["dead_fit"])
-        alive = dead_p < 0.5
+        dead_x = dead_signals(F["players"], F["team"])
+        dead_lo = logit(dead_x, p["dead_fit"])
+        dead_p = 1 / (1 + np.exp(-dead_lo))
     else:
-        alive = pace >= p["walking"]  # NaN pace counts as dead
+        dead_p = np.where(pace >= p["walking"], 0.0, 1.0)  # NaN pace counts as dead
     if "dead" in F:  # graded frames before a kickoff
-        alive[F["dead"]] = False
+        dead_p = np.where(F["dead"], 1.0, dead_p)
+    alive = dead_p < 0.5
     raw = np.where(alive, pred, "D")
-    # Blips: absorb short runs in alive/dead and in the team lean separately, so a dead blip can't
-    # move a turnover: the team changes where the lean does.
     for a, b in HALVES:
-        alive[a:b + 1] = absorb_short(alive[a:b + 1], {True: p["min_team"] * FPS, False: p["min_dead"] * FPS})
-        pred[a:b + 1] = absorb_short(pred[a:b + 1], {"H": p["min_team"] * FPS, "A": p["min_team"] * FPS})
-    pred[~alive] = "D"
+        if p["decode"] == "viterbi":
+            pred[a:b + 1] = np.array(list("HAD"))[viterbi(home_p[a:b + 1], dead_p[a:b + 1], p["switch_team"], p["switch_dead"])]
+        else:
+            # Blips: absorb short runs in alive/dead and in the team lean separately, so a dead
+            # blip can't move a turnover: the team changes where the lean does.
+            alive[a:b + 1] = absorb_short(alive[a:b + 1], {True: p["min_team"] * FPS, False: p["min_dead"] * FPS})
+            pred[a:b + 1] = absorb_short(pred[a:b + 1], {"H": p["min_team"] * FPS, "A": p["min_team"] * FPS})
+            pred[a:b + 1][~alive[a:b + 1]] = "D"
     pred[~graded_mask(len(pred))] = raw[~graded_mask(len(pred))] = "X"
-    return dict(pred=pred, raw=raw,
-                dead=dict(signals=DEAD_SIGNALS, fit=p["dead_fit"], x=dead_x) if p["dead"] == "logit" else None,
-                lanes=[("spread, home minus away, metres", "team", lean),
-                                            ("median player speed minus walking, m/s", "dead", pace - p["walking"])]
-                + ([("stoppage model, log-odds of dead", "dead", np.log(dead_p / (1 - dead_p)))] if p["dead"] == "logit" else []))
+    logit_team, logit_dead = p["team"] == "logit", p["dead"] == "logit"
+    return dict(pred=pred, raw=raw, p_home=home_p, p_dead=dead_p,
+                dead=dict(signals=DEAD_SIGNALS, fit=p["dead_fit"], x=dead_x) if logit_dead else None,
+                team=dict(signals=[f"{s}, {when}" for s in TEAM_SIGNALS for when in ("next 2 s", "last 2 s")],
+                          fit=p["team_fit"], x=team_x) if logit_team else None,
+                lanes=[("team model, log-odds of home" if logit_team else "spread, home minus away, metres", "team", lean),
+                       ("median player speed minus walking, m/s", "dead", pace - p["walking"])]
+                + ([("stoppage model, log-odds of dead", "dead", dead_lo)] if logit_dead else []))
 
 
-if __name__ == "__main__" and sys.argv[1:] == ["--fit"]:  # refit DEAD_FIT on every outside match
+if __name__ == "__main__" and sys.argv[1:] == ["--fit"]:  # refit DEAD_FIT and TEAM_FIT on every outside match
     import glob
     import os
     paths = sorted(glob.glob(os.path.join(os.path.dirname(__file__), "..", "data", "external", "*.npz")))
     ms = []
     for path in paths:
         d = np.load(path)
-        ms.append((os.path.basename(path).split("_")[0], d["players"], d["labels"], [tuple(h) for h in d["halves"]]))
-    print("DEAD_FIT =", fit(ms)["dead_fit"])
+        ms.append((os.path.basename(path).split("_")[0], d["players"], d["labels"], [tuple(h) for h in d["halves"]], d["team"], d["pitch"]))
+    for name, value in fit(ms).items():
+        print(name.upper(), "=", value)
 elif __name__ == "__main__":  # uv run python possession/model.py: check the run merging
     m = {"H": 3, "A": 3, "D": 2}
     f = lambda s: "".join(absorb_short(np.array(list(s)), m))  # noqa: E731
@@ -221,4 +298,12 @@ elif __name__ == "__main__":  # uv run python possession/model.py: check the run
     assert f("HA") == "AA" or f("HA") == "HH"     # everything short still ends as one run
     alive = absorb_short(np.array([1, 1, 1, 0, 1, 1, 0, 0, 0], bool), {True: 3, False: 2})
     assert alive.tolist() == [True] * 6 + [False] * 3  # two-valued, as the model calls it
+    v = lambda ph, pd, ct=3, cd=3: "".join("HAD"[k] for k in viterbi(np.array(ph), np.array(pd), ct, cd))  # noqa: E731
+    lo = [0.1] * 9
+    assert v([.9, .9, .9, .9, .1, .9, .9, .9, .9], lo) == "HHHHHHHHH"   # one away frame can't pay for two switches
+    assert v([.9, .9, .9, .1, .1, .1, .1, .1, .1], lo) == "HHHAAAAAA"   # a turnover lands where the evidence turns
+    assert v([.9] * 9, [.1, .1, .1, .9, .1, .1, .1, .1, .1]) == "HHHHHHHHH"   # a dead blip inside a possession
+    assert v([.9] * 4 + [.1] * 5, [.1, .1, .99, .99, .99, .99, .99, .1, .1]) == "HHDDDDDAA"  # a stoppage splits it
+    assert v([.5] * 9, [.1] * 4 + [1.0] * 5) == "HHHHDDDDD" or v([.5] * 9, [.1] * 4 + [1.0] * 5) == "AAAADDDDD"  # forced dead
+    assert v([.9, .9, .5, .5, .5, .5, .9, .9, .9], lo) == "HHHHHHHHH"   # no team evidence: stays with who had it
     print("ok")

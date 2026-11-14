@@ -149,7 +149,7 @@ def main():
     paths = sorted(glob.glob(os.path.join(os.path.dirname(HERE), "data", "external", "*.npz")))
     sets = sorted({provider(p) for p in paths})
     with ProcessPoolExecutor() as ex:
-        fits = dict(zip(sets, ex.map(fit_fold, [(model_dir, [p for p in paths if provider(p) != s]) for s in sets])))
+        fits = dict(zip(sets, ex.map(fit_fold, [(model_dir, [p for p in paths if provider(p) != s], False) for s in sets])))
         res = list(ex.map(analyse, [(p, model_dir, params | fits[provider(p)]) for p in paths]))
     by = {s: [r for p, r in zip(paths, res) if provider(p) == s] for s in sets}
 

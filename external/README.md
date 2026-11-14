@@ -63,26 +63,30 @@ All three cut possessions shorter than the public window (17 in 5 minutes, mean 
 7.6 s, D 20%), so a model fitted to them may lean towards short possessions. These are descriptive
 only: the labels are not adjusted towards the public window.
 
-## Baseline: `possession/` with the stoppage model (players only: more spread-out team, keepers left out, has it; a logistic model on two player-speed signals and one acceleration signal for dead; short runs absorbed)
+## Baseline: `possession/` (players only: a fitted team model on shape and movement, a fitted stoppage model, Viterbi over H/A/D)
 
-Held out by provider (`external/heldout.py`: the stoppage weights refitted on the other two
+Held out by provider (`external/heldout.py`: both models' weights refitted on the other two
 providers each time), the number to compare changes on:
 
 | held out | spellF1 | macroF1 | alive/dead F1 | team acc |
 |---|---|---|---|---|
-| IDSSE (7) | 0.243 | 0.757 | 0.914 | 0.770 |
-| Metrica (3) | 0.317 | 0.730 | 0.877 | 0.803 |
-| SkillCorner (20) | 0.301 | 0.721 | 0.906 | 0.798 |
-| mean of the three | 0.287 | 0.736 | 0.899 | 0.790 |
+| IDSSE (7) | 0.424 | 0.837 | 0.932 | 0.864 |
+| Metrica (3) | 0.506 | 0.800 | 0.889 | 0.899 |
+| SkillCorner (20) | 0.375 | 0.770 | 0.922 | 0.829 |
+| mean of the three | 0.435 | 0.802 | 0.914 | 0.864 |
 
-Before the acceleration signal: held-out mean 0.266 / 0.712 / 0.879 / 0.790. With all five signals (before dropping the two redundant ones): 0.282 / 0.735 / 0.898 / 0.790. With the old 2 s lean window and 2 s minimum possession: 0.282 / 0.736 / 0.898 / 0.790.
+The paragraphs below describe the model before 2026-11-12 (spread lean, three stoppage signals,
+short runs absorbed: held-out mean 0.282 / 0.736 / 0.898 / 0.790). The experiment log is in
+`possession/README.md`.
+
+Before the acceleration signal: held-out mean 0.266 / 0.712 / 0.879 / 0.790. With all five signals (before dropping the two redundant ones): 0.282 / 0.735 / 0.898 / 0.790.
 
 `errors.py` breaks the held-out mistakes down by kind (wrong team near a turnover or mid-possession,
 stoppages called or missed) and says why each unmatched true possession failed; results in
 `possession/README.md`.
 
-`score.py` in-sample (weights fitted on all 30): IDSSE 0.251, Metrica 0.320, SkillCorner 0.301,
-all 30 0.291 spellF1. Before the stoppage model (median speed under 1.2 m/s): held-out mean 0.250,
+`score.py` in-sample (weights fitted on all 30): IDSSE 0.244, Metrica 0.311, SkillCorner 0.300,
+all 30 0.288 spellF1. Before the stoppage model (median speed under 1.2 m/s): held-out mean 0.250,
 all 30 0.260. The experiment log is in `possession/README.md`.
 
 `score.py` prints each set's mean as well as the overall one; compare like with like. SkillCorner

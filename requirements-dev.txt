@@ -3,3 +3,6 @@
 #   pip install -r requirements.txt -r requirements-dev.txt
 #   python -m pytest tests
 pytest
+# Retraining the control classifier only (external/train_control.py). The decoder does not need
+# it: it reads the exported trees in hmm/models/. Pinned, since another version grows other trees.
+scikit-learn==1.6.1

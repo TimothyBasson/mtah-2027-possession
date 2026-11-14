@@ -45,6 +45,40 @@ def drop_ball(ball, seen, fps, seed=0, labels=None):
     return out
 
 
+def drop_players(players, halves, fps, name):
+    """Players knocked out the way BAR-ATH's tracker loses them, measured on its tracking alone
+    (no labels): outside bursts 0.85 of the 22 are missing on average, in runs of a few seconds;
+    18 times an hour most of them go at once (14 or fewer tracked, 8.6 on average, for 10 s on
+    average), which is 5% of frames. So each player is lost in runs of mean 5 s, 3.9% of the time,
+    and every 200 s on average each player is lost with probability 0.6 for a run of mean 10 s.
+    That takes out about 7% of player-frames, as on BAR-ATH. Speeds are recomputed from the
+    positions left, so a player has none for 5 frames after he reappears. Seeded by match name.
+    (The shape is possession/research/exp9.py's on claude/project-thread-uvbxom; the rates are
+    BAR-ATH's.)"""
+    import zlib
+    from build import speed
+    rng = np.random.default_rng(zlib.crc32(name.encode()))
+    n, K, _ = players.shape
+    out = players.copy()
+    off, share = 5 * fps, 0.039
+    for k in range(K):
+        i, on = 0, True
+        while i < n:
+            run = 1 + int(rng.exponential(off * (1 - share) / share if on else off))
+            if not on:
+                out[i:i + run, k] = np.nan
+            i, on = i + run, not on
+    i = int(rng.exponential(200 * fps))
+    while i < n:
+        run = 1 + int(rng.exponential(10 * fps))
+        out[i:i + run, rng.random(K) < 0.6] = np.nan
+        i += run + int(rng.exponential(200 * fps))
+    out[..., 2] = speed(out[..., :2], fps)
+    for a, _ in halves:  # no speed across the join between halves
+        out[a:a + 5, :, 2] = np.nan
+    return out
+
+
 def frames(players, ball, team, features):
     """The dict features.compute() builds for our match, from any match's arrays."""
     dh, da = features.nearest_by_team(players, ball, team)
