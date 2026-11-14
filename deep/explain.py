@@ -47,7 +47,7 @@ def heads(net, X, M):
                     Xv = D.swap_teams(Xv, np.zeros(len(X), np.int64), np.zeros((len(X), 2), np.float32))[0]
                 if m:
                     Xv = D.mirror(Xv, np.zeros((len(X), 2), np.float32))[0]
-                cls, b, e = net(torch.from_numpy(Xv)[None], torch.from_numpy(M)[None])
+                cls, b, e = net(torch.from_numpy(Xv)[None], torch.from_numpy(M)[None])[:3]
                 q, b = torch.softmax(cls[0], -1).numpy(), b[0].numpy().copy()
                 if m:
                     b[:, 1] *= -1

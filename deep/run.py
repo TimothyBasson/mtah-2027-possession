@@ -17,7 +17,7 @@ ROOT = os.path.dirname(HERE)
 sys.path[:0] = [HERE, os.path.join(ROOT, "possession"), os.path.join(ROOT, "external"), ROOT]
 import data as D  # noqa: E402
 import decode  # noqa: E402
-from net import PossessionNet  # noqa: E402
+from net import load_net  # noqa: E402
 from train import predict_half  # noqa: E402
 
 DECODE = dict(cost=4, min_team=1, min_dead=1)  # what two of the three held-out folds picked
@@ -26,8 +26,7 @@ DECODE = dict(cost=4, min_team=1, min_dead=1)  # what two of the three held-out 
 def probabilities(tag):
     import load
     players, ball, team, halves = load.load()
-    net = PossessionNet(nfeat=D.NFEAT)
-    net.load_state_dict(torch.load(os.path.join(HERE, "models", tag + ".pt")))  # train.py --fold none
+    net = load_net(os.path.join(HERE, "models", tag + ".pt"), D.NFEAT)  # train.py --fold none
     probs = []
     for a, b in halves:
         X, M, bxy, fr = D.half_tensors(players, ball, team, a, b, load.PITCH, load.FPS)

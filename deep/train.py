@@ -60,6 +60,51 @@ def spell_weights(y, power, ref=25, lo=0.5, hi=4.0):
     return w
 
 
+def ball_targets(X, M, ball, y):
+    """What the real ball teaches the v4 net, from a training batch after augmentation. Returns
+    targets and the frames each is defined on. Only ever called on training matches.
+
+    ptr    (B, T, K) soft "who is on the ball": softmax of minus distance / 2 m over tracked players
+    bvel   (B, T, 2) ball velocity / 10 m/s, central difference over 0.4 s
+    touch  (B, T)    1 where the ball's velocity changes by more than 5 m/s between consecutive
+                     0.2 s steps (a strike, a stop or a deflection), widened one step either side
+    free   (B, T)    log(1 + metres from the ball to the nearest tracked player)
+    """
+    scale = torch.tensor([52.5, 34.0])
+    b = ball * scale
+    seen = torch.isfinite(b[..., 0]) & (y >= 0) & (y < 2)
+    d = ((X[..., :2] * scale - torch.nan_to_num(b).unsqueeze(2)) ** 2).sum(-1).sqrt()
+    d = d.masked_fill(~M, 1e4)
+    ok_p = seen & M.any(-1)
+    ptr = torch.softmax(-d / 2.0, -1)
+    free = torch.log1p(d.min(-1)[0].clamp(max=60))
+    seg = (b[:, 1:] - b[:, :-1]) / 0.2                      # (B, T-1, 2), nan where either end unseen
+    bvel = torch.full_like(b, float("nan"))
+    bvel[:, 1:-1] = (seg[:, 1:] + seg[:, :-1]) / 2
+    ok_v = seen & torch.isfinite(bvel[..., 0]) & (bvel.norm(dim=-1) < 40)
+    jump = torch.full(b.shape[:2], float("nan"))
+    jump[:, 1:-1] = (seg[:, 1:] - seg[:, :-1]).norm(dim=-1)
+    ok_t = seen & torch.isfinite(jump) & ok_v
+    hit = (torch.nan_to_num(jump) > 5.0) & ok_t
+    hit = F.max_pool1d(hit.float().unsqueeze(1), 3, 1, 1).squeeze(1)
+    return dict(ptr=(ptr, ok_p), bvel=(torch.nan_to_num(bvel) / 10, ok_v), touch=(hit, ok_t), free=(free, ok_p))
+
+
+def ball_losses(extra, tg):
+    """The four ball-taught losses; zero where a batch has no frame with the ball seen."""
+    out = {}
+    z = extra["ptr"].sum() * 0
+    t, ok = tg["ptr"]
+    out["ptr"] = -(t[ok] * F.log_softmax(extra["ptr"][ok], -1)).sum(-1).mean() if ok.any() else z
+    t, ok = tg["bvel"]
+    out["bvel"] = F.smooth_l1_loss(extra["bvel"][ok], t[ok], beta=0.1) if ok.any() else z
+    t, ok = tg["touch"]
+    out["touch"] = F.binary_cross_entropy_with_logits(extra["touch"][ok], t[ok]) if ok.any() else z
+    t, ok = tg["free"]
+    out["free"] = F.smooth_l1_loss(extra["free"][ok], t[ok], beta=0.1) if ok.any() else z
+    return out
+
+
 def batch(train, rng, B, T, a):
     provs = sorted({m["provider"] for m in train})
     Xs, Ms, ys, bs, es, ws = [], [], [], [], [], []
@@ -139,6 +184,11 @@ def main():
     ap.add_argument("--spell", type=float, default=0.0, help="power of the short-possession loss weight")
     ap.add_argument("--knock", type=float, default=0.0,
                     help="share of training windows drawn with players lost in runs, as on BAR-ATH")
+    ap.add_argument("--ptr", type=float, default=0.0,
+                    help="v4: point at the player on the ball mid-network; weight of that loss")
+    ap.add_argument("--bvel", type=float, default=0.3, help="v4: ball velocity loss")
+    ap.add_argument("--touch", type=float, default=0.3, help="v4: ball struck/stopped loss")
+    ap.add_argument("--free", type=float, default=0.2, help="v4: ball-to-nearest-player distance loss")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
@@ -154,7 +204,7 @@ def main():
             assert m["name"] == k["name"]
             m["knocked"] = k["halves"]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
-    net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru)
+    net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru, ptr=a.ptr > 0)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
     out = os.path.join(D.ROOT, "data", "cache", "deep", a.tag, a.fold)
@@ -172,20 +222,25 @@ def main():
     for step in range(start + 1, a.steps + 1):
         net.train()
         X, M, y, ball, e, w = batch(train, rng, a.batch, a.window, a)
-        logits, bhat, ehat = net(X, M)
+        logits, bhat, ehat, extra = net(X, M)
         g = y >= 0
         loss_c = (F.cross_entropy(logits[g], y[g], reduction="none") * w[g]).sum() / w[g].sum()
         bg = g & (y < 2) & torch.isfinite(ball[..., 0])
         loss_b = F.smooth_l1_loss(bhat[bg], ball[bg], beta=0.1) if bg.any() else logits.sum() * 0
         loss_e = F.binary_cross_entropy_with_logits(ehat[g], e[g])
         loss = loss_c + a.ball * loss_b + a.edge * loss_e
+        loss_x = 0.0
+        if a.ptr > 0:
+            bl = ball_losses(extra, ball_targets(X, M, ball, y))
+            loss = loss + a.ptr * bl["ptr"] + a.bvel * bl["bvel"] + a.touch * bl["touch"] + a.free * bl["free"]
+            loss_x = bl["ptr"].item()
         opt.zero_grad(); loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
         opt.step(); sched.step()
-        run.append((loss_c.item(), loss_b.item(), loss_e.item()))
+        run.append((loss_c.item(), loss_b.item(), loss_e.item(), loss_x))
         if step % 100 == 0 or step == a.steps:
             r = np.mean(run, 0); run = []
-            msg = f"{step:5d} ce {r[0]:.3f} ball {r[1]:.3f} edge {r[2]:.3f}  {time.time() - t0:.0f}s"
+            msg = f"{step:5d} ce {r[0]:.3f} ball {r[1]:.3f} edge {r[2]:.3f} ptr {r[3]:.3f}  {time.time() - t0:.0f}s"
             if step % 500 == 0 or step == a.steps:
                 msg += f"  val acc {frame_scores(net, val):.3f}  test acc {frame_scores(net, test[:3]):.3f}"
             print(msg, flush=True)

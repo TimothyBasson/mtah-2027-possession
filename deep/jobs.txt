@@ -1,0 +1,10 @@
+# v4: the ball-taught pointer stage, two seeds; v2s1: the current model again on another seed
+v4 idsse --steps 1500 --ptr 0.5
+v4 metrica --steps 1500 --ptr 0.5
+v4 skillcorner --steps 1500 --ptr 0.5
+v2s1 idsse --steps 1500 --seed 1
+v2s1 metrica --steps 1500 --seed 1
+v2s1 skillcorner --steps 1500 --seed 1
+v4s1 idsse --steps 1500 --ptr 0.5 --seed 1
+v4s1 metrica --steps 1500 --ptr 0.5 --seed 1
+v4s1 skillcorner --steps 1500 --ptr 0.5 --seed 1
