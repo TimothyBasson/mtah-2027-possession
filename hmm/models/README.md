@@ -1,18 +1,22 @@
 # Committed model
 
-`control_state.npz` is the v7 control classifier (hmm/control.py), exported to plain arrays by
-hmm/trees.py. It holds only tree arrays, the 94 feature names and the class prior. It loads with
+`control_state.npz` is the v8 control classifier (hmm/control.py), exported to plain arrays by
+hmm/trees.py. It holds only tree arrays, the 275 feature names and the class prior. It loads with
 `allow_pickle=False` and nothing in it comes from BAR-ATH.
 
 | | |
 |---|---|
-| sha256 | `4223a1c46e92ad2402ce4ff52289c2d36a6e82cb1c3e52ddd2d330ac600bc8f9` |
+| sha256 | `c87a5443cc13ba67bf2ed1851de04095e1539a15ae0d85cdea5c44e11dee9cf5` |
 | Trained by | `python external/control_features.py && python external/train_control.py` |
-| Library | scikit-learn 1.6.1 (requirements-dev.txt), HistGradientBoostingClassifier, `random_state=0` |
+| Library | scikit-learn 1.6.1 (requirements-dev.txt), HistGradientBoostingClassifier, 300 rounds, no early stopping, `random_state=0` |
 | Target | per-frame H / A / D, folded towards the control rule (external/control.py, 2 s, 2 touches) |
-| Training data | the 30 external matches in data/external (external/README.md), every 5th labelled frame, both team orientations |
+| Training data | the 30 external matches in data/external (external/README.md), every 5th frame where labelled, both team orientations, the three providers weighted equally |
 
-Retrained from the same features with the pinned scikit-learn, the file comes out byte-identical.
+The v7 model (94 columns, sha256 `4223a1c4...`) is at commit fe457a3; the v8 features leave out
+columns it needs, so this decoder cannot run it.
+
+v7's file came out byte-identical when retrained with the pinned scikit-learn. That has not been
+repeated for v8: it was trained once, on 4 threads.
 `train_control.py` prints the sha256 so that you can check.
 
 Training data sources (external/README.md has how to fetch them):

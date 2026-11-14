@@ -87,7 +87,7 @@ def run(name):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--weights", default="0.05,0.1,0.15,0.2")
+    ap.add_argument("--weights", default="0.1,0.15,0.2,0.3")
     ap.add_argument("--sets", default=",".join(sh.SETS))
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--loso", default="control_loso.npz",

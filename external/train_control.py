@@ -1,14 +1,13 @@
 """Train the "who controls the ball" classifier (hmm/control.py) on the external matches.
 
-    python external/control_features.py             # features, once (~3 min)
+    python external/control_features.py             # features, once (~10 min)
     python external/train_control.py                # -> hmm/models/control_state.npz
     python external/train_control.py --loso         # held-out posteriors for score_control.py
 
 Needs scikit-learn, pinned in requirements-dev.txt. The decoder does not: the fitted trees are
 exported to plain arrays (hmm/trees.py), the model is committed as hmm/models/control_state.npz
-(it is derived from the open external data only), and the decoder evaluates it in numpy. Retrained
-with scikit-learn 1.6.1 from the same features it comes out byte-identical; the sha256 printed at
-the end is the check.
+(it is derived from the open external data only), and the decoder evaluates it in numpy. The
+sha256 printed at the end is the one hmm/models/README.md records.
 
 The target is the label per frame, H / A / D, folded towards the challenge's controlled-possession
 rule (external/control.py): a spell under 2 s with fewer than 2 own touches goes back to the team
@@ -17,15 +16,19 @@ the raw labels (held-out mean spellF1 gain +0.037, against +0.036) and worse aga
 ones (+0.042, against +0.052), and the folded labels are the ones that follow the challenge's rule.
 Every match counts in both team orientations (the
 features computed with the teams swapped, the label swapped to match), so the classifier learns no
-home or away bias. Rows are every STEP-th graded frame: neighbouring frames repeat each other.
+home or away bias. Rows are every graded frame the features are cached on (every 5th,
+hmm.control.STRIDE): neighbouring frames repeat each other. The three providers count equally
+(rows()), so SkillCorner's 20 matches and IDSSE's 7 do not outvote Metrica's 3.
 
 --loso trains three models, each with one set (IDSSE, Metrica, SkillCorner) left out, and saves
 the left-out set's posteriors, so external/score_control.py can score the decoder on matches the
 classifier never saw. Without it, one model is trained on all 30 matches for BAR-ATH.
 
-The model is a HistGradientBoostingClassifier with early stopping on a 10% validation split.
-Settings were not swept: held-out log loss with every 5th frame is 0.28 / 0.53 / 1.10 (IDSSE /
-Metrica / SkillCorner left out).
+The model is a HistGradientBoostingClassifier: 300 rounds, no early stopping, at least 200 rows a
+leaf and an L2 penalty of 1 (seq/model.py's settings, not swept here). Held-out log loss is
+0.24 / 0.55 / 0.77 (IDSSE / Metrica / SkillCorner left out); v7's classifier, which read the ball
+on its own, stopped early on a random 10% of rows and counted every row once, had
+0.27 / 0.54 / 1.08.
 """
 
 import argparse
@@ -136,8 +139,8 @@ def main():
             prior = class_shares(y, w)
             loss = []
             for n in (n for n in matches if n.startswith(k)):
-                a, b, labels, _, frames, n_frames = matches[n]
-                p = posteriors(model, a, b).astype(np.float32)
+                x, xs, labels, _, frames, n_frames = matches[n]
+                p = posteriors(model, x, xs).astype(np.float32)
                 g = labels >= 0
                 loss.append(-np.mean(np.log(np.clip(p[g, labels[g]], 1e-6, 1))))
                 out[n] = hold(p, n_frames)
