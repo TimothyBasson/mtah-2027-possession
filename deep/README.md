@@ -70,25 +70,35 @@ On the public window the bootstrap intervals overlap (`run_evaluation.py --boots
 `deep` v2 spellF1 0.826 (0.63 to 0.95), `hmm` v7 0.606 (0.44 to 0.76). Nothing in `deep/` was
 chosen on that window.
 
-**Against `hmm` v7 held out, on the same 30 matches.** `hmm` v7 from `external/score_control.py
---weights 0.15` (its classifier trained without the provider scored, its tables counted on the
-others, its hand-set weights as shipped, ball at 59% seen); `deep` v2 from `folded.py` with the
-shipped decode in every fold. "Folded" scores against the outside labels folded towards the
-challenge's controlled-possession rule (`external/control.py`), which `hmm` v7's classifier is
-trained on and `deep` is not.
+**Against `hmm` v7 held out, on the same 30 matches, paired by match** (`folded.py`). `hmm` v7
+is `external/score_control.py`'s run at the shipped weight (its classifier trained without the
+provider scored, its tables counted on the others, its hand-set weights as shipped, ball at 59%
+seen); `deep` v2 is the fold net that never saw the provider, with the shipped decode in every
+fold. "Folded" scores against the outside labels folded towards the challenge's
+controlled-possession rule (`external/control.py`), which `hmm` v7's classifier is trained on and
+`deep` is not.
 
-| spellF1 | IDSSE | Metrica | SkillCorner | mean |
+| spellF1 | `deep` v2 | `hmm` v7 | `deep` − `hmm`, paired (standard error) | matches `deep` is ahead on |
 |---|---|---|---|---|
-| `deep` v2, labels as they are | 0.549 | 0.635 | 0.398 | 0.527 |
-| `hmm` v7, labels as they are | 0.523 | 0.769 | 0.376 | 0.556 |
-| `deep` v2, folded labels | 0.675 | 0.720 | 0.451 | 0.615 |
-| `hmm` v7, folded labels | 0.609 | 0.798 | 0.428 | 0.612 |
+| labels as they are: IDSSE (7) | 0.549 | 0.523 | +0.027 (0.010) | 6 of 7 |
+| Metrica (3) | 0.635 | 0.769 | −0.134 (0.014) | 0 of 3 |
+| SkillCorner (20) | 0.398 | 0.376 | +0.022 (0.006) | 17 of 20 |
+| all 30 matches, each counting once | 0.457 | 0.450 | +0.008 (0.010) | 23 of 30 |
+| mean of the three providers | 0.527 | 0.556 | −0.028 | |
+| folded labels: IDSSE (7) | 0.675 | 0.609 | +0.066 (0.012) | 7 of 7 |
+| Metrica (3) | 0.720 | 0.798 | −0.077 (0.004) | 0 of 3 |
+| SkillCorner (20) | 0.451 | 0.428 | +0.023 (0.009) | 16 of 20 |
+| all 30 matches, each counting once | 0.530 | 0.507 | +0.023 (0.010) | 23 of 30 |
+| mean of the three providers | 0.615 | 0.611 | +0.004 | |
 
-Neither is ahead everywhere. `deep` leads on IDSSE and SkillCorner (27 of the 30 matches) under
-both labellings, without the ball; `hmm` leads on Metrica's three matches by 0.08 to 0.13, which
-is all of its lead in the mean on the labels as they are. On the folded labels, the nearer of the
-two to what BAR-ATH is scored on, the means are level (0.615 and 0.612). The two err in different
-places, which is the case for combining them rather than choosing.
+Which is ahead depends on how the matches are weighed, so neither average settles it. Match by
+match `deep` is ahead on 23 of 30 under either labelling, and on every provider but one. That
+one is Metrica, where `hmm` is ahead on all three matches by 0.08 to 0.13, and Metrica is the
+set most like BAR-ATH: the same tracking system and the ball seen about 60% of the time. Three
+matches are few, and their labels are rebuilt from on-ball events, which a ball-reading model
+follows more closely than a players-only one can; but for the question of which file to ship
+they are the most relevant three. Against that, on BAR-ATH's own public window `deep` is ahead
+(above), on 17 possessions. The evidence does not pick a winner.
 
 **Is the decode merging possessions?** (`compare.py --sweep`) The review noted 281 possessions
 against about 350 if the whole match ran at the public window's density. Every setting, the same
