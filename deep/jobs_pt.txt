@@ -1,0 +1,6 @@
+# pt: the ball-taught model (bt) started from the net pretrained on movement alone (pretrain.py --tag pre)
+pt idsse --steps 1500 --ptr 0.5 --init pre
+pt metrica --steps 1500 --ptr 0.5 --init pre
+pt skillcorner --steps 1500 --ptr 0.5 --init pre
+# ptc: the same with the hidden-player loss kept on while training
+ptc idsse --steps 1500 --ptr 0.5 --init pre --ssl 0.3

@@ -191,6 +191,12 @@ def main():
     ap.add_argument("--bvel", type=float, default=0.3, help="v4: ball velocity loss")
     ap.add_argument("--touch", type=float, default=0.3, help="v4: ball struck/stopped loss")
     ap.add_argument("--free", type=float, default=0.2, help="v4: ball-to-nearest-player distance loss")
+    ap.add_argument("--init", default="",
+                    help="start from a net pretrained on movement alone (deep/pretrain.py): the tag, or a path to net.pt")
+    ap.add_argument("--ssl", type=float, default=0.0,
+                    help="weight of the hidden-player loss of deep/pretrain.py kept on while training, on unlabelled "
+                         "windows of every provider including the held-out one and BAR-ATH (no label, no ball)")
+    ap.add_argument("--ssl-batch", type=int, default=8)
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
@@ -207,7 +213,23 @@ def main():
             m["knocked"] = k["halves"]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
     net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage)
-    opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
+    params, head = list(net.parameters()), None
+    if a.init:
+        p = a.init if os.path.isfile(a.init) else os.path.join(D.ROOT, "data", "cache", "deep", a.init, "pretrain", "net.pt")
+        sd, own = torch.load(p, map_location="cpu"), net.state_dict()
+        heads = ("cls.", "ball.", "edge.")  # the pretrained net never trained these
+        got = {k: v for k, v in sd.items() if k in own and v.shape == own[k].shape and not k.startswith(heads)}
+        net.load_state_dict(got, strict=False)
+        print(f"init from {p}: {len(got)} of {len(own)} tensors", flush=True)
+    if a.ssl > 0:
+        import pretrain as P
+        tracks = P.load_tracks()
+        head = torch.nn.Linear(a.d, 2 * P.GX * P.GY)
+        hp = os.path.join(os.path.dirname(p), "head.pt") if a.init else ""
+        if os.path.exists(hp):
+            head.load_state_dict(torch.load(hp, map_location="cpu"))
+        params += list(head.parameters())
+    opt = torch.optim.AdamW(params, a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
     out = os.path.join(D.ROOT, "data", "cache", "deep", a.tag, a.fold)
     os.makedirs(out, exist_ok=True)
@@ -215,7 +237,10 @@ def main():
     ckpt = os.path.join(out, "ckpt.pt")
     if os.path.exists(ckpt):  # the cloud container can restart mid-run: carry on from the last save
         c = torch.load(ckpt, weights_only=False)
-        net.load_state_dict(c["net"]); opt.load_state_dict(c["opt"]); sched.load_state_dict(c["sched"])
+        net.load_state_dict(c["net"])
+        if head is not None:
+            head.load_state_dict(c["head"])
+        opt.load_state_dict(c["opt"]); sched.load_state_dict(c["sched"])
         rng.bit_generator.state = c["rng"]
         if "torch_rng" in c:  # dropout draws from torch's generator: without it a resumed run diverges
             torch.set_rng_state(c["torch_rng"])
@@ -236,17 +261,24 @@ def main():
             bl = ball_losses(extra, ball_targets(X, M, ball, y))
             loss = loss + a.ptr * bl["ptr"] + a.bvel * bl["bvel"] + a.touch * bl["touch"] + a.free * bl["free"]
             loss_x = bl["ptr"].item()
+        loss_s = 0.0
+        if head is not None:
+            Xu, Mu, pos, team, hid = P.batch(tracks, rng, a.ssl_batch, a.window)
+            hu = net.features(Xu, Mu)
+            ls = P.hidden_loss(head(hu[0] if net.ptr else hu), pos, team, hid)
+            loss = loss + a.ssl * ls
+            loss_s = ls.item()
         opt.zero_grad(); loss.backward()
-        torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(params, 1.0)
         opt.step(); sched.step()
-        run.append((loss_c.item(), loss_b.item(), loss_e.item(), loss_x))
+        run.append((loss_c.item(), loss_b.item(), loss_e.item(), loss_x, loss_s))
         if step % 100 == 0 or step == a.steps:
             r = np.mean(run, 0); run = []
-            msg = f"{step:5d} ce {r[0]:.3f} ball {r[1]:.3f} edge {r[2]:.3f} ptr {r[3]:.3f}  {time.time() - t0:.0f}s"
+            msg = f"{step:5d} ce {r[0]:.3f} ball {r[1]:.3f} edge {r[2]:.3f} ptr {r[3]:.3f} hidden {r[4]:.3f}  {time.time() - t0:.0f}s"
             if step % 500 == 0 or step == a.steps:
                 msg += f"  val acc {frame_scores(net, val):.3f}  test acc {frame_scores(net, test[:3]):.3f}"
             print(msg, flush=True)
-            torch.save(dict(net=net.state_dict(), opt=opt.state_dict(), sched=sched.state_dict(),
+            torch.save(dict(net=net.state_dict(), head=head.state_dict() if head is not None else None, opt=opt.state_dict(), sched=sched.state_dict(),
                             rng=rng.bit_generator.state, torch_rng=torch.get_rng_state(), step=step), ckpt + ".tmp")
             os.replace(ckpt + ".tmp", ckpt)
     torch.save(net.state_dict(), os.path.join(out, "net.pt"))

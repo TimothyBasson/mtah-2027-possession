@@ -90,7 +90,8 @@ class PossessionNet(nn.Module):
             self.touch = nn.Linear(d, 1)   # "the ball is struck or stopped within 0.2 s"
             self.free = nn.Linear(d, 1)    # how far the ball is from the nearest player (log metres)
 
-    def forward(self, x, mask):
+    def features(self, x, mask):
+        """(B, T, d) per-frame features after the last stage, and the ball-taught stage's outputs."""
         B, T, K, Fd = x.shape
         h, e = self.enc(x.reshape(B * T, K, Fd), mask.reshape(B * T, K))
         h = h.reshape(B, T, -1)
@@ -108,7 +109,13 @@ class PossessionNet(nn.Module):
             extra["ptr"] = s
         if self.gru is not None:
             h = h + self.gru(h)[0]
+        return (h, extra) if self.ptr else h
+
+    def forward(self, x, mask):
+        extra = {}
+        h = self.features(x, mask)
         if self.ptr:
+            h, extra = h
             extra.update(bvel=self.bvel(h), touch=self.touch(h).squeeze(-1), free=self.free(h).squeeze(-1))
         return self.cls(h), self.ball(h), self.edge(h).squeeze(-1), extra
 

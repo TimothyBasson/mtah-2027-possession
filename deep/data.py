@@ -40,8 +40,11 @@ def home_defends_left(players, team, a, b):
         return bool(np.nanmean(x[:, team == 0]) < np.nanmean(x[:, team == 1]))
 
 
-def half_tensors(players, ball, team, a, b, pitch, fps=25):
-    """One half -> (X (T, SLOTS, NFEAT), mask (T, SLOTS), ball (T, 2), frames (T,)), canonical frame."""
+def half_tensors(players, ball, team, a, b, pitch, fps=25, tracks=False):
+    """One half -> (X (T, SLOTS, NFEAT), mask (T, SLOTS), ball (T, 2), frames (T,)), canonical frame.
+    With tracks, every track keeps its own column (T, K, NFEAT) instead of the tracked players
+    being packed to the front: deep/pretrain.py hides one track for seconds at a time and needs
+    to know which column it is."""
     L, W = pitch
     xy = players[a:b + 1, :, :2].astype(np.float32).copy()
     sp = players[a:b + 1, :, 2].astype(np.float32).copy()
@@ -69,6 +72,8 @@ def half_tensors(players, ball, team, a, b, pitch, fps=25):
                      np.broadcast_to(np.where(team == 0, 1.0, -1.0), (T, K)),
                      hasv.astype(np.float32)], -1).astype(np.float32)
     feat[~ok] = 0
+    if tracks:
+        return feat, ok, bxy / np.array([52.5, 34.0], np.float32), a + idx
     order = np.argsort(~ok, axis=1, kind="stable")[:, :SLOTS]  # tracked players first
     X = np.take_along_axis(feat, order[:, :, None], 1)
     M = np.take_along_axis(ok, order, 1)
