@@ -94,7 +94,7 @@ def main():
                     help="posteriors file in the cache, from train_control.py --loso [--out]")
     ap.add_argument("--min-possession", type=float, default=dec.MIN_POSSESSION_SECONDS,
                     help="seconds under which the decoder folds a possession between two spells "
-                         "of the other team (0 for none)")
+                         "of the other team (default {}: none)".format(dec.MIN_POSSESSION_SECONDS))
     ap.add_argument("--fold-seconds", type=float, default=CONTROL_SECONDS,
                     help="spell length under which the folded view folds (external/control.py)")
     a = ap.parse_args()

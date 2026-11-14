@@ -50,17 +50,17 @@ folded ones, and costs SkillCorner). The trees run in numpy (hmm/trees.py); only
 scikit-learn.
 
 v8 changes what the control classifier reads and how it is trained (hmm/control.py
-joint_features, external/train_control.py), and folds brief possessions after decoding:
+joint_features, external/train_control.py):
 - It no longer reads what the ball does on its own (seen or not, its speed). Two of the three
   outside providers freeze or hide the ball in a stoppage, and the classifier had learned that.
 - It also reads the team-shape features of seq/features.py: all 22 players, not only the ones by
   the ball, so it has something to go on where the ball is missing or noisy.
 - The three providers count equally in training, the trees are regularised, and nothing is
   stopped early.
-- A decoded possession under MIN_POSSESSION_SECONDS with the other team on both sides goes back
-  to that team (fold_brief_possessions).
+- Optional and off by default: a decoded possession under --min-possession seconds with the
+  other team on both sides goes back to that team (fold_brief_possessions).
 With the classifier trained with each set left out, spellF1 against the control-folded labels goes
-from v7's 0.609 / 0.798 / 0.428 to 0.650 / 0.819 / 0.486 (external/README.md).
+from v7's 0.609 / 0.798 / 0.428 to 0.644 / 0.816 / 0.480 (external/README.md).
 
 The gap clue counts a goalkeeper slot near a goal for the team defending that goal, not the team
 the metadata gives the slot: the tracker sometimes carries one keeper under the other keeper's
@@ -276,21 +276,25 @@ CACHE_DIR = os.path.join(DATA_DIR, "cache")
 # top of every v6 clue. Replacing the gap-distance and flight clues with it instead was worse on
 # all three sets (v7): its windowed features blur the moment of a switch, which those two clues
 # mark. Chosen on the external matches with the classifier trained with each set left out
-# (external/score_control.py). spellF1 against the control-folded labels, brief possessions folded
-# at MIN_POSSESSION_SECONDS, at 0.15 / 0.2 / 0.3 (v6: 0.510, 0.764, 0.403):
-#   IDSSE        0.641  0.650  0.659
-#   Metrica      0.823  0.819  0.822
-#   SkillCorner  0.485  0.486  0.483
-# The means are 0.650, 0.652 and 0.655, which is flat: an earlier build of the same features had
-# Metrica at 0.809 at 0.3. 0.2 is the middle. Every weight gains on every set.
+# (external/score_control.py). spellF1 against the control-folded labels,
+# at 0.15 / 0.2 / 0.3 (v6: 0.510, 0.764, 0.403):
+#   IDSSE        0.636  0.644  0.653
+#   Metrica      0.819  0.816  0.817
+#   SkillCorner  0.480  0.480  0.476
+# The means are 0.645, 0.647 and 0.649, which is flat, and SkillCorner, the set tracked most like
+# BAR-ATH, loses at 0.3. 0.2 is the middle. Every weight gains on every set.
 CONTROL_MODEL = os.path.join(ROOT, "hmm", "models", "control_state.npz")
 CONTROL_WEIGHT = 0.2
+CONTROL_FEATURES = "joint1"
 
-# v8: a possession briefer than this with the other team on both sides is given back to that team
-# after decoding (fold_brief_possessions). The challenge changes possession only on controlled
-# possession, for which DATA_POINTS.md gives "about 2 s" as one test; a decoded spell this short
-# between two spells of the other team is a touch, not control. Numbers in external/README.md.
-MIN_POSSESSION_SECONDS = 1.5
+# A possession briefer than this with the other team on both sides is given back to that team
+# after decoding (fold_brief_possessions). Off by default. On the external matches 1.5 s gains
+# 0.005 against the control-folded labels, but those labels are themselves folded by a rule of the
+# same shape (external/control.py), so part of that is the yardstick's own construction; against
+# the labels as they are it costs Metrica 0.014. And the challenge's ground truth does keep such
+# possessions: the public window has two of 17, 0.76 s and 1.32 s long, each between two spells
+# of the other team. That was looked at once, to check the assumption, not to choose the number.
+MIN_POSSESSION_SECONDS = 0.0
 
 
 def gap_table():
@@ -486,8 +490,11 @@ def load_control(game=GAME, data_dir=None, model_path=CONTROL_MODEL):
     keepers = keeper_slots(meta_path)
     halves = graded_segments(game)
     stat = os.stat(model_path)
-    key = "{}_{}_{}".format(cache_key(raw_path, team_of_track, n_frames, pitch, FPS, keepers,
-                                      halves), stat.st_size, int(stat.st_mtime))
+    # CONTROL_FEATURES names the feature code: change it with joint_features, or a model file
+    # that stays the same would be read against scores cached from the old columns
+    key = "{}_{}_{}_{}".format(cache_key(raw_path, team_of_track, n_frames, pitch, FPS, keepers,
+                                         halves), stat.st_size, int(stat.st_mtime),
+                               CONTROL_FEATURES)
     cache_path = os.path.join(CACHE_DIR, "control_{}.npy".format(key))
     if os.path.exists(cache_path):
         return np.load(cache_path)
