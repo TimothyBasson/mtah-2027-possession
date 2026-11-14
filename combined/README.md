@@ -156,3 +156,22 @@ there is no usable ball), is up on every provider under both labellings (+0.054 
 as they are, +0.055 / +0.004 / +0.013 folded), but that setting was read off this table with all
 three providers in view, so it is a suggestion, not a held-out result. What is solid: `deep/`
 adds a lot on IDSSE and nothing measurable either way on Metrica at small weights.
+
+### On BAR-ATH (check only, nothing tuned on it)
+
+`python combined/run.py` runs `hmm/decode.py` as for `hmm_v7.csv` with the gated term at 0/0.2 and
+writes `evaluation/results/hmm_v7_deep.csv`. With the weight at 0 the file is byte-identical to
+`hmm_v7.csv`. At 0/0.2 it agrees with `hmm_v7.csv` on 97.9% of graded frames (99.8% where the ball
+is seen, 95.2% where it is missing) and has 286 possessions against 289; the two name different
+teams in 14 short runs, 14 s in all, the longest 3.2 s.
+
+Public 5 minutes, 17 possessions, so gaps under about 0.33 are noise:
+
+| | spellF1 | macroF1 | possessions (17 true) |
+|---|---|---|---|
+| `deep` v2 | 0.826 | 0.918 | 14 |
+| `hmm` v7 + `deep` at 0/0.2 | 0.618 | 0.812 | 16 |
+| `hmm` v7 | 0.606 | 0.783 | 16 |
+
+So at this weight the combination is `hmm` v7 with small repairs where the ball is missing. It is
+a safe step up from v7 on the outside matches; it does not settle v7 against `deep`.
