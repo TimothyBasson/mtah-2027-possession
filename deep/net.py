@@ -137,6 +137,7 @@ class PossessionNet(nn.Module):
             extra["ptr"] = s
         if self.gru is not None:
             h = h + self.gru(h)[0]
+        extra["h"] = h  # the state every head reads: what a student copies from a teacher (train.py --hint)
         if self.ptr:
             extra.update(bvel=self.bvel(h), touch=self.touch(h).squeeze(-1), free=self.free(h).squeeze(-1))
         return self.cls(h), self.ball(h), self.edge(h).squeeze(-1), extra

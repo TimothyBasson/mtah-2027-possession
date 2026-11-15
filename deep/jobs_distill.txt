@@ -1,0 +1,9 @@
+# TAG FOLD [train.py options]. The runs behind README's "a ball-seeing teacher" section.
+# kd: bt plus the teacher tb's frame-by-frame answers on the training matches as soft targets
+kd idsse --steps 1500 --ptr 0.5 --distill tb
+kd metrica --steps 1500 --ptr 0.5 --distill tb
+kd skillcorner --steps 1500 --ptr 0.5 --distill tb
+# fd: bt copying the teacher window by window: its inner state (the 128 numbers every head reads) and its answers softened at temperature 2
+fd idsse --steps 1500 --ptr 0.5 --hint tb
+fd metrica --steps 1500 --ptr 0.5 --hint tb
+fd skillcorner --steps 1500 --ptr 0.5 --hint tb

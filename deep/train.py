@@ -248,6 +248,10 @@ def main():
     ap.add_argument("--distill", default="", help="tag of a --teach run: its probabilities on the training matches are soft targets")
     ap.add_argument("--kd", type=float, default=1.0, help="weight of the soft-target loss with --distill")
     ap.add_argument("--hard", type=float, default=1.0, help="weight of the label loss (lower it with --distill)")
+    ap.add_argument("--hint", default="", help="tag of a --teach run: its net is run on each training window (ball and "
+                    "all) and the players-only net copies its inner state and its softened answers")
+    ap.add_argument("--hintw", type=float, default=1.0, help="weight of copying the teacher's inner state with --hint")
+    ap.add_argument("--kdT", type=float, default=2.0, help="temperature of the teacher's answers with --hint")
     ap.add_argument("--ptime", type=int, default=0, choices=(0, 2, 3),
                     help="per-player convolutions through time in the encoder: number of stages (net.PTIME)")
     ap.add_argument("--d", type=int, default=128)
@@ -277,7 +281,14 @@ def main():
                 h["soft"] = z[f"p{i}"].astype(np.float32)
     net = PossessionNet(nfeat=D.NFEAT + (NBALL if a.teach else 0), d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage,
                         ptime=PTIME[a.ptime] if a.ptime else None)
-    opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
+    params, teacher, proj = list(net.parameters()), None, None
+    if a.hint:  # TRAINING ONLY: the fold's ball-fed teacher and a throw-away map from the student's state to its state
+        sd = torch.load(os.path.join(D.ROOT, "data", "cache", "deep", a.hint, a.fold, "net.pt"), map_location="cpu")
+        teacher = PossessionNet(nfeat=D.NFEAT + NBALL, d=a.d, ptr="ptr_q.weight" in sd)
+        teacher.load_state_dict(sd); teacher.eval()
+        proj = torch.nn.Linear(a.d, a.d)
+        params += list(proj.parameters())
+    opt = torch.optim.AdamW(params, a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
     out = os.path.join(D.ROOT, "data", "cache", "deep", a.tag, a.fold)
     os.makedirs(out, exist_ok=True)
@@ -285,7 +296,9 @@ def main():
     ckpt = os.path.join(out, "ckpt.pt")
     if os.path.exists(ckpt):  # the cloud container can restart mid-run: carry on from the last save
         c = torch.load(ckpt, weights_only=False)
-        net.load_state_dict(c["net"]); opt.load_state_dict(c["opt"]); sched.load_state_dict(c["sched"])
+        net.load_state_dict(c["net"]); opt.load_state_dict(c["opt"])
+        if proj is not None:
+            proj.load_state_dict(c["proj"]); sched.load_state_dict(c["sched"])
         rng.bit_generator.state = c["rng"]
         if "torch_rng" in c:  # dropout draws from torch's generator: without it a resumed run diverges
             torch.set_rng_state(c["torch_rng"])
@@ -303,13 +316,22 @@ def main():
         loss = a.hard * loss_c + a.ball * loss_b + a.edge * loss_e
         if q is not None:
             loss = loss - a.kd * (q[g] * F.log_softmax(logits[g], -1)).sum(-1).mean()
+        if teacher is not None:
+            with torch.no_grad():  # the same window, the same lost players, plus its real ball
+                Xt = torch.from_numpy(np.stack([with_ball(x, b) for x, b in zip(X.numpy(), ball.numpy())]))
+                tl, _, _, te = teacher(Xt, M)
+            if a.hintw:
+                loss = loss + a.hintw * F.smooth_l1_loss(proj(extra["h"]), te["h"])
+            if a.kd:
+                qt = F.softmax(tl[g] / a.kdT, -1)
+                loss = loss - a.kd * a.kdT ** 2 * (qt * F.log_softmax(logits[g] / a.kdT, -1)).sum(-1).mean()
         loss_x = 0.0
         if a.ptr > 0:
             bl = ball_losses(extra, ball_targets(X, M, ball, y))
             loss = loss + a.ptr * bl["ptr"] + a.bvel * bl["bvel"] + a.touch * bl["touch"] + a.free * bl["free"]
             loss_x = bl["ptr"].item()
         opt.zero_grad(); loss.backward()
-        torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(params, 1.0)
         opt.step(); sched.step()
         run.append((loss_c.item(), loss_b.item(), loss_e.item(), loss_x))
         if step % 100 == 0 or step == a.steps:
@@ -319,7 +341,8 @@ def main():
                 msg += f"  val acc {frame_scores(net, val, a.teach):.3f}  test acc {frame_scores(net, test[:3], a.teach):.3f}"
             print(msg, flush=True)
             torch.save(dict(net=net.state_dict(), opt=opt.state_dict(), sched=sched.state_dict(),
-                            rng=rng.bit_generator.state, torch_rng=torch.get_rng_state(), step=step), ckpt + ".tmp")
+                            rng=rng.bit_generator.state, torch_rng=torch.get_rng_state(), step=step,
+                            **(dict(proj=proj.state_dict()) if proj is not None else {})), ckpt + ".tmp")
             os.replace(ckpt + ".tmp", ckpt)
     torch.save(net.state_dict(), os.path.join(out, "net.pt"))
     for kind, ms in (("val", val), ("test", test)) + ((("train", train),) if a.teach and a.fold != "none" else ()):
