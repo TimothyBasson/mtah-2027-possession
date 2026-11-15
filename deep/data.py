@@ -14,8 +14,8 @@ import warnings
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STEP = 5          # 25 fps -> 5 fps
-LAG = 5           # frames either side for velocity and change of speed (0.4 s in all)
+STEP = int(os.environ.get("DEEP_STEP", 5))  # 25 fps -> 5 fps (DEEP_STEP=2: 12.5 fps, the "fine" variant)
+LAG = int(os.environ.get("DEEP_LAG", 5))    # frames either side for velocity and change of speed (0.4 s in all)
 MAX_SPEED = 12.0  # m/s; faster is a track jumping, as possession/model.py
 SLOTS = 26        # players kept per frame (22 expected; trackers sometimes duplicate one)
 NFEAT = 8         # x, y, vx, vy, speed, change of speed, team (+1 home, -1 away), has-velocity
@@ -104,7 +104,8 @@ def load_match(path, knock=False):
 
 def load_all(knock=False):
     import pickle
-    cache = os.path.join(ROOT, "data", "cache", "deep_v2_knock.pkl" if knock else "deep_v2.pkl")
+    sfx = "" if (STEP, LAG) == (5, 5) else f"_s{STEP}l{LAG}"
+    cache = os.path.join(ROOT, "data", "cache", f"deep_v2_knock{sfx}.pkl" if knock else f"deep_v2{sfx}.pkl")
     if os.path.exists(cache):
         with open(cache, "rb") as f:
             return pickle.load(f)

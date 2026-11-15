@@ -30,7 +30,8 @@ LETTERS = np.array(list("HAD"))
 
 def upsample(p, n):
     """(T, 3) at every STEP-th frame -> (n, 3) by linear interpolation."""
-    t = np.arange(len(p)) * D.STEP
+    step = int(np.ceil(n / len(p)))  # 5 for every net but the "fine" variant (DEEP_STEP)
+    t = np.arange(len(p)) * step
     return np.stack([np.interp(np.arange(n), t, p[:, k]) for k in range(p.shape[1])], 1)
 
 

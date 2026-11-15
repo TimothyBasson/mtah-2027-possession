@@ -40,13 +40,14 @@ def edges(y):
     """1 where the label changes within 2 steps (0.4 s) either side; ungraded frames don't count."""
     ch = np.zeros(len(y), bool)
     d = (y[1:] != y[:-1]) & (y[1:] >= 0) & (y[:-1] >= 0)
-    for k in range(-2, 3):
+    r = round(10 / D.STEP)
+    for k in range(-r, r + 1):
         i = np.flatnonzero(d) + 1 + k
         ch[i[(i >= 0) & (i < len(y))]] = True
     return ch.astype(np.float32)
 
 
-def spell_weights(y, power, ref=25, lo=0.5, hi=4.0):
+def spell_weights(y, power, ref=125 // D.STEP, lo=0.5, hi=4.0):
     """Per-frame loss weight so short possessions are not drowned by long ones: a frame in an H or A
     run of n steps weighs (ref / n) ** power, clipped. spellF1 counts each possession once, a
     per-frame loss counts it once per frame. ref is 5 s at 5 fps."""
@@ -78,7 +79,8 @@ def ball_targets(X, M, ball, y):
     ok_p = seen & M.any(-1)
     ptr = torch.softmax(-d / 2.0, -1)
     free = torch.log1p(d.min(-1)[0].clamp(max=60))
-    seg = (b[:, 1:] - b[:, :-1]) / 0.2                      # (B, T-1, 2), nan where either end unseen
+    dt = D.STEP / 25
+    seg = (b[:, 1:] - b[:, :-1]) / dt                      # (B, T-1, 2), nan where either end unseen
     bvel = torch.full_like(b, float("nan"))
     bvel[:, 1:-1] = (seg[:, 1:] + seg[:, :-1]) / 2
     ok_v = seen & torch.isfinite(bvel[..., 0]) & (bvel.norm(dim=-1) < 40)
@@ -142,7 +144,7 @@ def batch(train, rng, B, T, a):
         X, M, y, ball = h["X"][s:s + T], h["M"][s:s + T], h["y"][s:s + T], h["ball"][s:s + T]
         if "w" not in h or h.get("wp") != a.spell:
             h["w"], h["wp"] = spell_weights(h["y"], a.spell), a.spell
-        ws.append(h["w"][s:s + T])
+        ws.append(h["w"][s:s + T] * a.provw.get(prov, 1.0))
         if len(X) < T or (y >= 0).mean() < 0.3:
             ws.pop()
             continue
@@ -231,12 +233,15 @@ def main():
     ap.add_argument("--hard", type=float, default=1.0, help="weight of the label loss (lower it with --distill)")
     ap.add_argument("--ptime", type=int, default=0, choices=(0, 2, 3),
                     help="per-player convolutions through time in the encoder: number of stages (net.PTIME)")
+    ap.add_argument("--provw", default="", help="e.g. skillcorner=0.25: weight of a provider's LABELS in the label and "
+                    "edge losses (its ball still teaches at full weight); for a provider whose labels are noisy")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--tag", default="v2")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
+    a.provw = {k: float(v) for k, v in (kv.split("=") for kv in a.provw.split(",") if kv)}
     torch.set_num_threads(a.threads)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
@@ -275,7 +280,11 @@ def main():
         loss_c = (F.cross_entropy(logits[g], y[g], reduction="none") * w[g]).sum() / w[g].sum()
         bg = g & (y < 2) & torch.isfinite(ball[..., 0])
         loss_b = F.smooth_l1_loss(bhat[bg], ball[bg], beta=0.1) if bg.any() else logits.sum() * 0
-        loss_e = F.binary_cross_entropy_with_logits(ehat[g], e[g])
+        if a.provw:  # w carries the provider's label weight; the edge target is made of labels too
+            wn = (w[g] / w[g].mean()).clamp(max=4) if a.spell <= 0 else torch.ones_like(w[g])
+            loss_e = (F.binary_cross_entropy_with_logits(ehat[g], e[g], reduction="none") * wn).mean()
+        else:
+            loss_e = F.binary_cross_entropy_with_logits(ehat[g], e[g])
         loss = a.hard * loss_c + a.ball * loss_b + a.edge * loss_e
         if q is not None:
             loss = loss - a.kd * (q[g] * F.log_softmax(logits[g], -1)).sum(-1).mean()
