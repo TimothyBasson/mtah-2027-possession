@@ -1,6 +1,6 @@
-"""SoccerTrack v2 -> data/external/soccertrack_<match>.npz, in the arrays external/build.py writes.
+"""SoccerTrack v2 -> data/soccertrack/soccertrack_<match>.npz, in the arrays external/build.py writes.
 
-    python external/build_soccertrack.py --raw /path/to/raw [--out data/external]
+    python external/build_soccertrack.py --raw /path/to/raw [--out data/soccertrack]
 
 SoccerTrack v2 (Scott, Uchida, Kuroda, Kim, Fujii; arXiv 2508.01802; CC BY 4.0) is 10 full
 university matches filmed by one panoramic camera, with the provider's (Bepro) own tracking and
@@ -136,7 +136,7 @@ def build(meta_path, data_path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--raw", required=True, help="folder holding <match>_tracker_box_{metadata,data}.xml")
-    ap.add_argument("--out", default=os.path.join(ROOT, "data", "external"))
+    ap.add_argument("--out", default=os.path.join(ROOT, "data", "soccertrack"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     for meta in sorted(glob.glob(os.path.join(a.raw, "**", "*_tracker_box_metadata.xml"), recursive=True)):

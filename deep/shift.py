@@ -58,7 +58,7 @@ FOLDED = dict(cost=4, min_team=2, min_dead=3)
 def one(args):
     netpath, name, names = args
     torch.set_num_threads(1)
-    d = dict(np.load(os.path.join(ROOT, "data", "external", name + ".npz")))
+    d = dict(np.load(D.match_path(name)))
     halves = [tuple(int(v) for v in h) for h in d["halves"]]
     fps, pitch = int(d["fps"]), tuple(d["pitch"])
     net = PossessionNet(nfeat=D.NFEAT)

@@ -43,7 +43,7 @@ def main():
         os.makedirs(os.path.join(base, a.out, fold), exist_ok=True)
         for f in sorted(glob.glob(os.path.join(src, "*.npz"))):
             name = os.path.basename(f)
-            d = np.load(os.path.join(ROOT, "data", "external", name))
+            d = np.load(D.match_path(name[:-4]))
             halves = [tuple(int(v) for v in h) for h in d["halves"]]
             players = d["players"]
             if a.knock:

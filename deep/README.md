@@ -102,6 +102,66 @@ gaps: v1 already hides up to 15% of players at random in training.
 **With `possession/` in the same decode** (`stack/`): 0.530 against 0.529. The hand-built signals
 add nothing the network has not learned, so this model stands alone as the players-only model.
 
+## A fourth tracking provider and tracker-style changes (2026-11-14): small gain from the data, none from augmentation
+
+The design review put the cost of an unseen tracking provider at about 0.06, and BAR-ATH is one.
+Two things were tried: more providers, and making our matches look like other providers'.
+
+**SoccerTrack v2 as a fourth provider** (`external/build_soccertrack.py`; Bepro tracking of 8
+university matches with the provider's per-frame ball status; CC BY 4.0, see `external/README.md`).
+The files sit in `data/soccertrack/`; where that folder is empty `train.py` trains as before.
+It joins the training providers of every fold; the held-out provider is as before. Same seed,
+1,500 steps, one fixed decode for every tag (`deep/fixed.py`: cost 4, 1 s / 1 s on the labels as
+built; cost 4, 2 s / 3 s on the labels folded to the control rule):
+
+| | IDSSE | Metrica | SkillCorner | mean | per match against v2 |
+|---|---|---|---|---|---|
+| labels as built: v2 | 0.549 | 0.635 | 0.398 | 0.527 | |
+| + SoccerTrack, an equal third of windows (`st`) | 0.531 | 0.627 | 0.422 | 0.526 | +0.010 (se 0.004), up on 21 of 30 |
+| + SoccerTrack and `--style 0.5` (`sty`) | 0.518 | 0.617 | 0.419 | 0.518 | +0.005 (se 0.005), 18 of 30 |
+| **+ SoccerTrack at 15% of windows** (`stw`: `--share soccertrack=0.15`) | 0.548 | 0.649 | 0.414 | **0.537** | +0.012 (se 0.002), 25 of 30 |
+| folded labels: v2 | 0.672 | 0.723 | 0.489 | 0.628 | |
+| `st` | 0.657 | 0.711 | 0.515 | 0.628 | +0.012 (se 0.004), 19 of 30 |
+| `sty` | 0.650 | 0.709 | 0.509 | 0.623 | +0.007 (se 0.005), 18 of 30 |
+| **`stw`** | 0.670 | 0.727 | 0.505 | **0.634** | +0.011 (se 0.003), 22 of 30 |
+
+At an equal share SoccerTrack crowds out the other two training providers: SkillCorner gains and
+IDSSE and Metrica lose. At 15% the mean is up 0.010 on the labels as built and 0.006 on the folded
+ones, with IDSSE flat (-0.001 / -0.002). That is one seed and seed noise at a fixed decode is
+0.004, so it is a small gain, at the bar on one labelling and under it on the other. It costs
+nothing at prediction time. Fold nets and probabilities: `/mnt/project-files/deep/{st,sty,stw}/`.
+
+**The model on a tracker it has never seen.** v2's fold nets, which never saw Bepro tracking,
+score 0.68 to 0.75 spellF1 on two SoccerTrack matches (alive/dead 0.96 to 0.97, team 0.94),
+against 0.40 to 0.64 on their held-out providers. With SoccerTrack in training the same matches
+score 0.76 to 0.77 (the validation match). So a new tracker in itself costs about 0.04 here, and
+how a provider cuts possessions matters far more than how it tracks: Bepro's possessions have a
+median of 9 to 10 s, DFL's 3.7 s.
+
+**Which tracking differences the model feels** (`deep/shift.py --tag v2`: v2's fold nets on
+their held-out matches with the tracking changed one way at a time, `deep/trackers.py`; spellF1
+on labels as built / folded, provider mean over 11 matches):
+
+| change | as built | folded |
+|---|---|---|
+| as recorded | 0.519 | 0.621 |
+| smoothed 0.4 s / 1.2 s | 0.518 / 0.511 | 0.614 / 0.612 |
+| 10 fps or 5 fps underneath | 0.519 | 0.621 |
+| drift of 0.5 m over 3 s | 0.516 | 0.616 |
+| pitch 4% too long / shifted 1 m both ways | 0.522 / 0.522 | 0.623 / 0.619 |
+| broadcast view 60 m wide | 0.518 | 0.617 |
+| 7% / 15% of player-frames lost in 5 s runs | 0.517 / 0.513 | 0.617 / 0.610 |
+| independent noise of 0.1 m / 0.3 m per frame | 0.331 / 0.241 | 0.390 / 0.298 |
+| positions on a 1.05 x 0.68 m grid | 0.289 | 0.338 |
+
+The model does not care about smoothing, frame rate, calibration, a narrower view or lost
+players. It cares a great deal about frame-to-frame jitter, which goes straight into the
+velocities; but no provider has any to speak of. Median second difference of position at 25 fps:
+IDSSE 1.0 cm, Metrica 0.2 to 0.3 cm, SkillCorner 0.2 cm, BAR-ATH 0.15 cm. Only SoccerTrack's raw
+grid would trip it, which is why the converter smooths it. So training on changed tracking
+(`train.py --style`) had nothing to fix, and `sty` above confirms it: slightly worse than `st`.
+`--style` stays in the code as an option and is not used.
+
 ## v1 (2026-11-12)
 
 Held out by provider, the same folds and equal-provider mean as `external/heldout.py`:

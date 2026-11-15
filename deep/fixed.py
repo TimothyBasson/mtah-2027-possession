@@ -18,6 +18,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path[:0] = [HERE, os.path.join(ROOT, "external"), os.path.join(ROOT, "evaluation")]
+import data as D  # noqa: E402
 import decode  # noqa: E402
 import possession_metrics as pm  # noqa: E402
 from control import control_labels  # noqa: E402
@@ -28,7 +29,7 @@ FOLDED = dict(cost=4, min_team=2, min_dead=3)
 
 def one(args):
     name, files = args
-    d = dict(np.load(os.path.join(ROOT, "data", "external", name + ".npz")))
+    d = dict(np.load(D.match_path(name)))
     spans = [tuple(int(v) for v in h) for h in d["halves"]]
     truths = (pm.label_codes(d["labels"]), pm.label_codes(control_labels(d)))
     out = []

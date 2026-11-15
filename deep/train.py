@@ -175,7 +175,7 @@ def main():
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
     if a.style:
         for m in train:
-            m["raw"] = D.load_raw(os.path.join(D.ROOT, "data", "external", m["name"] + ".npz"))
+            m["raw"] = D.load_raw(D.match_path(m["name"]))
     net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)

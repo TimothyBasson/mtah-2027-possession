@@ -27,7 +27,15 @@ def provider(path):
 
 
 def external_paths():
-    return sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
+    """The 30 outside matches, then SoccerTrack v2 where it has been built: it lives in its own
+    folder so that external/heldout.py and the score scripts keep their 30."""
+    return (sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz"))) +
+            sorted(glob.glob(os.path.join(ROOT, "data", "soccertrack", "*.npz"))))
+
+
+def match_path(name):
+    folder = "soccertrack" if name.startswith("soccertrack_") else "external"
+    return os.path.join(ROOT, "data", folder, name + ".npz")
 
 
 def home_defends_left(players, team, a, b):
@@ -104,7 +112,8 @@ def load_match(path, knock=False):
 
 def load_all(knock=False):
     import pickle
-    cache = os.path.join(ROOT, "data", "cache", "deep_v2_knock.pkl" if knock else "deep_v2.pkl")
+    more = "_st" if glob.glob(os.path.join(ROOT, "data", "soccertrack", "*.npz")) else ""  # 38 matches, not 30
+    cache = os.path.join(ROOT, "data", "cache", f"deep_v2{more}_knock.pkl" if knock else f"deep_v2{more}.pkl")
     if os.path.exists(cache):
         with open(cache, "rb") as f:
             return pickle.load(f)
