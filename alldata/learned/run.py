@@ -16,19 +16,24 @@ import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-sys.path[:0] = [HERE, os.path.join(ROOT, "deep"), os.path.join(ROOT, "possession"), os.path.join(ROOT, "external"), ROOT]
+sys.path[:0] = [HERE]
+sys.path += [os.path.join(ROOT, "deep"), os.path.join(ROOT, "possession"), os.path.join(ROOT, "external"), ROOT]
 import decode  # noqa: E402
 import feats  # noqa: E402
-import train as T  # noqa: E402
+import fit as T  # noqa: E402
 
 DECODE = dict(cost=4, min_team=1, min_dead=1)
+HEAD = slice(0, 3)  # the head taught on the labels as built; slice(3, 6) is the folded one
 
 
 def bt_probabilities():
     """The players-only net on BAR-ATH (deep/run.py's probabilities), cached."""
     f = os.path.join(ROOT, "data", "cache", "deep", "bt", "bar_ath_probs.npz")
     if not os.path.exists(f):
-        import run as deep_run
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("deep_run", os.path.join(ROOT, "deep", "run.py"))
+        deep_run = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(deep_run)
         probs, _, _ = deep_run.probabilities("bt")
         os.makedirs(os.path.dirname(f), exist_ok=True)
         np.savez_compressed(f, **{f"p{i}": p for i, p in enumerate(probs)})
@@ -36,16 +41,27 @@ def bt_probabilities():
     return [z[k] for k in sorted(z.files)]
 
 
-def features(extra_fn=None):
+def features(with_tim=False):
+    """Feature rows per half; also cached as data/cache/alldata/bar/BAR-ATH.npz in build.py's
+    layout (labels all ungraded) for fit.py --fold none --pseudo."""
     import load
     players, ball, team, halves = load.load()
     bt = bt_probabilities()
-    out = []
+    tim_in = [[], []]
+    if with_tim:
+        import tim
+        tim_in = tim.inputs("BAR-ATH", [np.arange(a, b + 1, feats.STEP) for a, b in halves])
+    out, save = [], {}
     for i, (a, b) in enumerate(halves):
-        extra = [("bt", bt[i])] + (extra_fn(i, a, b) if extra_fn else [])
-        F, fr = feats.half_features(players, ball[:, :2], team, a, b, load.PITCH, load.FPS, extra=extra)
+        F, fr = feats.half_features(players, ball[:, :2], team, a, b, load.PITCH, load.FPS,
+                                    extra=[("bt", bt[i])] + tim_in[i])
         out.append(F)
-    return out, halves, len(players), list(feats.NAMES)
+        save.update({f"F0_{i}": F, f"fr_{i}": fr, f"y_{i}": np.full(len(F), -1, np.int8), f"yf_{i}": np.full(len(F), -1, np.int8)})
+    names = list(feats.NAMES)
+    if with_tim:
+        os.makedirs(os.path.join(T.CACHE, "bar"), exist_ok=True)
+        np.savez(os.path.join(T.CACHE, "bar", "BAR-ATH.npz"), names=np.array(names), nhalves=len(halves), **save)
+    return out, halves, len(players), names
 
 
 def probabilities(tags, Fs, names):
@@ -57,7 +73,7 @@ def probabilities(tags, Fs, names):
         net.load_state_dict(ck["sd"])
         sym = feats.symmetry(ck["names"])
         for i, F in enumerate(Fs):
-            probs[i] = probs[i] + T.predict(net, F[:, cols], sym) / len(tags)
+            probs[i] = probs[i] + T.predict(net, F[:, cols], sym)[:, HEAD] / len(tags)
     return probs
 
 
@@ -69,7 +85,7 @@ def main():
     torch.set_num_threads(1)
     from starter.baseline import RESULTS_DIR, write_submission
     from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES
-    Fs, halves, n, names = features()
+    Fs, halves, n, names = features(with_tim=os.path.exists(os.path.join(T.CACHE, "tim", "BAR-ATH.npz")))
     probs = probabilities(a.tags, Fs, names)
     os.makedirs(os.path.join(T.CACHE, "bar_ath"), exist_ok=True)
     np.savez_compressed(os.path.join(T.CACHE, "bar_ath", "+".join(a.tags) + ".npz"), **{f"p{i}": p for i, p in enumerate(probs)})

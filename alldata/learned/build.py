@@ -1,4 +1,4 @@
-"""Feature cache for the all-data model: data/cache/alldata/<match>.npz.
+"""Feature cache for the all-data model: data/cache/alldata/feats/<match>.npz.
 
     python alldata/learned/build.py [--versions 3] [--jobs 4]
 
@@ -24,9 +24,10 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path[:0] = [HERE, os.path.join(ROOT, "deep"), os.path.join(ROOT, "external"), ROOT]
 import data as D  # noqa: E402
 import feats  # noqa: E402
+import tim  # noqa: E402
 
-OUT = os.path.join(ROOT, "data", "cache", "alldata")
-BT = ("bt", "bts1")
+OUT = os.path.join(ROOT, "data", "cache", "alldata", "feats")
+BT = ("bt",)  # one net, as on BAR-ATH (deep/models/bt.pt)
 
 
 def bt_probs(name, nhalves):
@@ -55,6 +56,8 @@ def one(args):
     bt = bt_probs(name, len(halves))
     if bt is None:
         return name + " (no bt probabilities, skipped)"
+    # Tim's HMM as optional inputs (tim.py); fit.py --drop-cols tim trains without them
+    tim_in = tim.inputs(name, [np.arange(a, b + 1, feats.STEP) for a, b in halves])
     code = lambda l: np.select([l == "H", l == "A", l == "D"], [0, 1, 2], -1).astype(np.int8)  # noqa: E731
     out = {}
     for v in range(versions + 1):
@@ -65,7 +68,7 @@ def one(args):
                 bxy[a:b + 1] = feats.simulate_visibility(bxy[a:b + 1], lab[a:b + 1], rng, int(d["fps"]))
         for i, (a, b) in enumerate(halves):
             F, fr = feats.half_features(d["players"], bxy, d["team"], a, b, d["pitch"], int(d["fps"]),
-                                        extra=[("bt", bt[i])])
+                                        extra=[("bt", bt[i])] + tim_in[i])
             out[f"F{v}_{i}"] = F
             if v == 0:
                 out[f"y_{i}"], out[f"yf_{i}"], out[f"fr_{i}"] = code(lab[fr]), code(fold[fr]), fr

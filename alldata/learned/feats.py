@@ -17,11 +17,13 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-sys.path[:0] = [os.path.join(ROOT, "deep")]
+sys.path.append(os.path.join(ROOT, "deep"))
 import data as D  # noqa: E402
 
 STEP = D.STEP
 CLIP_T = 10.0  # s
+TOUCH_DV = 4.0      # m/s change of the ball's velocity over 0.16 s
+TOUCH_RADIUS = 3.0  # m, nearest player within 0.12 s
 
 
 def _runs(mask):
@@ -177,6 +179,43 @@ def half_features(players, ball_xy, team, a, b, pitch, fps=25, extra=None):
     for tn in "ha":
         for nm in tnames:
             add(f"{tn}_{nm}", team_cols[tn][nm])
+    # touches: the ball's velocity jumps while a player is beside it. Who touched last and who
+    # touches next (the whole match is on the table, so the future is fair game), how long ago,
+    # how many in a row by one team.
+    dall = np.minimum(np.where((team == 0)[None], dist, 1e4).min(1), 1e4), np.where((team == 1)[None], dist, 1e4).min(1)
+    near = -maxpool(-np.minimum(dall[0], dall[1]), 3)
+    cand = seen & (acc > TOUCH_DV) & (near < TOUCH_RADIUS)
+    cand[1:-1] &= (acc[1:-1] >= acc[:-2]) & (acc[1:-1] > acc[2:])
+    tf = np.flatnonzero(cand)
+    tt = np.where(-maxpool(-dall[0], 3)[tf] <= -maxpool(-dall[1], 3)[tf], 0, 1)
+    sgn = np.where(tt == 0, 1.0, -1.0)
+    run = np.ones(len(tf))
+    for j in range(1, len(tf)):
+        if tt[j] == tt[j - 1] and tf[j] - tf[j - 1] < 10 * fps:
+            run[j] = run[j - 1] + 1
+    prev = np.searchsorted(tf, idx, side="right") - 1   # last touch at or before each frame
+    nx = prev + 1
+    hp, hn = prev >= 0, nx < len(tf)
+    pc, nc = np.clip(prev, 0, max(len(tf) - 1, 0)), np.clip(nx, 0, max(len(tf) - 1, 0))
+    if len(tf):
+        ago = np.where(hp, (idx - tf[pc]) / fps, CLIP_T)
+        ahead = np.where(hn, (tf[nc] - idx) / fps, CLIP_T)
+        fresh_p, fresh_n = hp & (ago < CLIP_T), hn & (ahead < CLIP_T)
+        add("t_ago", np.clip(ago, 0, CLIP_T) / CLIP_T)
+        add("t_ahead", np.clip(ahead, 0, CLIP_T) / CLIP_T)
+        add("t_last", np.where(fresh_p, sgn[pc], 0))
+        add("t_next", np.where(fresh_n, sgn[nc], 0))
+        add("t_run", np.where(fresh_p, np.clip(run[pc], 0, 6) * sgn[pc], 0) / 3)
+        add("t_runnext", np.where(fresh_n, np.clip(run[nc], 0, 6) * sgn[nc], 0) / 3)
+        cs = np.r_[0, np.cumsum(np.bincount(tf, weights=sgn, minlength=n))]
+        w = 5 * fps
+        add("t_past5", (cs[idx + 1] - cs[np.maximum(idx + 1 - w, 0)]) / 4)
+        add("t_fut5", (cs[np.minimum(idx + w, n)] - cs[idx + 1]) / 4)
+    else:
+        for nm in ("t_ago", "t_ahead"):
+            add(nm, np.ones(n))
+        for nm in ("t_last", "t_next", "t_run", "t_runnext", "t_past5", "t_fut5"):
+            add(nm, np.zeros(n))
     add("margin", np.clip((np.minimum(dist[:, team == 1].min(1), 60) - np.minimum(dist[:, team == 0].min(1), 60)), -10, 10) / 5)
     T = len(sel)
     for nm, p in (extra or []):
@@ -197,7 +236,7 @@ def symmetry(names):
     sw = np.ones(len(names), np.float32)
     mi = np.ones(len(names), np.float32)
     for n, i in pos.items():
-        if n in ("bx", "vx", "by", "vy", "margin"):
+        if n in ("bx", "vx", "by", "vy", "margin", "t_last", "t_next", "t_run", "t_runnext", "t_past5", "t_fut5"):
             sw[i] = -1
         if n in ("by", "vy"):
             mi[i] = -1

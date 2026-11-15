@@ -1,13 +1,17 @@
 """Train the all-data possession model with one provider held out; save per-frame probabilities.
 
-    python alldata/learned/train.py --fold idsse --tag a1 [--labels fold] [--seed 0]
+    python alldata/learned/fit.py --fold idsse --tag b1 [--seed 0] [--pseudo b1]
 
 Inputs are the rows of feats.py (ball, players against the ball, the players-only net's
 probabilities). Training draws each provider equally often, and each window with the ball either
 as recorded or under simulated BAR-ATH-like visibility (--sim: share of windows simulated).
 Writes data/cache/alldata/runs/<tag>/<fold>/<match>.npz: probabilities at 5 fps for the held-out
 provider (kind test) and the validation matches (kind val), with the ball as recorded (p*) and
-under the simulation's first seed (s*).
+under the simulation's first seed (s*); f* are the head taught on the folded labels.
+
+--pseudo TAG adapts to the unseen provider without its labels: the held-out matches join the
+training set labelled by run TAG's own decoded predictions (frames where it is unsure are left
+out of the loss). With --fold none the unseen match is BAR-ATH (run.py --features first).
 """
 
 import argparse
@@ -27,6 +31,7 @@ sys.path[:0] = [HERE, os.path.join(ROOT, "deep")]
 import feats  # noqa: E402
 
 CACHE = os.path.join(ROOT, "data", "cache", "alldata")
+FEATS = os.path.join(CACHE, "feats")  # build.py's match files
 VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3, "soccertrack": 1}
 
 
@@ -48,7 +53,7 @@ class Net(nn.Module):
         self.inp = nn.Sequential(nn.Linear(nf, d), nn.GELU(), nn.Linear(d, d))
         self.tcn = nn.Sequential(*[TCNBlock(d, k, drop) for k in dilations])
         self.gru = nn.GRU(d, d // 2, batch_first=True, bidirectional=True) if gru else None
-        self.cls = nn.Linear(d, 3)
+        self.cls = nn.Linear(d, 6)  # H/A/D on the labels as built, then on the folded labels
         self.edge = nn.Linear(d, 1)
 
     def forward(self, x):
@@ -59,9 +64,9 @@ class Net(nn.Module):
         return self.cls(h), self.edge(h).squeeze(-1)
 
 
-def load_matches(use=None, drop_cols=()):
+def load_matches(drop_cols=(), folder=FEATS):
     ms = []
-    for f in sorted(glob.glob(os.path.join(CACHE, "*.npz"))):
+    for f in sorted(glob.glob(os.path.join(folder, "*.npz"))):
         z = np.load(f)
         name = os.path.basename(f)[:-4]
         names = [str(n) for n in z["names"]]
@@ -73,6 +78,25 @@ def load_matches(use=None, drop_cols=()):
                                yf=z[f"yf_{i}"].astype(np.int64), fr=z[f"fr_{i}"]))
         ms.append(dict(name=name, provider=name.split("_")[0], halves=halves, names=[names[i] for i in keep]))
     return ms
+
+
+def pseudo_labels(m, tag, fold, conf):
+    """The match with y / yf replaced by run `tag`'s decoded labels; -1 where its probability of
+    the decoded state is under conf."""
+    sys.path.append(os.path.join(ROOT, "deep"))
+    import decode
+    z = np.load(os.path.join(CACHE, "runs", tag, fold, m["name"] + ".npz"))
+    halves = []
+    for i, h in enumerate(m["halves"]):
+        new = dict(F=h["F"][:1], fr=h["fr"])
+        for key, pk in (("y", "p"), ("yf", "fp")):
+            p = z[f"{pk}{i}"]
+            lp = np.log(np.clip(p, 1e-6, 1))
+            path = decode.absorb(decode.viterbi(lp, 4 / 5), {0: 5, 1: 5, 2: 5}).astype(np.int64)
+            path[p[np.arange(len(p)), path] < conf] = -1
+            new[key] = path
+        halves.append(new)
+    return dict(name=m["name"], provider="pseudo", halves=halves, names=m["names"])
 
 
 def split(matches, fold):
@@ -114,32 +138,32 @@ def swap_y(y):
 def batch(train, rng, B, T, a, sym):
     perm, sw, mi = sym
     provs = sorted({m["provider"] for m in train})
-    Xs, ys, es, ws = [], [], [], []
+    Xs, ys, es, ws, y2s = [], [], [], [], []
     while len(Xs) < B:
         prov = provs[rng.integers(len(provs))]
         ms = [m for m in train if m["provider"] == prov]
         m = ms[rng.integers(len(ms))]
         h = m["halves"][rng.integers(len(m["halves"]))]
         v = rng.integers(1, len(h["F"])) if (rng.random() < a.sim and len(h["F"]) > 1) else 0
-        yall = h["yf"] if a.labels == "fold" else h["y"]
+        yall = h["y"]
         n = len(yall)
         s = rng.integers(0, max(1, n - T))
-        X, y = h["F"][v][s:s + T], yall[s:s + T]
+        X, y, y2 = h["F"][v][s:s + T], yall[s:s + T], h["yf"][s:s + T]
         if len(X) < T or (y >= 0).mean() < 0.3:
             continue
-        key = ("w", a.labels, a.spell)
+        key = ("w", a.spell)
         if key not in h:
             h[key] = spell_weights(yall, a.spell)
         w = h[key][s:s + T]
         if rng.random() < 0.5:
-            X, y = X[:, perm] * sw, swap_y(y)
+            X, y, y2 = X[:, perm] * sw, swap_y(y), swap_y(y2)
         if rng.random() < 0.5:
             X = X * mi
         if a.noise:
             X = X + rng.normal(0, a.noise, X.shape).astype(np.float32)
-        Xs.append(X.astype(np.float32)); ys.append(y); es.append(edges(y)); ws.append(w)
+        Xs.append(X.astype(np.float32)); ys.append(y); es.append(edges(y)); ws.append(w); y2s.append(y2)
     t = lambda v: torch.from_numpy(np.stack(v))  # noqa: E731
-    return t(Xs), t(ys), t(es), t(ws)
+    return t(Xs), t(ys), t(es), t(ws), t(y2s)
 
 
 @torch.no_grad()
@@ -155,16 +179,16 @@ def predict(net, X, sym):
                 Z = Z[:, perm] * sw
             if m:
                 Z = Z * mi
-            p = F.softmax(net(torch.from_numpy(np.ascontiguousarray(Z, np.float32))[None])[0][0], -1).numpy()
-            out = out + (p[:, [1, 0, 2]] if s else p)
-    return out / 4
+            lg = net(torch.from_numpy(np.ascontiguousarray(Z, np.float32))[None])[0][0]
+            p = torch.cat([F.softmax(lg[:, :3], -1), F.softmax(lg[:, 3:], -1)], -1).numpy()
+            out = out + (p[:, [1, 0, 2, 4, 3, 5]] if s else p)
+    return out / 4  # (T, 6): labels as built, folded
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fold", required=True)   # idsse | metrica | skillcorner | none
     ap.add_argument("--tag", required=True)
-    ap.add_argument("--labels", default="raw", choices=["raw", "fold"])
     ap.add_argument("--steps", type=int, default=1500)
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--T", type=int, default=300)
@@ -175,6 +199,8 @@ def main():
     ap.add_argument("--noise", type=float, default=0.0)
     ap.add_argument("--edge", type=float, default=0.3)
     ap.add_argument("--drop-cols", nargs="*", default=[])
+    ap.add_argument("--pseudo", default="")
+    ap.add_argument("--conf", type=float, default=0.7)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--threads", type=int, default=1)
     a = ap.parse_args()
@@ -186,6 +212,9 @@ def main():
     if a.fold == "none":
         train, val = train + val, []
     names = ms[0]["names"]
+    if a.pseudo:
+        unseen = test if a.fold != "none" else load_matches(drop_cols=a.drop_cols, folder=os.path.join(CACHE, "bar"))
+        train = train + [pseudo_labels(m, a.pseudo, a.fold, a.conf) for m in unseen]
     sym = feats.symmetry(names)
     net = Net(len(names), a.d)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
@@ -195,11 +224,13 @@ def main():
     t0 = time.time()
     for step in range(a.steps):
         net.train()
-        X, y, e, w = batch(train, rng, a.batch, a.T, a, sym)
+        X, y, e, w, y2 = batch(train, rng, a.batch, a.T, a, sym)
         logits, edge = net(X)
-        ok = y >= 0
-        ce = F.cross_entropy(logits[ok], y[ok], reduction="none", label_smoothing=0.02)
-        loss = (ce * w[ok]).sum() / w[ok].sum() + a.edge * F.binary_cross_entropy_with_logits(edge[ok], e[ok])
+        ok, ok2 = y >= 0, y2 >= 0
+        ce = F.cross_entropy(logits[ok][:, :3], y[ok], reduction="none", label_smoothing=0.02)
+        ce2 = F.cross_entropy(logits[ok2][:, 3:], y2[ok2], reduction="none", label_smoothing=0.02)
+        loss = ((ce * w[ok]).sum() / w[ok].sum() + (ce2 * w[ok2]).sum() / w[ok2].sum()
+                + a.edge * F.binary_cross_entropy_with_logits(edge[ok], e[ok]))
         opt.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(net.parameters(), 1.0)
@@ -212,9 +243,10 @@ def main():
         for m in group:
             o = {}
             for i, h in enumerate(m["halves"]):
-                o[f"p{i}"] = predict(net, h["F"][0], sym)
-                if len(h["F"]) > 1:
-                    o[f"s{i}"] = predict(net, h["F"][1], sym)
+                for k, v in (("p", 0), ("s", 1)):
+                    if v < len(h["F"]):
+                        q = predict(net, h["F"][v], sym)
+                        o[f"{k}{i}"], o[f"f{k}{i}"] = q[:, :3], q[:, 3:]
             np.savez_compressed(os.path.join(out, m["name"] + ".npz"), kind=kind, **o)
     print("done", a.tag, a.fold, f"{time.time() - t0:.0f}s")
 

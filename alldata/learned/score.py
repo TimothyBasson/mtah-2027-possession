@@ -53,9 +53,10 @@ def one(args):
     for f in files:
         z = np.load(f)
         k = key if f"{key}0" in z.files else "p"
-        probs = [z[f"{k}{i}"] for i in range(len(spans))]
         row = []
-        for t, dec in ((raw, decs[0]), (fold, decs[1])):
+        for t, dec, pre in ((raw, decs[0], ""), (fold, decs[1], "f")):
+            kk = pre + k if f"{pre}{k}0" in z.files else k
+            probs = [z[f"{kk}{i}"] for i in range(len(spans))]
             r = pm.evaluate(t, pm.label_codes(decode.labels_from(probs, spans, len(t), **dec)), bootstrap_n=0)
             row += [r["spell_f1_mean"], r["alive_dead_f1"], r["team_acc_both_alive"]]
         out.append(row)
