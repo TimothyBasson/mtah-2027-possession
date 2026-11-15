@@ -1,0 +1,8 @@
+# TAG FOLD [train.py options]: label-cleaning runs, all on the bt recipe (--steps 1500 --ptr 0.5).
+# lcsw: SkillCorner drawn for a quarter of the training windows instead of half (it is not in its own fold's training)
+lcsw idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25
+lcsw metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25
+# lccl: every training provider's labels retimed to touches, frames the ball contradicts left out of the loss
+lccl metrica --steps 1500 --ptr 0.5 --clean retime+lastmask+mask
+lccl idsse --steps 1500 --ptr 0.5 --clean retime+lastmask+mask
+lccl skillcorner --steps 1500 --ptr 0.5 --clean retime+lastmask+mask

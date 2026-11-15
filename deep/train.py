@@ -210,6 +210,10 @@ def main():
     ap.add_argument("--bvel", type=float, default=0.3, help="v4: ball velocity loss")
     ap.add_argument("--touch", type=float, default=0.3, help="v4: ball struck/stopped loss")
     ap.add_argument("--free", type=float, default=0.2, help="v4: ball-to-nearest-player distance loss")
+    ap.add_argument("--clean", default="",
+                    help="train on labels cleaned with each training match's ball (deep/clean/labels.py), "
+                         "e.g. retime+lastmask+mask; scoring labels are untouched")
+    ap.add_argument("--clean-prov", nargs="*", default=[], help="providers to clean; default all in training")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
@@ -227,6 +231,18 @@ def main():
             m["knocked"] = k["halves"]
     matches = [m for m in matches if m["provider"] in ("idsse", "metrica", "skillcorner") or m["provider"] in a.extra]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
+    if a.clean:
+        assert not a.knock, "--clean does not relabel the knocked copies"
+        from clean.labels import clean
+        for m in train:
+            if a.clean_prov and m["provider"] not in a.clean_prov:
+                continue
+            lab = clean(np.load(D.match_path(m["name"])), a.clean)
+            code = np.full(len(lab), -1, np.int64)
+            for i, c in enumerate(D.CLASSES):
+                code[lab == c] = i
+            for h in m["halves"]:
+                h["y"] = code[h["frames"]]
     if a.style:
         for m in train:
             m["raw"] = D.load_raw(D.match_path(m["name"]))
