@@ -73,7 +73,7 @@ class PossessionNet(nn.Module):
     is never an input: forward() takes the players and their mask and nothing else."""
 
     def __init__(self, nfeat=8, d_set=64, d=128, dilations=(1, 2, 4, 8, 16, 32, 1, 2, 4, 8, 16, 32),
-                 gru=True, drop=0.1, set_blocks=2, ptr=False):
+                 gru=True, drop=0.1, set_blocks=2, ptr=False, restart=False):
         super().__init__()
         self.enc = FrameEncoder(nfeat, d_set, blocks=set_blocks, out=d)
         self.tcn = nn.Sequential(*[TCNBlock(d, k, drop) for k in dilations])
@@ -89,6 +89,10 @@ class PossessionNet(nn.Module):
             self.bvel = nn.Linear(d, 2)    # the ball's velocity
             self.touch = nn.Linear(d, 1)   # "the ball is struck or stopped within 0.2 s"
             self.free = nn.Linear(d, 1)    # how far the ball is from the nearest player (log metres)
+        self.restart = restart
+        if restart:  # training targets only (deep/restarts.py): kind of the next restart, time to and since a stop/start
+            self.rkind = nn.Linear(d, 5)
+            self.rtime = nn.Linear(d, 2)
 
     def forward(self, x, mask):
         B, T, K, Fd = x.shape
@@ -110,12 +114,14 @@ class PossessionNet(nn.Module):
             h = h + self.gru(h)[0]
         if self.ptr:
             extra.update(bvel=self.bvel(h), touch=self.touch(h).squeeze(-1), free=self.free(h).squeeze(-1))
+        if self.restart:
+            extra.update(rkind=self.rkind(h), rtime=self.rtime(h))
         return self.cls(h), self.ball(h), self.edge(h).squeeze(-1), extra
 
 
 def load_net(path, nfeat=8):
     """A saved net of either kind; which kind is read off its weights."""
     sd = torch.load(path, map_location="cpu")
-    net = PossessionNet(nfeat=nfeat, ptr="ptr_q.weight" in sd)
+    net = PossessionNet(nfeat=nfeat, ptr="ptr_q.weight" in sd, restart="rkind.weight" in sd)
     net.load_state_dict(sd)
     return net.eval()
