@@ -100,11 +100,13 @@ def check_labels(path, min_alive_share):
     public window has about 80% of graded frames alive; a real method lands far above 20%.
     """
     counts = {}
+    labels = []
     with open(path) as handle:
         next(handle)
         for line in handle:
             label = line.rstrip("\r\n").split(",")[1].strip().upper()
             counts[label] = counts.get(label, 0) + 1
+            labels.append(label)
     labelled = sum(n for label, n in counts.items() if label != "X")
     alive = counts.get("H", 0) + counts.get("A", 0)
     share = alive / labelled if labelled else 0.0
@@ -115,7 +117,20 @@ def check_labels(path, min_alive_share):
     for team in ("H", "A"):
         if not counts.get(team):
             problems.append("no frame is labelled {}".format(team))
-    return counts, problems
+    return counts, labels, problems
+
+
+def possession_stats(labels, fps):
+    """Possessions as the scorer sees them: maximal runs of H or of A (D and X end one)."""
+    runs, start = [], None
+    for i, label in enumerate(labels + ["X"]):
+        if start is not None and label != labels[start]:
+            runs.append(i - start)
+            start = None
+        if start is None and label in ("H", "A"):
+            start = i
+    mean = sum(runs) / len(runs) / fps if runs else 0.0
+    return {"possessions": len(runs), "mean_seconds": round(mean, 2)}
 
 
 def run_method(method, workdir):
@@ -208,8 +223,16 @@ def main():
         sys.exit("NOT REPRODUCIBLE: two runs gave different files\n  " + "\n  ".join(digests))
 
     validate(final_csv)
-    min_alive = config.get("sanity", {}).get("min_alive_share", 0.2)
-    counts, problems = check_labels(final_csv, min_alive)
+    sanity = config.get("sanity", {})
+    counts, labels, problems = check_labels(final_csv, sanity.get("min_alive_share", 0.2))
+    stats = possession_stats(labels, sanity.get("fps", 25))
+    low, high = sanity.get("possession_seconds", [6, 40])
+    density_warning = None
+    if not low <= stats["mean_seconds"] <= high:
+        # a warning, not a stop: a real method can land here, but so can a collapse or explosion
+        density_warning = ("{} possessions of mean {:.1f} s is outside {}-{} s (public window: "
+                           "~14 s). Check for a collapsed or exploded possession count.".format(
+                               stats["possessions"], stats["mean_seconds"], low, high))
     if problems and not args.allow_degenerate:
         os.remove(final_csv)  # never leave a rejected file where it could be uploaded
         sys.exit("DEGENERATE  the file is valid but looks like an input was read as empty:\n  "
@@ -227,6 +250,8 @@ def main():
         "reproduced_twice_scope": "same machine and interpreter only; the real test is a clean "
                                   "clone + pinned environment giving this sha256",
         "label_counts": counts,
+        "possession_stats": stats,
+        "density_warning": density_warning,
         "method": method_name,
         "method_description": method.get("description"),
         "command": method["cmd"],
@@ -253,6 +278,9 @@ def main():
     print("\n-> {}".format(os.path.relpath(final_csv, ROOT)))
     print("-> {}".format(os.path.relpath(manifest_path, ROOT)))
     print("   sha256 {}".format(digests[0]))
+    print("   {} possessions of mean {:.1f} s".format(stats["possessions"], stats["mean_seconds"]))
+    if density_warning:
+        print("WARN  " + density_warning)
     if dirty:
         print("WARN  {} uncommitted or untracked file(s): the repo at {} might not regenerate this "
               "file. Commit first for the real one.".format(len(changes), commit[:7] if commit else "?"))

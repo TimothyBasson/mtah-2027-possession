@@ -7,7 +7,7 @@
 
   "inputs": ["data/tactical", "data/broadcast"],
 
-  "sanity": {"min_alive_share": 0.2},
+  "sanity": {"min_alive_share": 0.2, "possession_seconds": [6, 40], "fps": 25},
 
   "methods": {
     "hmm": {
