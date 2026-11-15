@@ -29,17 +29,24 @@ def base_probs(name, tags, n_halves):
 
 
 def viterbi_ev(logp, cost, bonus=None, ha_cost=None):
-    """Best path through (n, 3) log-probabilities. Any change of state costs `cost`; a direct
-    H<->A change at frame i costs cost - bonus[i] (bonus is the turnover evidence at i)."""
+    """Best path through (n, 3) log-probabilities. Any change of state costs `cost` (a direct
+    H<->A change `ha_cost` when given), less the turnover evidence at that frame: bonus is (n,)
+    for either direction or (n, 2) for [to home, to away]."""
     n = len(logp)
     back = np.zeros((n, 3), np.int8)
     v = logp[0].copy()
     base = -cost * (1 - np.eye(3))
-    ha = np.zeros((3, 3)); ha[0, 1] = ha[1, 0] = 1
     if ha_cost is not None:
-        base = base - (ha_cost - cost) * ha
+        base[0, 1] = base[1, 0] = -ha_cost
+    if bonus is not None and bonus.ndim == 1:
+        bonus = np.stack([bonus, bonus], 1)
+    hot = np.zeros(n, bool) if bonus is None else (bonus > 0).any(1)
     for i in range(1, n):
-        tr = base if bonus is None or bonus[i] == 0 else base + bonus[i] * ha
+        tr = base
+        if hot[i]:
+            tr = base.copy()
+            tr[1, 0] += bonus[i, 0]   # away -> home
+            tr[0, 1] += bonus[i, 1]   # home -> away
         s = v[:, None] + tr          # from, to
         back[i] = s.argmax(0)
         v = s.max(0) + logp[i]

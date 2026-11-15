@@ -101,7 +101,7 @@ def losses(o, b, a):
 
 @torch.no_grad()
 def predict_half(net, h, chunk=1500, overlap=100):
-    """ev, evf, cls (T, 3) for a half, the four symmetric views averaged; in overlapping chunks."""
+    """ev, evf, cls (T, 3) for a half, two symmetric views averaged; in overlapping chunks."""
     net.eval()
     n = len(h["X"])
     outs = {k: np.zeros((n, 3), np.float32) for k in ("ev", "evf", "cls")}
@@ -111,8 +111,8 @@ def predict_half(net, h, chunk=1500, overlap=100):
         s0, e0 = max(0, s - overlap), min(n, e + overlap)
         X, M, _ = TD.window(dict(X=h["X"], M=h["M"]), s0, e0 - s0)
         acc = {k: 0 for k in outs}
-        for sw in (0, 1):
-            for mi in (0, 1):
+        for sw, mi in ((0, 0), (1, 1)):
+            if True:
                 Xv = X
                 if sw:
                     Xv = TD.swap_teams(Xv)
@@ -123,7 +123,7 @@ def predict_half(net, h, chunk=1500, overlap=100):
                     p = F.softmax(o[k][0], -1).numpy()
                     if sw:
                         p = p[:, [0, 2, 1]] if k != "cls" else p[:, [1, 0, 2]]
-                    acc[k] = acc[k] + p / 4
+                    acc[k] = acc[k] + p / 2
         for k in outs:
             outs[k][s:e] = acc[k][s - s0:s - s0 + (e - s)]
         s = e
