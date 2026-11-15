@@ -5,8 +5,9 @@ The ball the model is shown ("shown") is not always the ball as recorded:
 
 - IDSSE freezes the ball while play is dead (it moves exactly zero), which no automatic tracker
   does. A frozen ball is treated as not observed, on every run.
-- mode "barath" shows the resting ball in 40% of IDSSE's stoppages (BAR-ATH's tracker does see a
-  dead ball: 15% of its ball-seen frames in the public window are dead), with a little jitter,
+- mode "barath" keeps the ball in view through 35% of IDSSE's and the Metrica samples' stoppages
+  (BAR-ATH's tracker does follow a dead ball: 15% of its ball-seen frames in the public window
+  are dead), on a made-up path from where it went out to where play restarts (dead_ball_path),
   and hides the ball the way BAR-ATH loses it in live play: in long gaps (BAR-ATH:
   99% of its missing frames sit in gaps over 5 s, median 10 s), not in the random 1-2 s dropouts
   `external/score.py --seen` makes. About 12% of live frames are hidden, which is the Metrica
@@ -81,9 +82,51 @@ def frozen(ball, fps):
     return out
 
 
-DEAD_SHOWN_SHARE = 0.4    # share of IDSSE's stoppages whose resting ball is shown in mode "barath"
-SMOOTH_FRAMES = (14.0, 18.0)  # half-width of the smoothing window in 25 fps frames, drawn per match
+DEAD_SHOWN_SHARE = 0.35   # share of stoppages whose ball stays in view in mode "barath"
 REST_JITTER = 0.02        # m, so a shown resting ball is not exactly still
+SMOOTH_FRAMES = (14.0, 18.0)  # half-width of the smoothing window in 25 fps frames, drawn per match
+
+
+def dead_runs(d):
+    """(start, stop) of each stoppage whose ball the provider does not track: IDSSE's frozen runs,
+    and the Metrica samples' dead spells (their ball is absent while play is dead)."""
+    prov = provider(d["name"])
+    if prov == "idsse":
+        mask = frozen(d["ball"], d["fps"])
+    elif prov == "metrica":
+        mask = (d["labels"] == "D") & ~np.isfinite(d["ball"][:, 0])
+    else:
+        return []
+    edges = np.flatnonzero(np.diff(np.r_[0, mask.astype(np.int8), 0]))
+    return list(zip(edges[::2], edges[1::2]))
+
+
+def dead_ball_path(ball, a, b, fps, rng):
+    """A made-up path for a ball in view through the stoppage a..b: it rests where it went out,
+    is brought to where play restarts at walking-to-throwing pace, and rests there. Returns the
+    (b - a, 2) path, or None when either end is unknown."""
+    n = len(ball)
+    lo = a - 1
+    while lo >= 0 and lo > a - 3 * fps and not np.isfinite(ball[lo, 0]):
+        lo -= 1
+    hi = b
+    while hi < n and hi < b + 3 * fps and not np.isfinite(ball[hi, 0]):
+        hi += 1
+    if lo < 0 or hi >= n or not np.isfinite(ball[lo, 0]) or not np.isfinite(ball[hi, 0]):
+        return None
+    p0, p1 = ball[lo, :2], ball[hi, :2]
+    m = b - a
+    dist = np.hypot(*(p1 - p0))
+    travel = int(min(max(dist / rng.uniform(2.0, 8.0), 0.5) * fps, 0.8 * m))
+    rest_end = int(min(rng.uniform(0.5, 6.0) * fps, (m - travel) * 0.7))
+    start = int(rng.uniform(0, max(m - travel - rest_end, 1)))
+    t = np.clip((np.arange(m) - start) / max(travel, 1), 0, 1)
+    t = t * t * (3 - 2 * t)
+    path = p0[None] + (p1 - p0)[None] * t[:, None]
+    # a little wander, as a ball carried or rolled back has
+    wander = np.cumsum(rng.standard_normal((m, 2)) * 0.03, 0)
+    wander -= np.linspace(0, 1, m)[:, None] * wander[-1]
+    return path + wander + REST_JITTER * rng.standard_normal((m, 2))
 
 
 def shown_ball(d, mode="native", seed=0):
@@ -96,16 +139,21 @@ def shown_ball(d, mode="native", seed=0):
     rng = np.random.default_rng(zlib.crc32(f"{d['name']} {seed}".encode()))
     hide = np.zeros(n, bool)
     if prov == "idsse" and mode != "recorded":
-        fz = frozen(ball, fps)
-        hide |= fz
-        if mode == "barath":
-            # some stoppages keep their resting ball in view: all of it, or the seconds before the restart
-            edges = np.flatnonzero(np.diff(np.r_[0, fz.astype(np.int8), 0]))
-            for a, b in zip(edges[::2], edges[1::2]):
-                if rng.random() < DEAD_SHOWN_SHARE:
-                    s = a if rng.random() < 0.5 else max(a, b - int(fps * rng.uniform(1, 10)))
-                    hide[s:b] = False
-                    ball[s:b, :2] += REST_JITTER * rng.standard_normal((b - s, 2))
+        hide |= frozen(ball, fps)
+    if mode == "barath":
+        src = ball.copy()
+        src[hide] = np.nan
+        for a, b in dead_runs(d):
+            if b - a < 2 * fps or rng.random() > DEAD_SHOWN_SHARE:
+                continue
+            path = dead_ball_path(src, a, b, fps, rng)
+            if path is None:
+                continue
+            u = rng.random()  # all of the stoppage, only its end, or only its start
+            s, e = (a, b) if u < 0.4 else (max(a, b - int(fps * rng.uniform(1, 10))), b) if u < 0.7 else \
+                (a, min(b, a + int(fps * rng.uniform(1, 10))))
+            ball[s:e, :2] = path[s - a:e - a]
+            hide[s:e] = False
     if mode == "barath" and prov in ("idsse", "skillcorner"):
         mean_len = LIVE_GAP_MEDIAN * np.exp(LIVE_GAP_SIGMA ** 2 / 2) * fps
         rate = LIVE_GAP_SHARE / mean_len  # gap starts per frame

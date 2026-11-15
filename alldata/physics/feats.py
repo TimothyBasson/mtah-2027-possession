@@ -4,6 +4,8 @@ For each half, at every STEP-th frame, one row of features in five groups:
 
   ball     where the ball is, how fast, how its velocity just changed, how near each team is to it
            now, a little earlier and a little later (centred windows: the task is offline)
+  carry    the same distances against players smoothed as BAR-ATH's ball is smoothed, the ball's
+           speed relative to the nearest of them, and how long one team has been carrying it
   touch    the touches found in the ball's path (ball.py): the team and timing of the last three
            and the next three, how many touches in a row each of those teams strings together,
            and the touch balance over a few seconds either way. This is the organisers' control
@@ -32,6 +34,34 @@ OFFS = (-4.0, -2.0, -1.0, -0.4, 0.4, 1.0, 2.0, 4.0)
 WINS = ((0.0, 1.0), (1.0, 2.0), (2.0, 4.0), (4.0, 8.0))
 NEAR = 1.5     # m: a player this close "has" the ball for the near-control share
 CLEAR = 0.5    # ... if the other team's nearest is at least this much further
+
+
+SMOOTH_HALF_WIDTH = 16.0  # frames at 25 fps: the middle of common.SMOOTH_FRAMES
+
+
+def smooth_columns(X, half_width):
+    """Each column smoothed by the parabolic window BAR-ATH's ball carries, NaN-aware."""
+    h = int(np.ceil(half_width))
+    w = np.clip(1 - (np.arange(-h, h + 1) / half_width) ** 2, 0, None)
+    ok = np.isfinite(X)
+    from scipy.ndimage import convolve1d
+    num = convolve1d(np.where(ok, X, 0.0), w, axis=0, mode="constant")
+    den = convolve1d(ok.astype(float), w, axis=0, mode="constant")
+    out = num / np.maximum(den, 1e-9)
+    out[~ok] = np.nan
+    return out
+
+
+def _shiftc(X, k):
+    """Rows of X shifted by k (X[t + k]), NaN beyond the ends."""
+    out = np.full(X.shape, np.nan)
+    if k > 0:
+        out[:-k] = X[k:]
+    elif k < 0:
+        out[-k:] = X[:k]
+    else:
+        out[:] = X
+    return out
 
 
 def _shift(x, k):
@@ -136,6 +166,54 @@ def half_features(players, ball, shown, team, prior, pitch, fps, extra=None):
             add(f"n_diff{r:g}", (cH - cA)[t])
             add(f"n_sum{r:g}", (cH + cA)[t])
 
+        # ---- the same distances with the players smoothed as the ball is ------------------------
+        # BAR-ATH's ball is a 1.3 s moving average of the real one (common.py); a dribbled ball
+        # then trails its carrier. Against the carrier's own 1.3 s average it does not.
+        hw = SMOOTH_HALF_WIDTH * fps / 25
+        sx, sy = smooth_columns(px, hw), smooth_columns(py, hw)
+        dist_s = np.hypot(sx - bx[:, None], sy - by[:, None])
+        iH = np.where(np.isfinite(dist_s[:, H]), dist_s[:, H], np.inf)
+        iA = np.where(np.isfinite(dist_s[:, A]), dist_s[:, A], np.inf)
+        sH = np.where(np.isfinite(bx), np.minimum(iH.min(1), 30.0), np.nan)
+        sA = np.where(np.isfinite(bx), np.minimum(iA.min(1), 30.0), np.nan)
+        ssd = np.clip(sA, 0, 15) - np.clip(sH, 0, 15)
+        smin = np.minimum(sH, sA)
+        add("s_sd", ssd[t])
+        add("s_min", smin[t])
+        # speed of the ball relative to each team's nearest (smoothed) player: near zero when carried
+        j2 = max(1, sec(0.2))
+        vsx, vsy = (_shiftc(sx, j2) - _shiftc(sx, -j2)) * fps / (2 * j2), (_shiftc(sy, j2) - _shiftc(sy, -j2)) * fps / (2 * j2)
+        rows_ = np.arange(n)
+        kH, kA = np.flatnonzero(H)[iH.argmin(1)], np.flatnonzero(A)[iA.argmin(1)]
+        rvH = np.hypot(vsx[rows_, kH] - k["vx"], vsy[rows_, kH] - k["vy"])
+        rvA = np.hypot(vsx[rows_, kA] - k["vx"], vsy[rows_, kA] - k["vy"])
+        add("s_relv_home", rvH[t])
+        add("s_relv_away", rvA[t])
+        # carried: within 2 m of a smoothed player and moving with him
+        carry = np.where(np.isfinite(smin), 0.0, np.nan)
+        carry = np.where((sH < 2.0) & (rvH < 2.5) & ~((sA < 2.0) & (rvA < rvH)), 1.0, carry)
+        carry = np.where((sA < 2.0) & (rvA < 2.5) & ~((sH < 2.0) & (rvH <= rvA)), -1.0, carry)
+        add("s_carry", carry[t])
+        wssd, wcar = _Win(ssd), _Win(carry)
+        for o in OFFS:
+            add(f"s_sd@{o:+g}", _shift(ssd, sec(o))[t])
+        for lo, hi in WINS:
+            for tag, a, b in ((f"+{lo:g}_{hi:g}", sec(lo), sec(hi)), (f"-{lo:g}_{hi:g}", -sec(hi), -sec(lo))):
+                add(f"ws_sd{tag}", wssd.mean(t, a, b))
+                add(f"ws_carry{tag}", wcar.mean(t, a, b))
+        # how long the same team has been, and will stay, the carrier (runs of carry of one sign)
+        cz = np.nan_to_num(carry, nan=0.0)
+        for sgn, nm in ((1.0, "home"), (-1.0, "away")):
+            on = cz == sgn
+            idx_ = np.arange(n)
+            lastoff = np.maximum.accumulate(np.where(~on, idx_, -1))
+            nextoff = np.minimum.accumulate(np.where(~on, idx_, n)[::-1])[::-1]
+            laston = np.maximum.accumulate(np.where(on, idx_, -10 ** 9))
+            nexton = np.minimum.accumulate(np.where(on, idx_, 10 ** 9)[::-1])[::-1]
+            add(f"s_carry_{nm}_since", np.minimum((idx_ - laston) / fps, 30.0)[t])
+            add(f"s_carry_{nm}_until", np.minimum((nexton - idx_) / fps, 30.0)[t])
+            add(f"s_carry_{nm}_run", np.where(on, np.minimum((nextoff - lastoff - 1) / fps, 30.0), 0.0)[t])
+
         # ---- touches -----------------------------------------------------------------------
         tf, tt = touches["frame"], touches["team"]            # team +1 home, -1 away, 0 nobody near
         own = tt != 0
@@ -220,6 +298,21 @@ def half_features(players, ball, shown, team, prior, pitch, fps, extra=None):
         # the ball's outward speed towards the nearer line when it was last seen
         vout = np.maximum(np.sign(by - W / 2) * k["vy_edge"], np.sign(cx) * sign * k["vx_edge"])
         add("g_lost_vout", np.where(gone & (last >= 0), vout[lc], np.nan)[t])
+
+        # ---- out of play: when the shown ball was last, and is next, beyond a line ------------
+        margin = np.minimum(W / 2 - cy, L / 2 - np.abs(cx))
+        isout = np.nan_to_num(margin, nan=1.0) < -0.5
+        lo_ = np.maximum.accumulate(np.where(isout, idx, -10 ** 9))
+        no_ = np.minimum.accumulate(np.where(isout, idx, 10 ** 9)[::-1])[::-1]
+        add("o_since", np.minimum((idx - lo_) / fps, 60.0)[t])
+        add("o_until", np.minimum((no_ - idx) / fps, 60.0)[t])
+        wm = _Win(np.where(np.isfinite(margin), np.minimum(margin, 5.0), np.nan))
+        add("o_margin-5", wm.mean(t, -sec(5), 0))
+        add("o_margin+5", wm.mean(t, 0, sec(5)))
+        oend = isout & (np.nan_to_num(L / 2 - np.abs(cx), nan=1.0) < -0.5)   # over a goal line
+        le_ = np.maximum.accumulate(np.where(oend, idx, -10 ** 9))
+        add("o_end_since", np.minimum((idx - le_) / fps, 60.0)[t])
+        add("o_end_side", np.where(idx - le_ < 60 * fps, np.sign(cx[np.clip(le_, 0, n - 1)]), 0.0)[t])
 
         # ---- players -----------------------------------------------------------------------
         nH, nA = np.sum(np.isfinite(px[:, H]), 1), np.sum(np.isfinite(px[:, A]), 1)
