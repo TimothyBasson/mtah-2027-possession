@@ -1,0 +1,213 @@
+"""Tracking with the ball -> per-frame feature rows for the all-data model (5 fps).
+
+Everything here may read the ball. One row per STEP-th frame of a half, in the canonical frame of
+deep/data.py (centre spot at 0, home defending x < 0), built so that swapping the teams and
+mirroring the pitch are a column permutation and sign flips (SWAP_PERM, SWAP_SIGN, MIRROR_SIGN).
+
+Blocks: the ball (seen, how long unseen, position carried across gaps, velocity, change of
+velocity, where it is against the lines), each team against the ball (nearest players, closing
+speed, players near it), each team alone (players tracked, centroid), and optional per-frame
+probabilities of other models (the players-only net bt; in the "with Tim" variant, his HMM).
+"""
+
+import os
+import sys
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+sys.path[:0] = [os.path.join(ROOT, "deep")]
+import data as D  # noqa: E402
+
+STEP = D.STEP
+CLIP_T = 10.0  # s
+
+
+def _runs(mask):
+    e = np.flatnonzero(np.diff(mask.astype(np.int8)) != 0) + 1
+    s, t = np.r_[0, e], np.r_[e, len(mask)]
+    return s, t, mask[s]
+
+
+def simulate_visibility(xy, labels, rng, fps=25):
+    """A ball seen the way BAR-ATH's is: tracked through live play, lost for the core of most
+    stoppages and now and then in open play. xy (n, 2) with NaN where unseen; labels H/A/D/X.
+    Sources differ (IDSSE sees the ball always, Metrica's samples never in a stoppage), so both
+    are pushed to the same randomised pattern: after a stoppage starts the ball stays for u1
+    seconds, before it ends it is back for u2 seconds; hidden between. Where the source has no
+    ball in a stoppage, it is held still at the last / next seen place for those seconds."""
+    xy = xy.copy()
+    n = len(xy)
+    seen = np.isfinite(xy[:, 0])
+    q = rng.uniform(0.3, 1.0)
+    m1, m2 = rng.uniform(0.3, 8.0, 2)
+    dead = labels == "D"
+    s, t, v = _runs(dead)
+    reach = 3 * fps  # the source may lose the ball a little before the label says dead
+    for a, b in zip(s[v], t[v]):
+        pa = np.flatnonzero(seen[max(a - reach, 0):a])
+        pb = np.flatnonzero(seen[b:b + reach])
+        before = xy[max(a - reach, 0) + pa[-1]] if len(pa) else None
+        after = xy[b + pb[0]] if len(pb) else None
+        if rng.random() > q:  # this stoppage keeps its ball throughout
+            if before is not None and after is not None:
+                k = np.flatnonzero(~seen[a:b]) + a
+                w = ((k - a + 1) / (b - a + 1))[:, None]
+                xy[k] = before * (1 - w) + after * w
+            continue
+        u1, u2 = int(rng.exponential(m1) * fps), int(rng.exponential(m2) * fps)
+        lo, hi = a + u1, b - u2
+        if before is not None:
+            k = np.flatnonzero(~seen[a:min(lo, b)]) + a
+            xy[k] = before
+        if after is not None:
+            k = np.flatnonzero(~seen[max(hi, a):b]) + max(hi, a)
+            xy[k] = after
+        if lo < hi:
+            xy[lo:hi] = np.nan
+    rate = rng.uniform(0, 0.5) / 60 / fps  # gaps per live frame
+    live = np.flatnonzero((labels == "H") | (labels == "A"))
+    for a in live[rng.random(len(live)) < rate]:
+        xy[a:a + int(rng.uniform(1, 20) * fps)] = np.nan
+    return xy
+
+
+NAMES = []
+
+
+def half_features(players, ball_xy, team, a, b, pitch, fps=25, extra=None):
+    """(T, F) float32 for frames a..b (inclusive), sampled every STEP frames. ball_xy (n, 2) in
+    metres from the corner, NaN where unseen (callers may have changed what is seen). extra:
+    list of (name, (T, 3) H/A/D probabilities) appended as inputs."""
+    L, W = float(pitch[0]), float(pitch[1])
+    hl, hw = L / 2, W / 2
+    xy = players[a:b + 1, :, :2].astype(np.float32) - np.array([hl, hw], np.float32)
+    bxy = ball_xy[a:b + 1].astype(np.float32) - np.array([hl, hw], np.float32)
+    if not D.home_defends_left(players, team, a, b):
+        xy, bxy = -xy, -bxy
+    n = len(xy)
+    seen = np.isfinite(bxy[:, 0])
+    idx = np.arange(n)
+    if seen.any():
+        si = idx[seen]
+        bi = np.stack([np.interp(idx, si, bxy[seen, k]) for k in (0, 1)], 1).astype(np.float32)
+        last = np.maximum.accumulate(np.where(seen, idx, -10 ** 6))
+        nxt = np.minimum.accumulate(np.where(seen, idx, 10 ** 7)[::-1])[::-1]
+    else:
+        bi = np.zeros((n, 2), np.float32)
+        last, nxt = np.full(n, -10 ** 6), np.full(n, 10 ** 7)
+    since = np.clip((idx - last) / fps, 0, CLIP_T) / CLIP_T
+    until = np.clip((nxt - idx) / fps, 0, CLIP_T) / CLIP_T
+    gap = np.where(seen, 0, np.clip((nxt - last) / fps, 0, 60) / 60)
+    k = 2
+    v = np.zeros_like(bi)
+    v[k:-k] = (bi[2 * k:] - bi[:-2 * k]) * (fps / (2 * k))
+    v = np.clip(v, -40, 40)
+    acc = np.zeros(n, np.float32)
+    acc[k:-k] = np.linalg.norm(v[2 * k:] - v[:-2 * k], axis=1)
+    speed = np.linalg.norm(v, axis=1)
+    # the ball against the lines (metres inside; negative is out)
+    in_x, in_y = hl - np.abs(bi[:, 0]), hw - np.abs(bi[:, 1])
+    # players against the ball
+    ok = np.isfinite(xy[:, :, 0])
+    dist = np.linalg.norm(np.nan_to_num(xy, nan=1e4) - bi[:, None], axis=-1)
+    dist[~ok] = 1e4
+    psp = np.nan_to_num(players[a:b + 1, :, 2].astype(np.float32))
+    psp[psp > D.MAX_SPEED] = 0
+
+    def maxpool(x, r=2):  # max over +-r frames
+        out = x.copy()
+        for s in range(1, r + 1):
+            out[s:] = np.maximum(out[s:], x[:-s])
+            out[:-s] = np.maximum(out[:-s], x[s:])
+        return out
+
+    sel = np.arange(0, n, STEP)
+    cols, names = [], []
+
+    def add(name, x):
+        cols.append(np.asarray(x, np.float32)[sel] if len(x) == n else np.asarray(x, np.float32))
+        names.append(name)
+
+    add("seen", seen)
+    add("since", since)
+    add("until", until)
+    add("gap", gap)
+    add("speed", np.log1p(speed) / 3)
+    add("acc", np.log1p(maxpool(acc)) / 3)
+    add("in_x", np.clip(in_x, -5, 20) / 10)
+    add("in_y", np.clip(in_y, -5, 20) / 10)
+    add("goal_y", np.clip(np.abs(bi[:, 1]), 0, 20) / 10)  # distance from the goal's axis
+    add("pspeed", np.where(ok, psp, np.nan).mean(1) if False else (psp * ok).sum(1) / np.maximum(ok.sum(1), 1) / 3)
+    add("bx", bi[:, 0] / 52.5)
+    add("vx", v[:, 0] / 10)
+    add("by", bi[:, 1] / 34.0)
+    add("vy", v[:, 1] / 10)
+    team_cols = {}
+    for ti, tn in ((0, "h"), (1, "a")):
+        m = team == ti
+        dt = dist[:, m]
+        part = np.sort(dt, axis=1)[:, :3] if dt.shape[1] >= 3 else np.pad(np.sort(dt, axis=1), ((0, 0), (0, 3 - dt.shape[1])), constant_values=1e4)
+        d1, d2, d3 = part[:, 0], part[:, 1], part[:, 2]
+        near = dt.argmin(1)
+        nsp = psp[:, m][idx, near]
+        nxy = np.nan_to_num(xy[:, m][idx, near])
+        nv = np.zeros_like(nxy)
+        nv[k:-k] = (nxy[2 * k:] - nxy[:-2 * k]) * (fps / (2 * k))
+        nv[np.linalg.norm(nv, axis=1) > D.MAX_SPEED] = 0
+        rel = bi - nxy
+        d1c = np.minimum(d1, 60)
+        close = np.zeros(n, np.float32)
+        close[k:-k] = -(d1c[2 * k:] - d1c[:-2 * k]) * (fps / (2 * k))
+        okt = ok[:, m]
+        cx = np.where(okt, xy[:, m, 0], 0).sum(1) / np.maximum(okt.sum(1), 1)
+        cvx = np.zeros(n, np.float32)
+        cvx[12:-12] = (cx[24:] - cx[:-24]) * (fps / 24)
+        f = dict(d1=np.log1p(np.minimum(d1, 60)) / 2, d2=np.log1p(np.minimum(d2, 60)) / 2,
+                 d3=np.log1p(np.minimum(d3, 60)) / 2,
+                 dmin=np.log1p(np.minimum(-maxpool(-d1), 60)) / 2,
+                 touch=np.exp(-d1 / 1.5), nsp=nsp / 5, close=np.clip(close, -15, 15) / 5,
+                 relv=np.clip(np.linalg.norm(v - nv, axis=1), 0, 30) / 10,
+                 n2=(dt < 2).sum(1) / 3, n5=(dt < 5).sum(1) / 5, cnt=okt.sum(1) / 11,
+                 cx=cx / 52.5 * (1 if ti == 0 else 1), cvx=np.clip(cvx, -8, 8) / 3,
+                 relx=np.clip(rel[:, 0], -20, 20) / 5)
+        team_cols[tn] = f
+    tnames = list(team_cols["h"])
+    for tn in "ha":
+        for nm in tnames:
+            add(f"{tn}_{nm}", team_cols[tn][nm])
+    add("margin", np.clip((np.minimum(dist[:, team == 1].min(1), 60) - np.minimum(dist[:, team == 0].min(1), 60)), -10, 10) / 5)
+    T = len(sel)
+    for nm, p in (extra or []):
+        p = np.asarray(p, np.float32)[:T]
+        if len(p) < T:
+            p = np.pad(p, ((0, T - len(p)), (0, 0)), mode="edge")
+        lp = np.log(np.clip(p, 1e-4, 1)) / 4 + 1
+        for j, c in enumerate("HAD"):
+            cols.append(lp[:, j]); names.append(f"{nm}_{c}")
+    NAMES[:] = names
+    return np.stack(cols, 1).astype(np.float32), a + sel
+
+
+def symmetry(names):
+    """Column permutation and signs for the team swap, and signs for the mirror."""
+    pos = {n: i for i, n in enumerate(names)}
+    perm = np.arange(len(names))
+    sw = np.ones(len(names), np.float32)
+    mi = np.ones(len(names), np.float32)
+    for n, i in pos.items():
+        if n in ("bx", "vx", "by", "vy", "margin"):
+            sw[i] = -1
+        if n in ("by", "vy"):
+            mi[i] = -1
+        if n[:2] in ("h_", "a_"):
+            o = ("a_" if n[0] == "h" else "h_") + n[2:]
+            perm[i] = pos[o]
+            if n[2:] in ("cx", "cvx", "relx"):
+                sw[i] = -1
+        if n.endswith("_H") and n[:-2] + "_A" in pos:
+            perm[i] = pos[n[:-2] + "_A"]
+        if n.endswith("_A") and n[:-2] + "_H" in pos:
+            perm[i] = pos[n[:-2] + "_H"]
+    return perm, sw, mi
