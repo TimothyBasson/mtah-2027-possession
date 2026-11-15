@@ -29,7 +29,8 @@ interpreter running the script) and `{workdir}` (an empty scratch folder), and m
 ## Checklist before the form
 
 Team and accounts
-- [ ] Team name agreed, exactly as on the registration form, and set in `submission.json`
+- [x] Team name set in `submission.json`: **Gambtt**
+- [ ] Confirm it matches the registration form exactly (spelling and case)
 - [ ] Whoever uploads has a Google account and has opened the form link (sent by email)
 - [ ] Team has 3 to 5 members (needed for the Innovation Challenge and the Final Pitch)
 

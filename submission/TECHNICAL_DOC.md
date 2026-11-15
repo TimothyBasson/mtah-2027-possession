@@ -1,5 +1,5 @@
 <!--
-DRAFT. Rename to <team_name>.md (or export <team_name>.pdf) when it is uploaded: SUBMISSION.md asks
+DRAFT. Rename to Gambtt.md (or export Gambtt.pdf) when it is uploaded: SUBMISSION.md asks
 for both files to carry the team name. *.pdf is git-ignored in this repo, so export the PDF into
 submission/out/.
 
@@ -7,7 +7,7 @@ The six sections below are the ones SUBMISSION.md lists. "A few pages is plenty.
 Lines starting "TODO" are decisions still open; delete them as they close.
 -->
 
-# TEAM_NAME_TBD: who has the ball, frame by frame
+# Gambtt: who has the ball, frame by frame
 
 **More than a Hack 2027, Phase 1: Ball Possession** · repository: TODO public URL · commit: TODO
 
