@@ -83,7 +83,7 @@ def decode_one(name):
     np.save(os.path.join(TIM, "labels", name + ".npy"), np.array([CODES[c] for c in pred], np.int8))
     import possession_metrics as pm
     from build import table_path
-    z = np.load(table_path(name, "barath", "f4"))
+    z = np.load(table_path(name, "barath", "f5"))
     p = pm.label_codes(pred)
     return name, [pm.evaluate(pm.label_codes(z[k]), p, bootstrap_n=0)["spell_f1_mean"] for k in ("labels", "folded")]
 

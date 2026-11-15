@@ -36,11 +36,21 @@ def keep_columns(names, drop):
     return np.array([not any(n.startswith(p) for p in drop) for n in names])
 
 
-def load_tables(names, mode, tag, modes_extra=()):
+def load_tables(names, mode, tag, extra=None):
+    """Feature tables by match. extra="tim" appends columns read from Tim's decoder's labels
+    (tim.py), in both team orientations."""
     out = {}
     for n in names:
         z = np.load(table_path(n, mode, tag))
-        out[n] = {k: z[k] for k in z.files}
+        t = {k: z[k] for k in z.files}
+        if extra == "tim":
+            import tim
+            F, Fs, nm = tim.features(tim.labels(n), t["frames"], [tuple(h) for h in t["halves"]])
+            t["F"] = np.concatenate([t["F"], F], 1)
+            if "Fs" in t:
+                t["Fs"] = np.concatenate([t["Fs"], Fs], 1)
+            t["names"] = np.r_[t["names"], np.array(nm)]
+        out[n] = t
     return out
 
 
@@ -67,7 +77,7 @@ def rows(tabs, names, target, stride, keep, extra_tabs=()):
 # SkillCorner; elsewhere it is made up (common.dead_ball_path), so how such a ball moves, who is
 # near it and what touches it shows must not decide alive or dead. Where it is, whether it is
 # shown, the players and the players-only prior may.
-DEAD_COLUMNS = ("q_", "p_", "g_", "o_", "b_x", "b_absy", "b_side_margin", "b_end_margin")
+DEAD_COLUMNS = ("q_", "p_", "g_", "o_", "z_", "b_x", "b_absy", "b_side_margin", "b_end_margin")
 
 
 class TwoHeads:
@@ -130,26 +140,28 @@ def main():
     ap.add_argument("--trees", type=int, default=PARAMS["n_estimators"])
     ap.add_argument("--leaves", type=int, default=PARAMS["num_leaves"])
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--more", nargs="*", default=[], help="table tags of further simulated copies to train on")
+    ap.add_argument("--extra", choices=["tim"], help="also read Tim's decoder's labels (tim.py)")
     ap.add_argument("--jobs", type=int, default=PARAMS["n_jobs"])
     ap.add_argument("--heads", action="store_true", help="separate dead-ball and team heads (TwoHeads)")
     ap.add_argument("--test-mode", default=None, help="ball mode of the held-out matches (default: --mode)")
     a = ap.parse_args()
     params = dict(PARAMS, n_estimators=a.trees, num_leaves=a.leaves, random_state=a.seed, n_jobs=a.jobs)
     names = C.names()
-    tabs = load_tables(names, a.mode, a.tag)
-    test_tabs = tabs if not a.test_mode or a.test_mode == a.mode else load_tables(names, a.test_mode, a.tag)
+    tabs = load_tables(names, a.mode, a.tag, a.extra)
+    test_tabs = tabs if not a.test_mode or a.test_mode == a.mode else load_tables(names, a.test_mode, a.tag, a.extra)
+    more = tuple(load_tables(names, a.mode, t, a.extra) for t in a.more)
     cols = tabs[names[0]]["names"]
     keep = keep_columns(cols, a.drop)
     print(f"{keep.sum()} of {len(cols)} features", flush=True)
     if a.fold == "none":
         import joblib
-        X, y, w = rows(tabs, names, a.target, a.stride, keep)
+        X, y, w = rows(tabs, names, a.target, a.stride, keep, more)
         m = fit(X, y, w, params, cols[keep], a.heads)
         os.makedirs(os.path.join(HERE, "models"), exist_ok=True)
         joblib.dump(dict(model=m, keep=keep, names=cols, args=vars(a)),
                     os.path.join(HERE, "models", a.run + ".joblib"), compress=3)
-        z = np.load(table_path("bar_ath", a.mode, a.tag))
-        t = {k: z[k] for k in z.files}
+        t = load_tables(["bar_ath"], a.mode, a.tag, a.extra)["bar_ath"]
         save_probs(a.run, "bar_ath", t, predict(m, t, keep))
         return
     if a.fold == "cv":  # three folds of matches, every provider in training: what BAR-ATH's model sees
@@ -159,7 +171,7 @@ def main():
         folds = [(p, [n for n in names if C.provider(n) == p]) for p in (C.PROVIDERS if a.fold == "all" else [a.fold])]
     for prov, held in folds:
         tr = [n for n in names if n not in held]
-        X, y, w = rows(tabs, tr, a.target, a.stride, keep)
+        X, y, w = rows(tabs, tr, a.target, a.stride, keep, more)
         m = fit(X, y, w, params, cols[keep], a.heads)
         for n in held:
             save_probs(a.run, n, test_tabs[n], predict(m, test_tabs[n], keep))

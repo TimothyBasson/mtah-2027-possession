@@ -26,7 +26,7 @@ GRID = [dict(cost=c, cost_dead=cd, min_team=t, min_dead=d)
         for c in (2.0, 4.0, 8.0) for cd in (None, 2 * c) for t, d in ((0.5, 1.0), (1.0, 1.0), (1.0, 2.0), (2.0, 3.0))]
 
 
-def truth(name, mode="barath", tag="f4"):
+def truth(name, mode="barath", tag="f5"):
     z = np.load(table_path(name, mode, tag))
     return z["labels"], z["folded"], [tuple(int(v) for v in h) for h in z["halves"]]
 
