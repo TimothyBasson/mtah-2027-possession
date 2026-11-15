@@ -1,14 +1,13 @@
 """Train the "who controls the ball" classifier (hmm/control.py) on the external matches.
 
-    python external/control_features.py             # features, once (~3 min)
+    python external/control_features.py             # features, once (~10 min)
     python external/train_control.py                # -> hmm/models/control_state.npz
     python external/train_control.py --loso         # held-out posteriors for score_control.py
 
 Needs scikit-learn, pinned in requirements-dev.txt. The decoder does not: the fitted trees are
 exported to plain arrays (hmm/trees.py), the model is committed as hmm/models/control_state.npz
-(it is derived from the open external data only), and the decoder evaluates it in numpy. Retrained
-with scikit-learn 1.6.1 from the same features it comes out byte-identical; the sha256 printed at
-the end is the check.
+(it is derived from the open external data only), and the decoder evaluates it in numpy. The
+sha256 printed at the end is the one hmm/models/README.md records.
 
 The target is the label per frame, H / A / D, folded towards the challenge's controlled-possession
 rule (external/control.py): a spell under 2 s with fewer than 2 own touches goes back to the team
@@ -17,15 +16,19 @@ the raw labels (held-out mean spellF1 gain +0.037, against +0.036) and worse aga
 ones (+0.042, against +0.052), and the folded labels are the ones that follow the challenge's rule.
 Every match counts in both team orientations (the
 features computed with the teams swapped, the label swapped to match), so the classifier learns no
-home or away bias. Rows are every STEP-th graded frame: neighbouring frames repeat each other.
+home or away bias. Rows are every graded frame the features are cached on (every 5th,
+hmm.control.STRIDE): neighbouring frames repeat each other. The three providers count equally
+(rows()), so SkillCorner's 20 matches and IDSSE's 7 do not outvote Metrica's 3.
 
 --loso trains three models, each with one set (IDSSE, Metrica, SkillCorner) left out, and saves
 the left-out set's posteriors, so external/score_control.py can score the decoder on matches the
 classifier never saw. Without it, one model is trained on all 30 matches for BAR-ATH.
 
-The model is a HistGradientBoostingClassifier with early stopping on a 10% validation split.
-Settings were not swept: held-out log loss with every 5th frame is 0.28 / 0.53 / 1.10 (IDSSE /
-Metrica / SkillCorner left out).
+The model is a HistGradientBoostingClassifier: 300 rounds, no early stopping, at least 200 rows a
+leaf and an L2 penalty of 1 (seq/model.py's settings, not swept here). Held-out log loss is
+0.24 / 0.53 / 0.76 (IDSSE / Metrica / SkillCorner left out); v7's classifier, which read the ball
+on its own, stopped early on a random 10% of rows and counted every row once, had
+0.27 / 0.54 / 1.08.
 """
 
 import argparse
@@ -43,9 +46,10 @@ sys.path.insert(0, os.path.join(ROOT, "external"))
 from control import control_labels  # noqa: E402
 from control_features import CACHE  # noqa: E402
 from hmm import trees  # noqa: E402
+from hmm.control import hold  # noqa: E402
 
 SETS = ("idsse", "metrica", "skillcorner")
-STEP = 5
+ITERATIONS = 300
 MODEL_PATH = os.path.join(ROOT, "hmm", "models", "control_state.npz")
 SWAP = np.array([1, 0, 2])  # H <-> A, D stays
 
@@ -55,15 +59,17 @@ def code(labels):
 
 
 def load_matches():
+    """{match: (X, Xs, label codes on the cached frames, column names, frames, frames in the match)}"""
     matches = {}
-    for path in sorted(glob.glob(os.path.join(CACHE, "control_*_*.npz"))):
-        name = os.path.basename(path)[len("control_"):-4]
+    for path in sorted(glob.glob(os.path.join(CACHE, "control_v8_*_*.npz"))):
+        name = os.path.basename(path)[len("control_v8_"):-4]
         if not name.startswith(SETS):
             continue
         z = np.load(path)
         labels = control_labels(dict(np.load(os.path.join(ROOT, "data", "external",
                                                           name + ".npz"))))
-        matches[name] = (z["X"], z["Xs"], code(labels), list(z["names"]))
+        matches[name] = (z["X"], z["Xs"], code(labels)[z["frames"]], list(z["names"]),
+                         z["frames"], len(labels))
     if not matches:
         sys.exit("no features in {}: run external/control_features.py first".format(CACHE))
     return matches
@@ -75,20 +81,33 @@ def keep_columns(names, drop):
 
 
 def rows(matches, names):
-    X, y = [], []
+    """(X, y, weight): every graded cached frame of these matches, in both team orientations. The
+    weights make each provider count the same, however many matches it has: unweighted, IDSSE and
+    SkillCorner would outvote Metrica's three."""
+    X, y, w = [], [], []
+    graded = {k: sum(int(np.sum(matches[n][2] >= 0)) for n in names if n.startswith(k))
+              for k in SETS}
     for n in names:
-        a, b, labels, _ = matches[n]
-        g = np.flatnonzero(labels >= 0)[::STEP]
+        a, b, labels = matches[n][:3]
+        g = np.flatnonzero(labels >= 0)
         X += [a[g], b[g]]
         y += [labels[g], SWAP[labels[g]]]
-    return np.vstack(X), np.concatenate(y)
+        w.append(np.full(2 * len(g), 1.0 / graded[n.split("_")[0]]))
+    w = np.concatenate(w)
+    return np.vstack(X), np.concatenate(y), w / w.mean()
 
 
-def fit(X, y):
+def fit(X, y, weight):
+    """No early stopping and a fixed seed, so a refit on the same rows gives the same trees. The
+    leaf floor and the L2 penalty are seq/model.py's, taken as they were and not swept here."""
     from sklearn.ensemble import HistGradientBoostingClassifier
     return HistGradientBoostingClassifier(
-        max_iter=300, learning_rate=0.1, max_leaf_nodes=63, early_stopping=True,
-        validation_fraction=0.1, random_state=0).fit(X, y)
+        max_iter=ITERATIONS, learning_rate=0.1, max_leaf_nodes=63, min_samples_leaf=200,
+        l2_regularization=1.0, early_stopping=False, random_state=0).fit(X, y, sample_weight=weight)
+
+
+def class_shares(y, weight):
+    return np.bincount(y, weights=weight, minlength=3) / weight.sum()
 
 
 def posteriors(model, a, b):
@@ -108,32 +127,37 @@ def main():
     keep = keep_columns(names, [d for d in a.drop.split(",") if d])
     if len(keep) < len(names):
         print("leaving out {} of {} columns".format(len(names) - len(keep), len(names)))
-        matches = {n: (x[:, keep], xs[:, keep], y, nm) for n, (x, xs, y, nm) in matches.items()}
+        matches = {n: (m[0][:, keep], m[1][:, keep]) + m[2:] for n, m in matches.items()}
         names = [names[i] for i in keep]
     if a.loso:
         out = {}
         for k in SETS:
             train = [n for n in matches if not n.startswith(k)]
-            X, y = rows(matches, train)
+            X, y, w = rows(matches, train)
             t = time.time()
-            model = fit(X, y)
-            prior = np.bincount(y, minlength=3) / len(y)
+            model = fit(X, y, w)
+            prior = class_shares(y, w)
+            loss = []
             for n in (n for n in matches if n.startswith(k)):
-                out[n] = posteriors(model, matches[n][0], matches[n][1]).astype(np.float32)
+                x, xs, labels, _, frames, n_frames = matches[n]
+                p = posteriors(model, x, xs).astype(np.float32)
+                g = labels >= 0
+                loss.append(-np.mean(np.log(np.clip(p[g, labels[g]], 1e-6, 1))))
+                out[n] = hold(p, n_frames)
                 out["prior_" + n] = prior
-            print("{:12s} left out: {} rows, {} iterations, {:.0f} s".format(
-                k, len(y), model.n_iter_, time.time() - t), flush=True)
+            print("{:12s} left out: {} rows, {:.0f} s, held-out log loss {:.2f}".format(
+                k, len(y), time.time() - t, np.mean(loss)), flush=True)
         path = os.path.join(CACHE, a.out or "control_loso.npz")
         np.savez_compressed(path, **out)
         print("->", path)
         return
-    X, y = rows(matches, list(matches))
+    X, y, w = rows(matches, list(matches))
     t = time.time()
-    model = fit(X, y)
-    print("{} rows, {} iterations, {:.0f} s".format(len(y), model.n_iter_, time.time() - t))
+    model = fit(X, y, w)
+    print("{} rows, {:.0f} s".format(len(y), time.time() - t))
     path = a.out or MODEL_PATH
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    prior = np.bincount(y, minlength=3) / len(y)
+    prior = class_shares(y, w)
     trees.export(model, path, prior=prior, names=np.array(names))
     check = X[np.random.default_rng(0).choice(len(X), 20000, replace=False)]
     diff = np.abs(trees.predict_proba(trees.load(path), check) - model.predict_proba(check))

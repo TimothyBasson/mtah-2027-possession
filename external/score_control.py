@@ -1,4 +1,4 @@
-"""Score hmm_v7 (v6 plus the control classifier) against hmm_v6 on the external matches.
+"""Score hmm_v8 (v6 plus the control classifier) against hmm_v6 on the external matches.
 
     python external/control_features.py
     python external/train_control.py --loso         # needs scikit-learn
@@ -76,21 +76,25 @@ def run(name):
     ratio = np.log(np.clip(loso[name], 1e-6, 1)) - np.log(loso["prior_" + name])
     trans, start = dec.transitions(), np.log(dec.START)
     out = {}
+    fold = int(round(STATE["min_possession"] * fps))
     for w in (0.0,) + tuple(weights):
         pred = dec.decode(clues, trans, start, segments, kickoffs=(), extra=extra,
-                          direct=w * ratio if w else None)
+                          direct=w * ratio if w else None, min_possession=fold if w else 0)
         pred[d["labels"] == "X"] = "X"
-        out["hmm_v6" if w == 0 else "v7 w{:g}".format(w)] = [sh.score(gt, pred) for gt in views]
+        out["hmm_v6" if w == 0 else "v8 w{:g}".format(w)] = [sh.score(gt, pred) for gt in views]
     return name, out
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--weights", default="0.05,0.1,0.15,0.2")
+    ap.add_argument("--weights", default="0.1,0.15,0.2,0.3")
     ap.add_argument("--sets", default=",".join(sh.SETS))
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--loso", default="control_loso.npz",
                     help="posteriors file in the cache, from train_control.py --loso [--out]")
+    ap.add_argument("--min-possession", type=float, default=dec.MIN_POSSESSION_SECONDS,
+                    help="seconds under which the decoder folds a possession between two spells "
+                         "of the other team (default {}: none)".format(dec.MIN_POSSESSION_SECONDS))
     ap.add_argument("--fold-seconds", type=float, default=CONTROL_SECONDS,
                     help="spell length under which the folded view folds (external/control.py)")
     a = ap.parse_args()
@@ -101,7 +105,8 @@ def main():
     if not os.path.exists(loso_path):
         sys.exit("no {}: run external/train_control.py --loso first".format(loso_path))
     state = dict(paths=paths, tables=tables(paths), loso=dict(np.load(loso_path)),
-                 weights=[float(w) for w in a.weights.split(",")], fold_seconds=a.fold_seconds)
+                 weights=[float(w) for w in a.weights.split(",")], fold_seconds=a.fold_seconds,
+                 min_possession=a.min_possession)
     with Pool(a.jobs, initializer=_init, initargs=(state,)) as pool:
         rows = dict(pool.map(run, list(paths)))
     models = list(next(iter(rows.values())))
