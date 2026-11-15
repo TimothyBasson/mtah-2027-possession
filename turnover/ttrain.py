@@ -46,6 +46,24 @@ def widen(ev, r):
     return out
 
 
+def ball_token(X, M, ball):
+    """ANALYSIS ONLY (--ball-input): the recorded ball as one more token, in the last slot, team 0.
+    It measures how much of a turnover is simply not in the players' movement. A detector trained
+    this way reads the ball, so it is never used to label a match."""
+    b = ball.astype(np.float32) * np.array([52.5, 34.0], np.float32)
+    v = np.full_like(b, np.nan); acc = np.full_like(b, np.nan)
+    v[1:-1] = (b[2:] - b[:-2]) * 6.25
+    acc[1:-1] = (b[2:] - 2 * b[1:-1] + b[:-2]) * 156.25
+    ok = np.isfinite(b[:, 0])
+    f = np.stack([b[:, 0] / 52.5, b[:, 1] / 34.0, np.nan_to_num(v[:, 0]) / 5, np.nan_to_num(v[:, 1]) / 5,
+                  np.clip(np.nan_to_num(acc[:, 0]), -40, 40) / 4, np.clip(np.nan_to_num(acc[:, 1]), -40, 40) / 4,
+                  np.nan_to_num(np.hypot(v[:, 0], v[:, 1])) / 5, np.zeros(len(b), np.float32), np.isfinite(v[:, 0]).astype(np.float32)], -1)
+    f[~ok] = 0
+    X, M = X.copy(), M.copy()
+    X[:, -1], M[:, -1] = f, ok
+    return X, M
+
+
 def batch(train, rng, B, T, a):
     provs = sorted({m["provider"] for m in train})
     out = {k: [] for k in ("X", "M", "y", "ev", "evf", "ball", "touch")}
@@ -72,6 +90,8 @@ def batch(train, rng, B, T, a):
             X[..., :2] += (rng.normal(0, a.noise, X[..., :2].shape) / np.array([52.5, 34.0])).astype(np.float32)
         M = M & ~(rng.random(M.shape[1]) < rng.uniform(0, a.dropout))[None]  # whole tracks hidden
         X[~M] = 0
+        if a.ball_input:
+            X, M = ball_token(X, M, ball)
         for k, v in zip(out, (X, M, y, ev, evf, ball, touch)):
             out[k].append(v)
     return {k: torch.from_numpy(np.stack(v)) for k, v in out.items()}
@@ -100,7 +120,7 @@ def losses(o, b, a):
 
 
 @torch.no_grad()
-def predict_half(net, h, chunk=1500, overlap=100):
+def predict_half(net, h, chunk=1500, overlap=100, ball_input=False):
     """ev, evf, cls (T, 3) for a half, two symmetric views averaged; in overlapping chunks."""
     net.eval()
     n = len(h["X"])
@@ -110,6 +130,8 @@ def predict_half(net, h, chunk=1500, overlap=100):
         e = min(n, s + chunk)
         s0, e0 = max(0, s - overlap), min(n, e + overlap)
         X, M, _ = TD.window(dict(X=h["X"], M=h["M"]), s0, e0 - s0)
+        if ball_input:
+            X, M = ball_token(X, M, h["ball"][s0:e0])
         acc = {k: 0 for k in outs}
         for sw, mi in ((0, 0), (1, 1)):
             if True:
@@ -130,12 +152,12 @@ def predict_half(net, h, chunk=1500, overlap=100):
     return outs
 
 
-def ap(net, ms, key="ev"):
+def ap(net, ms, key="ev", ball_input=False):
     """Average precision of 'a turnover within 0.24 s of this frame' over live frames (direction ignored)."""
     sc, tg = [], []
     for m in ms:
         for h in m["halves"]:
-            o = predict_half(net, h)
+            o = predict_half(net, h, ball_input=ball_input)
             g = (h["y"] == 0) | (h["y"] == 1)
             sc.append(1 - o[key][g, 0]); tg.append(widen(h[key], 3)[g] > 0)
     if not sc:
@@ -160,6 +182,8 @@ def main():
     ap_.add_argument("--ptr", type=float, default=0.5)
     ap_.add_argument("--touch", type=float, default=0.5)
     ap_.add_argument("--cls", type=float, default=0.3)
+    ap_.add_argument("--ball-input", action="store_true",
+                     help="ANALYSIS ONLY: the recorded ball as an input token, the ceiling a ball-blind detector cannot pass")
     ap_.add_argument("--threads", type=int, default=1)
     ap_.add_argument("--tag", default="t1")
     ap_.add_argument("--seed", type=int, default=0)
@@ -194,7 +218,7 @@ def main():
             r = np.mean(run, 0); run = []
             msg = f"{step:5d} ev {r[0]:.4f} evf {r[1]:.4f} cls {r[2]:.3f} ptr {r[3]:.3f} touch {r[4]:.3f}  {time.time() - t0:.0f}s"
             if step % 400 == 0 or step == a.steps:
-                msg += f"  AP val {ap(net, val[:1]):.3f} test {ap(net, test[:1]):.3f}"
+                msg += f"  AP val {ap(net, val[:1], ball_input=a.ball_input):.3f} test {ap(net, test[:1], ball_input=a.ball_input):.3f}"
             print(msg, flush=True)
             torch.save(dict(net=net.state_dict(), opt=opt.state_dict(), sched=sched.state_dict(), rng=rng.bit_generator.state,
                             torch_rng=torch.get_rng_state(), step=step), ckpt + ".tmp")
@@ -204,7 +228,7 @@ def main():
         for m in ms:
             res = {}
             for i, h in enumerate(m["halves"]):
-                o = predict_half(net, h)
+                o = predict_half(net, h, ball_input=a.ball_input)
                 res.update({f"ev{i}": o["ev"].astype(np.float16), f"evf{i}": o["evf"].astype(np.float16), f"cls{i}": o["cls"].astype(np.float16)})
             np.savez_compressed(os.path.join(out, m["name"] + ".npz"), kind=kind, **res)
     dst = f"/mnt/project-files/turnover/{a.tag}/{a.fold}/"

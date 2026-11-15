@@ -19,7 +19,7 @@ sys.path.insert(0, HERE)
 import common as C  # noqa: E402
 from common import sh  # noqa: E402
 
-GRID = [None] + [dict(key=k, w=w, ha=ha, floor=fl) for k in ("ev", "evf") for w in (1, 2, 4, 8, 16) for ha in (4, 8) for fl in (0.02, 0.05, 0.1)]
+GRID = [None] + [dict(key=k, w=w, ha=ha, floor=fl, gate=gate) for k in ("ev", "evf") for w in (2, 4, 8) for ha in (4, 8) for fl in (0.02, 0.05) for gate in (0, 1)]
 
 
 def evidence(z, i, key, n, w, floor):
@@ -37,8 +37,13 @@ def decode(probs, spans, n, z, g):
         if g is None:
             path = C.viterbi_ev(lp, C.COST)
         else:
-            path = C.viterbi_ev(lp, C.COST, evidence(z, i, g["key"], b - a + 1, g["w"], g["floor"]), g["ha"])
-        path = C.decode.absorb(path, {0: C.MIN_TEAM * 25, 1: C.MIN_TEAM * 25, 2: C.MIN_DEAD * 25})
+            e = evidence(z, i, g["key"], b - a + 1, g["w"], g["floor"])
+            if g.get("gate"):  # no turnover where the base model sees a stoppage within a second
+                dead = np.exp(lp[:, 2]) > 0.3
+                near = np.convolve(dead, np.ones(51), "same") > 0
+                e[near] = 0
+            path = C.viterbi_ev(lp, C.COST, e, g["ha"])
+        path = C.absorb(path, C.MIN_TEAM, C.MIN_DEAD)
         out[a:b + 1] = C.LETTERS[path]
     return out
 
