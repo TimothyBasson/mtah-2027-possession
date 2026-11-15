@@ -27,7 +27,15 @@ def provider(path):
 
 
 def external_paths():
-    return sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
+    """The 30 outside matches, then SoccerTrack v2 where it has been built: it lives in its own
+    folder so that external/heldout.py and the score scripts keep their 30."""
+    return (sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz"))) +
+            sorted(glob.glob(os.path.join(ROOT, "data", "soccertrack", "*.npz"))))
+
+
+def match_path(name):
+    folder = "soccertrack" if name.startswith("soccertrack_") else "external"
+    return os.path.join(ROOT, "data", folder, name + ".npz")
 
 
 def home_defends_left(players, team, a, b):
@@ -104,7 +112,8 @@ def load_match(path, knock=False):
 
 def load_all(knock=False):
     import pickle
-    cache = os.path.join(ROOT, "data", "cache", "deep_v2_knock.pkl" if knock else "deep_v2.pkl")
+    more = "_st" if glob.glob(os.path.join(ROOT, "data", "soccertrack", "*.npz")) else ""  # 38 matches, not 30
+    cache = os.path.join(ROOT, "data", "cache", f"deep_v2{more}_knock.pkl" if knock else f"deep_v2{more}.pkl")
     if os.path.exists(cache):
         with open(cache, "rb") as f:
             return pickle.load(f)
@@ -133,3 +142,52 @@ def mirror(X, ball):
     ball = ball.copy()
     ball[..., 1] *= -1
     return X, ball
+
+
+# -- raw 25 fps windows, for training on tracking changed to look like another system's ---------
+
+def load_raw(path):
+    """Per half: positions at the recorded rate in the canonical frame (centre spot at 0, home
+    defending x < 0), for deep/trackers.py to change before the features are computed."""
+    d = np.load(path)
+    L, W = (float(v) for v in d["pitch"])
+    out = []
+    for a, b in ((int(h[0]), int(h[1])) for h in d["halves"]):
+        xy = d["players"][a:b + 1, :, :2].astype(np.float32) - np.array([L / 2, W / 2], np.float32)
+        if not home_defends_left(d["players"], d["team"], a, b):
+            xy = -xy
+        out.append(dict(xy=xy, team=d["team"].copy(), fps=int(d["fps"])))
+    return out
+
+
+def window_tensors(xy, team, fps=25):
+    """Positions (n, K, 2) in the canonical frame at `fps` -> (X, mask) at every STEP-th frame,
+    the features half_tensors computes: with xy a whole half it returns the same X and mask."""
+    n = len(xy)
+    sp = np.full(xy.shape[:2], np.nan, np.float32)
+    sp[LAG:] = np.linalg.norm(xy[LAG:] - xy[:-LAG], axis=-1) * fps / LAG  # as external/build.py speed()
+    sp[sp > MAX_SPEED] = np.nan
+    vel = np.full_like(xy, np.nan)
+    vel[LAG:n - LAG] = (xy[2 * LAG:] - xy[:n - 2 * LAG]) * (fps / (2 * LAG))
+    with np.errstate(invalid="ignore"):
+        vel[np.linalg.norm(vel, axis=-1) > MAX_SPEED] = np.nan
+    dsp = np.full_like(sp, np.nan)
+    dsp[LAG:n - LAG] = (sp[2 * LAG:] - sp[:n - 2 * LAG]) * (fps / (2 * LAG))
+    idx = np.arange(0, n, STEP)
+    xy, sp, vel, dsp = xy[idx], sp[idx], vel[idx], dsp[idx]
+    T, K = xy.shape[:2]
+    ok = np.isfinite(xy[:, :, 0])
+    hasv = np.isfinite(vel[:, :, 0])
+    feat = np.stack([xy[:, :, 0] / 52.5, xy[:, :, 1] / 34.0,
+                     np.nan_to_num(vel[:, :, 0]) / 5, np.nan_to_num(vel[:, :, 1]) / 5,
+                     np.nan_to_num(sp) / 5, np.clip(np.nan_to_num(dsp), -8, 8) / 3,
+                     np.broadcast_to(np.where(team == 0, 1.0, -1.0), (T, K)),
+                     hasv.astype(np.float32)], -1).astype(np.float32)
+    feat[~ok] = 0
+    order = np.argsort(~ok, axis=1, kind="stable")[:, :SLOTS]
+    X = np.take_along_axis(feat, order[:, :, None], 1)
+    M = np.take_along_axis(ok, order, 1)
+    if K < SLOTS:
+        X = np.pad(X, ((0, 0), (0, SLOTS - K), (0, 0)))
+        M = np.pad(M, ((0, 0), (0, SLOTS - K)))
+    return X, M

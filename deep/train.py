@@ -19,9 +19,11 @@ import torch.nn.functional as F
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data as D  # noqa: E402
+import trackers as TR  # noqa: E402
 from net import PossessionNet  # noqa: E402
 
-VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3}  # last n matches of each training provider
+VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3, "soccertrack": 1}  # last n matches of each training provider
+PAD = 50  # frames of context either side of a raw window, for smoothing and velocities
 
 
 def split(matches, fold):
@@ -130,7 +132,12 @@ def batch(train, rng, B, T, a):
     provs = sorted({m["provider"] for m in train})
     Xs, Ms, ys, bs, es, ws, rs = [], [], [], [], [], [], []
     while len(Xs) < B:
-        prov = provs[rng.integers(len(provs))]
+        if a.share:  # e.g. soccertrack=0.15: that provider's share of windows, the rest split equally
+            w = np.array([a.share.get(q, np.nan) for q in provs])
+            w[np.isnan(w)] = (1 - np.nansum(w)) / max(1, np.isnan(w).sum())
+            prov = provs[rng.choice(len(provs), p=w / w.sum())]
+        else:
+            prov = provs[rng.integers(len(provs))]
         ms = [m for m in train if m["provider"] == prov]
         m = ms[rng.integers(len(ms))]
         hi = rng.integers(len(m["halves"]))
@@ -139,6 +146,12 @@ def batch(train, rng, B, T, a):
         n = len(h["y"])
         s = rng.integers(0, max(1, n - T))
         X, M, y, ball = h["X"][s:s + T], h["M"][s:s + T], h["y"][s:s + T], h["ball"][s:s + T]
+        f0, f1 = s * D.STEP - PAD, (s + T) * D.STEP + PAD
+        if "raw" in m and rng.random() < a.style and f0 >= 0 and f1 <= len(m["raw"][hi]["xy"]):
+            # the same window as another tracking system might have recorded it (deep/trackers.py)
+            r = m["raw"][hi]
+            X, M = D.window_tensors(TR.apply(r["xy"][f0:f1], TR.style(rng), rng, (0.0, 0.0), r["fps"]), r["team"], r["fps"])
+            X, M = X[PAD // D.STEP:PAD // D.STEP + T], M[PAD // D.STEP:PAD // D.STEP + T]
         if "w" not in h or h.get("wp") != a.spell:
             h["w"], h["wp"] = spell_weights(h["y"], a.spell), a.spell
         ws.append(h["w"][s:s + T])
@@ -212,6 +225,12 @@ def main():
     ap.add_argument("--spell", type=float, default=0.0, help="power of the short-possession loss weight")
     ap.add_argument("--knock", type=float, default=0.0,
                     help="share of training windows drawn with players lost in runs, as on BAR-ATH")
+    ap.add_argument("--style", type=float, default=0.0,
+                    help="share of training windows changed to look like another tracking system")
+    ap.add_argument("--with", dest="extra", nargs="*", default=[],
+                    help="providers beyond the three of v2 to train on as well, e.g. soccertrack "
+                         "(data/soccertrack/); without it the training set is v2's whatever is on disk")
+    ap.add_argument("--share", nargs="*", default=[], help="provider=share of training windows, e.g. soccertrack=0.15")
     ap.add_argument("--ptr", type=float, default=0.0,
                     help="v4: point at the player on the ball mid-network; weight of that loss")
     ap.add_argument("--stage", action="store_true",
@@ -229,6 +248,7 @@ def main():
     ap.add_argument("--tag", default="v2")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
+    a.share = {k: float(v) for k, v in (kv.split("=") for kv in a.share)}
     torch.set_num_threads(a.threads)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
@@ -237,6 +257,7 @@ def main():
         for m, k in zip(matches, D.load_all(knock=True)):
             assert m["name"] == k["name"]
             m["knocked"] = k["halves"]
+    matches = [m for m in matches if m["provider"] in ("idsse", "metrica", "skillcorner") or m["provider"] in a.extra]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
     if a.restart > 0:  # training matches only: a held-out match's ball is never read
         import restarts
@@ -244,6 +265,9 @@ def main():
         for m in train:
             for h, r in zip(m["halves"], tg[m["name"]]):
                 h["restart"] = r
+    if a.style:
+        for m in train:
+            m["raw"] = D.load_raw(D.match_path(m["name"]))
     net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage, restart=a.restart > 0)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
