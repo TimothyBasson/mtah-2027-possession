@@ -146,6 +146,9 @@ def main():
         if os.path.exists(dst) or not os.path.exists(data):
             continue
         players, ball, team, labels, halves, pitch, fps = build(meta, data)
+        if not len(labels) or not np.isin(labels, ["H", "A"]).any():
+            print(f"soccertrack_{match}: no ball status in the tracking, skipped", flush=True)
+            continue
         np.savez_compressed(dst + ".tmp.npz", players=players, ball=ball, team=team, labels=labels,
                             halves=halves, pitch=pitch, fps=fps)
         os.replace(dst + ".tmp.npz", dst)

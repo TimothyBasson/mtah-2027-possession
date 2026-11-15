@@ -154,7 +154,9 @@ def main():
                     help="share of training windows drawn with players lost in runs, as on BAR-ATH")
     ap.add_argument("--style", type=float, default=0.0,
                     help="share of training windows changed to look like another tracking system")
-    ap.add_argument("--without", nargs="*", default=[], help="providers left out altogether, e.g. soccertrack")
+    ap.add_argument("--with", dest="extra", nargs="*", default=[],
+                    help="providers beyond the three of v2 to train on as well, e.g. soccertrack "
+                         "(data/soccertrack/); without it the training set is v2's whatever is on disk")
     ap.add_argument("--share", nargs="*", default=[], help="provider=share of training windows, e.g. soccertrack=0.15")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
@@ -171,7 +173,7 @@ def main():
         for m, k in zip(matches, D.load_all(knock=True)):
             assert m["name"] == k["name"]
             m["knocked"] = k["halves"]
-    matches = [m for m in matches if m["provider"] not in a.without]
+    matches = [m for m in matches if m["provider"] in ("idsse", "metrica", "skillcorner") or m["provider"] in a.extra]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
     if a.style:
         for m in train:
