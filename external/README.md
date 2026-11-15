@@ -27,6 +27,22 @@ Where the raw files come from (put them under `data/external/raw/`):
   `data/matches/<id>/` folder under `raw/skillcorner/`, fetching `*_tracking_extrapolated.jsonl`
   from `media.githubusercontent.com` rather than `raw.githubusercontent.com`.
 
+- SoccerTrack v2 (added 2026-11-14, `soccertrack_*`, 8 matches): Scott, Uchida, Kuroda, Kim and
+  Fujii, "SoccerTrack v2", arXiv 2508.01802, <https://atomscott.github.io/SoccerTrack-v2/>,
+  dataset CC BY 4.0 (any use with credit; cite the paper in the technical document). University
+  matches tracked by Bepro from a panoramic camera, 25 fps, 22 players in almost every frame,
+  positions on a 1.05 m x 0.68 m grid (smoothed by the converter). Built by
+  `python external/build_soccertrack.py --raw <folder>` into `data/soccertrack/` (its own folder, so
+  the 30 above stay the held-out set of every other script) from `raw/<match>/<match>_tracker_box_data.xml`
+  and `_metadata.xml`, about 220 MB a match, from the gated Hugging Face dataset or the authors'
+  Google Drive mirror. Labels are Bepro's per-frame ball status (HOME / AWAY / BALLOUT, and
+  NEUTRAL held by the team before it): 235 to 330 possessions a match, median 7 to 12 s, D 26 to
+  38%. Matches 132831 and 132877 carry no ball status and are left out. `build.py`,
+  `heldout.py` and the `score*.py` scripts do not use this set; `deep/train.py` does.
+- Looked at and not used: PFF / Gradient Sports World Cup 2022 (64 matches of broadcast tracking,
+  free on a sign-up form, no published licence); Last Row (19 goal clips); Alfheim (one team, no
+  ball); SoccerNet tracking (needs an NDA).
+
 ## What the labels are, and are not
 
 Neither label source uses the challenge's own "controlled possession" rule, so absolute scores
