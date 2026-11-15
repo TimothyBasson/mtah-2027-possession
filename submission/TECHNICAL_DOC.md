@@ -65,7 +65,7 @@ delete the lines for the method not chosen.
 | HMM tables and transition settings | counted from the outside matches' labels | no | no |
 | `--fit-place` (HMM, **off by default**) | the match's own tracking, from what the other clues say; unsupervised, no labels | yes | no |
 | `deep/models/bt.pt` | the 30 outside matches only; decode settings picked on held-out outside folds (deep/README.md) | applied to its players' tracking; its ball is never read | no |
-| public 5-minute ground truth | — | — | scored as a pipeline check only; TODO confirm no weight, threshold or method choice was picked on it |
+| public 5-minute ground truth | — | — | scored as a pipeline check only. The code records that no setting was tuned on it: `hmm/decode.py` (module docstring, every version), `hmm/ball.py` (`FLIGHT_SPEED` chosen on the external matches), `deep/README.md` (decode settings picked on held-out outside folds; "nothing chosen on" the public window). TODO: confirm the final `hmm` vs `deep` choice is not made on the public window either, then turn this cell into a plain statement |
 
 ## 4. Possession rules implemented
 
