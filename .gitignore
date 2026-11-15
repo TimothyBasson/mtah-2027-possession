@@ -65,3 +65,7 @@ env/
 
 # -- training logs (deep/run_folds.sh, deep/train.py) -----------------------------------------
 logs/
+
+# -- submission builds (submission/make_submission.py) ----------------------------------------
+# The built CSV is a full-match label file; it is uploaded through the form, never committed.
+submission/out/

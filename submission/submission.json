@@ -1,0 +1,33 @@
+{
+  "_readme": "Everything about the submission that is still undecided lives here. Change any value; make_submission.py reads it fresh every run. Placeholders in a command: {python} = the interpreter running make_submission.py, {workdir} = an empty scratch folder for this run.",
+
+  "team_name": "TEAM_NAME_TBD",
+
+  "method": "hmm",
+
+  "inputs": ["data/tactical", "data/broadcast"],
+
+  "methods": {
+    "hmm": {
+      "description": "Sticky HMM over tracking clues + learned control classifier, Viterbi per half (hmm/decode.py)",
+      "cmd": ["{python}", "-m", "hmm.decode", "--out", "{workdir}/candidate.csv"],
+      "produces": "candidate.csv",
+      "requirements": ["requirements.txt"],
+      "model_files": ["hmm/models/control_state.npz"]
+    },
+    "deep": {
+      "description": "Ball-taught players-only network 'bt' (deep/run.py); needs torch",
+      "cmd": ["{python}", "deep/run.py", "--tag", "bt", "--threads", "1", "--out", "{workdir}/candidate.csv"],
+      "produces": "candidate.csv",
+      "requirements": ["requirements.txt", "requirements-deep.txt"],
+      "model_files": ["deep/models/bt.pt"]
+    },
+    "baseline": {
+      "description": "Organisers' nearest-player baseline, +/-125 frame vote. Only for testing this pipeline end to end.",
+      "cmd": ["{python}", "starter/baseline.py", "--window", "125", "--out", "{workdir}"],
+      "produces": "baseline_smooth125.csv",
+      "requirements": ["requirements.txt"],
+      "model_files": []
+    }
+  }
+}
