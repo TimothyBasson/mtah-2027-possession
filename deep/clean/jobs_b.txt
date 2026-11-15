@@ -1,0 +1,3 @@
+# lcsw10: SkillCorner at a tenth of the training windows
+lcsw10 metrica --steps 1500 --ptr 0.5 --share skillcorner=0.1
+lcsw10 idsse --steps 1500 --ptr 0.5 --share skillcorner=0.1
