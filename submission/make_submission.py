@@ -120,8 +120,31 @@ def check_labels(path, min_alive_share):
     return counts, labels, problems
 
 
-def possession_stats(labels, fps):
-    """Possessions as the scorer sees them: maximal runs of H or of A (D and X end one)."""
+def fill_short_abstentions(labels, max_gap):
+    """X carried forward from the previous label, as the scorer does, for gaps up to max_gap frames.
+
+    The scorer fills X inside graded stretches of the ground truth (fill_abstentions in
+    evaluation/possession_metrics.py), which this script cannot see. Long X stretches -- before
+    kickoff, half-time, after the whistle -- are ungraded there, so here they stay breaks.
+    """
+    filled = list(labels)
+    i = 0
+    while i < len(filled):
+        if filled[i] != "X":
+            i += 1
+            continue
+        end = i
+        while end < len(filled) and filled[end] == "X":
+            end += 1
+        if i > 0 and end - i <= max_gap:
+            filled[i:end] = [filled[i - 1]] * (end - i)
+        i = end
+    return filled
+
+
+def possession_stats(labels, fps, max_gap_seconds=60):
+    """Possessions as the scorer sees them: maximal runs of H or of A, after short X gaps are filled."""
+    labels = fill_short_abstentions(labels, int(max_gap_seconds * fps))
     runs, start = [], None
     for i, label in enumerate(labels + ["X"]):
         if start is not None and label != labels[start]:
