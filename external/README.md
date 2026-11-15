@@ -343,6 +343,39 @@ machine that did this work. `python -m hmm.decode` now needs the retrained
 tracking quality the outside sets do not show (`p_tracked`, the defensive lines, the 6-player
 floor), and how they behave on BAR-ATH's fragmented slots is unchecked, as it was for `seq/`.
 
+### SkillCorner's training labels (2026-11-15)
+
+SkillCorner publishes two possession sources, and they agree on only 86% of named live frames:
+the per-frame possession group (the team of the player on the ball, which `labels` is built from
+and every score here is graded on) and the team of each phase of play. The per-frame group flips
+on single touches; the phase team does not. v8's team accuracy on SkillCorner held out is 0.845
+against the first and 0.915 against the second, with a classifier that never saw either.
+
+`build.py` now also saves the phase team as `train_labels`, and `train_control.py` trains on it
+(folded like the rest) where a match has it. Scoring still reads `labels` only, so the yardstick
+is the same and SkillCorner's own held-out row cannot move: its classifier is trained on IDSSE and
+Metrica. Folded spellF1 at weight 0.2, each set held out:
+
+| SkillCorner trained on | IDSSE | Metrica | SkillCorner | mean |
+|---|---|---|---|---|
+| per-frame group (v8) | 0.644 | 0.816 | 0.480 | 0.647 |
+| phase-of-play team | 0.674 | 0.808 | 0.480 | 0.654 |
+
+IDSSE is up on 7 of 7 matches against hmm_v6 either way; Metrica's 0.008 is three matches and
+inside the 0.01 noise. At weights 0.15 / 0.25 the second row is 0.668 / 0.680, 0.814 / 0.803,
+0.480 / 0.478.
+
+Measured the same day and not adopted, because each changes what is graded rather than the model:
+
+- Graded on the phase team, v8 scores 0.621 on SkillCorner (0.610 raw).
+- For the first seconds of a cutaway (median 3.3 s) SkillCorner extrapolates all 22 players
+  with nobody detected and no camera view: 41% of graded dead frames, 4% of live ones. Labelled
+  X like the rest of the cutaway, SkillCorner scores 0.513 (0.642 with the phase team as well);
+  retrained on that, IDSSE 0.646 and Metrica 0.805. Blanked for the model but still graded: 0.471.
+- The conversion itself does not matter: cubic instead of linear upsampling, a 0.3 s moving
+  average on the 10 fps ball or players, filling ball gaps up to 1 s and keeping the extrapolated
+  ball all score 0.477 to 0.483. Dropping extrapolated players scores 0.455.
+
 ## The learned labeller (`seq/`), `score_seq.py --seen 0.59`
 
 Boosted trees score each frame H / A / D from team-level features, and a chain decodes the half

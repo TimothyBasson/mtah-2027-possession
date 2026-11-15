@@ -8,6 +8,8 @@ Each npz:
     ball     (n, 3)    float32  x, y in metres, speed; NaN where missing
     team     (K,)      int8     0 home, 1 away
     labels   (n,)      <U1      H / A / D, X outside the halves
+    train_labels (n,)  <U1      SkillCorner only: the labels the control classifier is trained on
+                                (external/train_control.py). Never scored against.
     halves   (h, 2)    int      first and last frame of each period, inclusive
     pitch    (2,)      float    length, width in metres
     fps      ()        int
@@ -69,10 +71,10 @@ def speed(xy, fps, lag=5):
     return v
 
 
-def save(name, players, ball, team, labels, halves, pitch, fps):
+def save(name, players, ball, team, labels, halves, pitch, fps, **more):
     os.makedirs(OUT, exist_ok=True)
     np.savez_compressed(os.path.join(OUT, f"{name}.npz"), players=players, ball=ball, team=team,
-                        labels=labels, halves=halves, pitch=pitch, fps=fps)
+                        labels=labels, halves=halves, pitch=pitch, fps=fps, **more)
     g = labels[labels != "X"]
     print(f"{name}: {len(labels)} frames, {len(team)} players, ball seen "
           f"{np.isfinite(ball[:, 0]).mean():.0%}, labels " +
@@ -231,6 +233,12 @@ def build_skillcorner():
             alive[s:e + 1] = True
             phase_team[s:e + 1] = t != home
         lab10 = skillcorner_labels(group, alive, phase_team)
+        # SkillCorner's other possession source: the team of the phase of play, for every frame of
+        # the phase. It names the team, not the player on the ball, so a touch by the other team
+        # inside a phase does not flip it. It agrees with the per-frame group on 86% of named live
+        # frames. The scores stay on `labels`; this one is what the control classifier trains on
+        # (external/README.md, "SkillCorner's training labels").
+        phase10 = np.where(alive, np.where(phase_team == 0, "H", "A"), "D").astype("<U1")
 
         parts, halves, start = [], [], 0
         for k in (1, 2):
@@ -238,19 +246,22 @@ def build_skillcorner():
             sel = np.arange(sel[0], sel[-1] + 1)
             m = (len(sel) - 1) * FPS // SC_FPS + 1
             parts.append((resample(xy[sel], m), resample(ball[sel], m),
-                          lab10[sel][np.arange(m) * SC_FPS // FPS]))
+                          lab10[sel][np.arange(m) * SC_FPS // FPS],
+                          phase10[sel][np.arange(m) * SC_FPS // FPS]))
             halves.append((start, start + m - 1))
             start += m
-        pxy, bxy, labels = (np.concatenate(p) for p in zip(*parts))
+        pxy, bxy, labels, train_labels = (np.concatenate(p) for p in zip(*parts))
         # Broadcast cutaways (replays, close-ups) track nobody: ~half the dead frames. Our tactical
         # feed never goes blank, so these are ungraded, not free dead-ball points.
-        labels[~np.isfinite(pxy[..., 0]).any(1)] = "X"
+        cutaway = ~np.isfinite(pxy[..., 0]).any(1)
+        labels[cutaway] = train_labels[cutaway] = "X"
         players = np.concatenate([pxy, speed(pxy, FPS)[..., None]], -1)
         ball = np.concatenate([bxy, speed(bxy, FPS)[:, None]], -1)
         # halves are stacked back to back, so the 5-frame speed lag reaches across the join
         for s, _ in halves[1:]:
             players[s:s + 5, :, 2] = ball[s:s + 5, 2] = np.nan
-        save(f"skillcorner_{mid}", players, ball, team, labels, np.array(halves), pitch, FPS)
+        save(f"skillcorner_{mid}", players, ball, team, labels, np.array(halves), pitch, FPS,
+             train_labels=train_labels)
 
 
 if __name__ == "__main__":

@@ -6,10 +6,10 @@ hmm/trees.py. It holds only tree arrays, the 248 feature names and the class pri
 
 | | |
 |---|---|
-| sha256 | `695a6ad67a551cdf3000a271cbc62722149ff7f578b58f4cc6ed584b7138288c` |
+| sha256 | `577f70e1aaf6b9b20f2b7f8223fddc8f776b6fdb2e84c9fb3e86bb7d01471afd` |
 | Trained by | `python external/control_features.py && python external/train_control.py` |
 | Library | scikit-learn 1.6.1 (requirements-dev.txt), HistGradientBoostingClassifier, 300 rounds, no early stopping, `random_state=0` |
-| Target | per-frame H / A / D, folded towards the control rule (external/control.py, 2 s, 2 touches) |
+| Target | per-frame H / A / D, folded towards the control rule (external/control.py, 2 s, 2 touches); for SkillCorner the phase-of-play team (`train_labels`, external/build.py) |
 | Training data | the 30 external matches in data/external (external/README.md), every 5th frame where labelled, both team orientations, the three providers weighted equally |
 
 The v7 model (94 columns, sha256 `4223a1c4...`) is at commit fe457a3; the v8 features leave out

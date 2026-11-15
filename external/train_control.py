@@ -20,6 +20,12 @@ home or away bias. Rows are every graded frame the features are cached on (every
 hmm.control.STRIDE): neighbouring frames repeat each other. The three providers count equally
 (rows()), so SkillCorner's 20 matches and IDSSE's 7 do not outvote Metrica's 3.
 
+SkillCorner is trained on its phase-of-play team (`train_labels` in its npz, external/build.py),
+not on the per-frame possession group it is scored against: the two agree on 86% of named live
+frames, and the group flips on single touches. With the scorer untouched, the held-out folded
+spellF1 goes from 0.644 / 0.816 / 0.480 to 0.674 / 0.808 / 0.480 (IDSSE / Metrica / SkillCorner;
+SkillCorner's own row cannot move, since its classifier never sees SkillCorner).
+
 --loso trains three models, each with one set (IDSSE, Metrica, SkillCorner) left out, and saves
 the left-out set's posteriors, so external/score_control.py can score the decoder on matches the
 classifier never saw. Without it, one model is trained on all 30 matches for BAR-ATH.
@@ -66,8 +72,10 @@ def load_matches():
         if not name.startswith(SETS):
             continue
         z = np.load(path)
-        labels = control_labels(dict(np.load(os.path.join(ROOT, "data", "external",
-                                                          name + ".npz"))))
+        d = dict(np.load(os.path.join(ROOT, "data", "external", name + ".npz")))
+        if "train_labels" in d:  # SkillCorner: the phase-of-play team (external/build.py)
+            d["labels"] = d["train_labels"]
+        labels = control_labels(d)
         matches[name] = (z["X"], z["Xs"], code(labels)[z["frames"]], list(z["names"]),
                          z["frames"], len(labels))
     if not matches:
