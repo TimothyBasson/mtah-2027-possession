@@ -7,6 +7,8 @@
 
   "inputs": ["data/tactical", "data/broadcast"],
 
+  "sanity": {"min_alive_share": 0.2},
+
   "methods": {
     "hmm": {
       "description": "Sticky HMM over tracking clues + learned control classifier, Viterbi per half (hmm/decode.py)",

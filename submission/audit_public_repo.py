@@ -13,6 +13,10 @@ What it flags:
   (a submission IS a full-match label file; the organisers ship that folder empty on purpose)
 - video, PDFs, pickles, and any blob over --max-mb (default 5 MB)
 - frame-level derived exports (*.parquet, *.feather, *.npz/*.npy outside hmm/models and deep/models)
+- by CONTENT, wherever the file sits: any csv/tsv/json/txt whose header is frame,label or that has
+  more than 100k lines (except the organisers' shipped baselines and public ground truth)
+
+Model weights under hmm/models and deep/models are listed as expected, not flagged.
 
 Exit code 1 if anything is flagged, so it can sit in a checklist or CI.
 """
@@ -41,6 +45,38 @@ RULES = [
     ("array export outside model folders", lambda p: p.endswith((".npz", ".npy", ".parquet", ".feather"))
         and not p.startswith(("hmm/models/", "deep/models/"))),
 ]
+
+
+# Label-shaped files the organisers ship on purpose (README.md, .gitignore).
+SHIPPED_LABELS = ("evaluation/results/baseline_", "evaluation/gt/")
+TEXT_EXTS = (".csv", ".tsv", ".json", ".txt", ".jsonl")
+MAX_LINES = 100_000  # a frame-level export of this match has ~199k rows
+# Committed on purpose, listed (not flagged) so that a stray one stands out.
+EXPECTED = ("model weights", lambda p: p.endswith((".pt", ".pth", ".onnx", ".npz", ".joblib"))
+            and p.startswith(("hmm/models/", "deep/models/")))
+
+
+def label_shaped(blobs):
+    """(sha -> reason) for text blobs whose CONTENTS look like frame-level data, wherever they sit.
+
+    Paths alone miss a submission saved as hmm/out/foo.csv or a notebook dump in logs/.
+    """
+    if not blobs:
+        return {}
+    out = subprocess.run(["git", "cat-file", "--batch"], cwd=ROOT, input="\n".join(blobs).encode(),
+                         capture_output=True, check=True).stdout
+    found, pos = {}, 0
+    while pos < len(out):
+        header_end = out.index(b"\n", pos)
+        sha, _, size = out[pos:header_end].decode().split()
+        body = out[header_end + 1:header_end + 1 + int(size)]
+        pos = header_end + 1 + int(size) + 1
+        first = body.split(b"\n", 1)[0].strip().lower().replace(b" ", b"")
+        if first.startswith(b"frame,label") or first.startswith(b"frame\tlabel"):
+            found[sha] = "header frame,label"
+        elif body.count(b"\n") > MAX_LINES:
+            found[sha] = "{} lines".format(body.count(b"\n"))
+    return found
 
 
 def git(*args):
@@ -74,10 +110,20 @@ def main():
             if kind == "blob":
                 sizes[sha] = int(size)
 
-    flagged = {}
+    text_blobs = sorted({s for path, group in paths.items() if path.endswith(TEXT_EXTS)
+                         and not path.startswith(SHIPPED_LABELS) for s in group if s in sizes})
+    shaped = label_shaped(text_blobs)
+
+    flagged, expected = {}, []
     for path, group in sorted(paths.items()):
         if not any(s in sizes for s in group):
             continue  # a tree (folder), not a file
+        if EXPECTED[1](path):
+            expected.append("{}  ({:.1f} MB)".format(path, max(sizes.get(s, 0) for s in group) / 1e6))
+        for sha in group:
+            if sha in shaped:
+                flagged.setdefault("frame-level contents", []).append(
+                    "{}  ({}, blob {})".format(path, shaped[sha], sha[:10]))
         for reason, rule in RULES:
             if rule(path):
                 flagged.setdefault(reason, []).append(path)
@@ -86,7 +132,13 @@ def main():
             flagged.setdefault("blob over {:g} MB".format(args.max_mb), []).append(
                 "{}  ({:.1f} MB)".format(path, biggest / 1e6))
 
-    print("audited {} paths reachable from {}".format(len(paths), " ".join(scope)))
+    print("audited {} paths reachable from {} ({} text blobs read for contents)".format(
+        len(paths), " ".join(scope), len(text_blobs)))
+    if expected:
+        print("\nexpected, not flagged -- {} committed on purpose; check nothing here is a stray:".format(
+            EXPECTED[0]))
+        for item in expected:
+            print("      " + item)
     if not flagged:
         print("OK    nothing flagged")
         return

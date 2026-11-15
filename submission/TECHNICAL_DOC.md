@@ -53,6 +53,20 @@ None of it comes from BAR-ATH. TODO: confirm this table matches the final method
 TODO: how possession labels were derived from those providers' data (external/README.md), and any
 label folding (external/control.py).
 
+### What touches BAR-ATH, and how
+
+"None of it comes from BAR-ATH" covers human labels. Some parts of the pipeline still *read* the
+match, so they are listed here one by one. TODO: confirm each line for the final method, and
+delete the lines for the method not chosen.
+
+| component | learned from | reads BAR-ATH? | uses BAR-ATH labels (incl. public 5 min)? |
+|---|---|---|---|
+| `hmm/models/control_state.npz` (HMM's control classifier) | the 30 outside matches only (hmm/models/README.md) | applied to its tracking at decode time | no |
+| HMM tables and transition settings | counted from the outside matches' labels | no | no |
+| `--fit-place` (HMM, **off by default**) | the match's own tracking, from what the other clues say; unsupervised, no labels | yes | no |
+| `deep/models/bt.pt` | the 30 outside matches only; decode settings picked on held-out outside folds (deep/README.md) | applied to its players' tracking; its ball is never read | no |
+| public 5-minute ground truth | — | — | scored as a pipeline check only; TODO confirm no weight, threshold or method choice was picked on it |
+
 ## 4. Possession rules implemented
 
 TODO, for the final method:
@@ -77,4 +91,8 @@ pip install -r requirements.txt            # TODO: plus requirements-deep.txt if
 python submission/make_submission.py --twice
 ```
 
-Expected output: `submission/out/<team>.csv` with sha256 `TODO` (from the manifest written next to it).
+Expected output: `submission/out/Gambtt.csv` with sha256 `TODO` (from the manifest written next to it).
+
+TODO: the sha256 above must come from a **clean clone in the pinned environment**, not from the
+development checkout. `--twice` only shows the method is deterministic on one machine; the rules
+ask for the same bytes on the organisers' run.

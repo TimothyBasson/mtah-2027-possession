@@ -62,24 +62,60 @@ def safe_name(team):
 SF_DATALESS = 0x40000000  # macOS: the file's bytes were evicted to iCloud and are not on disk
 
 
-def offloaded_inputs(paths):
-    """Input files whose contents iCloud has evicted.
+def unreadable_inputs(paths):
+    """Input files that are missing, empty, or whose contents iCloud has evicted.
 
     Not hypothetical: with data/tactical/BAR-ATH_tactical_atd.txt evicted, starter/baseline.py read
-    no ball at all and wrote an all-D file that still passed validation. Refuse instead.
+    no ball at all and wrote an all-D file that still passed validation. Refuse instead. The
+    eviction check is macOS-only; missing and empty are checked everywhere, and check_labels()
+    catches whatever slips past both.
     """
     found = []
     for rel in paths:
         top = os.path.join(ROOT, rel)
+        if not os.path.exists(top):
+            found.append("{}  (missing)".format(rel))
+            continue
         files = [top] if os.path.isfile(top) else [
             os.path.join(folder, name) for folder, _, names in os.walk(top, followlinks=True)
-            for name in names]
+            for name in names if not name.startswith(".")]
+        if not files:
+            found.append("{}  (empty folder)".format(rel))
         for path in files:
             if path.endswith(".mp4"):
                 continue  # video is never read by the labelling methods
-            if getattr(os.stat(path), "st_flags", 0) & SF_DATALESS:
-                found.append(os.path.relpath(path, ROOT))
+            info = os.stat(path)
+            if getattr(info, "st_flags", 0) & SF_DATALESS:
+                found.append("{}  (offloaded to iCloud: brctl download <path>)".format(
+                    os.path.relpath(path, ROOT)))
+            elif info.st_size == 0:
+                found.append("{}  (0 bytes)".format(os.path.relpath(path, ROOT)))
     return found
+
+
+def check_labels(path, min_alive_share):
+    """Fail on a file that is valid but degenerate -- the shape a silently empty input produces.
+
+    The organisers' validator checks the format only, so an all-D or one-team file passes it. The
+    public window has about 80% of graded frames alive; a real method lands far above 20%.
+    """
+    counts = {}
+    with open(path) as handle:
+        next(handle)
+        for line in handle:
+            label = line.rstrip("\r\n").split(",")[1].strip().upper()
+            counts[label] = counts.get(label, 0) + 1
+    labelled = sum(n for label, n in counts.items() if label != "X")
+    alive = counts.get("H", 0) + counts.get("A", 0)
+    share = alive / labelled if labelled else 0.0
+    problems = []
+    if share < min_alive_share:
+        problems.append("only {:.1%} of labelled frames are H or A (minimum {:.0%})".format(
+            share, min_alive_share))
+    for team in ("H", "A"):
+        if not counts.get(team):
+            problems.append("no frame is labelled {}".format(team))
+    return counts, problems
 
 
 def run_method(method, workdir):
@@ -99,6 +135,7 @@ def validate(path):
     result = subprocess.run([sys.executable, os.path.join(ROOT, "evaluation", "validate_submission.py"),
                              path], cwd=ROOT)
     if result.returncode:
+        os.remove(path)  # never leave a rejected file where it could be uploaded
         sys.exit("validation FAILED -- this file would score nothing")
 
 
@@ -126,7 +163,10 @@ def main():
     parser.add_argument("--method", help="override the method named in the config")
     parser.add_argument("--team", help="override the team name in the config")
     parser.add_argument("--twice", action="store_true",
-                        help="run the method a second time and fail if the bytes differ")
+                        help="run the method a second time and fail if the bytes differ (same "
+                             "machine only; a clean-clone rebuild is the real test)")
+    parser.add_argument("--allow-degenerate", action="store_true",
+                        help="keep a valid file even if it is almost all D or has one team missing")
     parser.add_argument("--score-public", action="store_true",
                         help="score against the public 5 minutes (a pipeline check, not a tuning signal)")
     parser.add_argument("--list", action="store_true", help="list configured methods and exit")
@@ -149,11 +189,10 @@ def main():
         print("NOTE  team_name is still the placeholder; the file will be named {}.csv".format(team))
     name = safe_name(team)
 
-    evicted = offloaded_inputs(config.get("inputs", []) + method.get("model_files", []))
-    if evicted:
-        sys.exit("STOP  {} input file(s) are offloaded to iCloud and would read as empty:\n  {}\n"
-                 "Download them first, e.g.  brctl download <path>".format(
-                     len(evicted), "\n  ".join(evicted)))
+    bad = unreadable_inputs(config.get("inputs", []) + method.get("model_files", []))
+    if bad:
+        sys.exit("STOP  {} input(s) cannot be read as they are:\n  {}".format(
+            len(bad), "\n  ".join(bad)))
 
     os.makedirs(OUT_DIR, exist_ok=True)
     final_csv = os.path.join(OUT_DIR, name + ".csv")
@@ -169,14 +208,25 @@ def main():
         sys.exit("NOT REPRODUCIBLE: two runs gave different files\n  " + "\n  ".join(digests))
 
     validate(final_csv)
+    min_alive = config.get("sanity", {}).get("min_alive_share", 0.2)
+    counts, problems = check_labels(final_csv, min_alive)
+    if problems and not args.allow_degenerate:
+        os.remove(final_csv)  # never leave a rejected file where it could be uploaded
+        sys.exit("DEGENERATE  the file is valid but looks like an input was read as empty:\n  "
+                 + "\n  ".join(problems) + "\n(--allow-degenerate to keep it anyway)")
 
     commit = git("rev-parse", "HEAD")
-    dirty = bool(git("status", "--porcelain", "--untracked-files=no"))
+    # untracked counts too: an unadded module or model file would not be in the public repo
+    changes = (git("status", "--porcelain") or "").splitlines()
+    dirty = bool(changes)
     manifest = {
         "team_name": team,
         "file": os.path.basename(final_csv),
         "sha256": digests[0],
         "reproduced_twice": args.twice,
+        "reproduced_twice_scope": "same machine and interpreter only; the real test is a clean "
+                                  "clone + pinned environment giving this sha256",
+        "label_counts": counts,
         "method": method_name,
         "method_description": method.get("description"),
         "command": method["cmd"],
@@ -185,6 +235,7 @@ def main():
                         for path in method.get("model_files", [])},
         "git_commit": commit,
         "git_dirty": dirty,
+        "git_changes": changes,
         "libraries": library_versions(),
         "platform": platform.platform(),
         "built_at": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -203,8 +254,10 @@ def main():
     print("-> {}".format(os.path.relpath(manifest_path, ROOT)))
     print("   sha256 {}".format(digests[0]))
     if dirty:
-        print("WARN  uncommitted changes to tracked files: the repo at {} would not regenerate this "
-              "file. Commit first for the real one.".format(commit[:7] if commit else "?"))
+        print("WARN  {} uncommitted or untracked file(s): the repo at {} might not regenerate this "
+              "file. Commit first for the real one.".format(len(changes), commit[:7] if commit else "?"))
+        for line in changes[:10]:
+            print("        " + line)
 
 
 if __name__ == "__main__":

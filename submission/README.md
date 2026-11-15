@@ -7,7 +7,7 @@ Nothing here is final. The method, the team name and the document can all change
 | file | what it is | change it when |
 |---|---|---|
 | `submission.json` | team name, which method, and the command for each method | anything changes; this is the only place the choice lives |
-| `make_submission.py` | runs the method, validates with the organisers' checker, writes `out/<team>.csv` + a manifest | rarely; add methods in the json instead |
+| `make_submission.py` | checks inputs exist and are not empty or iCloud-offloaded, runs the method, validates with the organisers' checker, refuses a degenerate file (almost all D, or a team missing), writes `out/<team>.csv` + a manifest | rarely; add methods in the json instead |
 | `audit_public_repo.py` | searches all of git history for data, ground truth and label files | run before making the repo public |
 | `TECHNICAL_DOC.md` | draft of the technical document, six required sections | as decisions close |
 | `out/` | built files. Git-ignored: a submission is a full-match label file | never commit |
@@ -41,8 +41,9 @@ Method
 Reproducibility
 - [ ] One environment pinned: Python version + requirement files for the chosen method (README/doc say which)
 - [ ] All code and model files committed; `make_submission.py` prints no "uncommitted changes" warning
-- [ ] `python submission/make_submission.py --twice` passes
-- [ ] Fresh clone + data bundle + documented commands give the same sha256 as the manifest
+- [ ] `python submission/make_submission.py --twice` passes (same machine only: necessary, not sufficient)
+- [ ] Fresh clone in a fresh venv with the pinned versions + data bundle + documented commands give the same sha256 as the manifest; that sha256 goes in the doc
+- [ ] `deep` only: torch version and thread count pinned (CPU kernels can change the bytes)
 
 Public repository
 - [ ] `git fetch origin` then `python submission/audit_public_repo.py` is clean (it only sees branches fetched locally), or history has been cleaned / squashed into a fresh repo
