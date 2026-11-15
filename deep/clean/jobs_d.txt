@@ -1,0 +1,7 @@
+# lccs: both together, SkillCorner at a quarter of the windows and every provider's labels cleaned; two seeds.
+# The SkillCorner fold trains on no SkillCorner, so its lccs run is lccl's: only its second seed is new.
+lccs metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean retime+lastmask+mask
+lccs idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean retime+lastmask+mask
+lccls1 skillcorner --steps 1500 --ptr 0.5 --clean retime+lastmask+mask --seed 1
+lccss1 metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean retime+lastmask+mask --seed 1
+lccss1 idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean retime+lastmask+mask --seed 1
