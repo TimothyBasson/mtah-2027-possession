@@ -20,6 +20,9 @@ Keys (defaults are the shipped fit):
     norm=none             none | z (per-match z-score of every column) | rank (per-match quantile)
     seed=0  bag=1         bag > 1 averages that many fits on bootstrap samples of the matches
     sets=idsse,metrica,skillcorner
+    within=PROVIDER       not held out: score every 4th match of the provider with a model trained
+                          on its other matches (within_train=own) or on those and the other two
+                          providers (within_train=all). A ceiling, not a held-out score.
     w=0.2                 control weight(s) in the decoder, comma-separated
 """
 
@@ -49,7 +52,7 @@ from hmm.control import STRIDE, hold  # noqa: E402
 SWEEP = os.path.join(CACHE, "sweep")
 DEFAULTS = dict(iters=300, lr=0.1, leaves=63, min_leaf=200, l2=1.0, max_features=1.0,
                 max_bins=255, depth=0, stages="", drop="", only="", weight="provider", sub=1,
-                seen_power=1.0,
+                seen_power=1.0, within="", within_train="own",
                 norm="none", seed=0, bag=1, sets=",".join(tc.SETS), w="0.2")
 STATE = {}
 
@@ -218,9 +221,16 @@ def run(name, c):
     posts = {s: {} for s in stages}
     loss = {s: {} for s in stages}
     t0 = time.time()
+    if c["within"]:
+        sets = [c["within"]]
     for k in sets:
         train = [n for n in matches if not n.startswith(k)]
         held = [n for n in matches if n.startswith(k)]
+        if c["within"]:   # a ceiling: every 4th match of this provider, trained on its others
+            own = held
+            held = own[::4]
+            train = ([n for n in own if n not in held]
+                     + (train if c["within_train"] == "all" else []))
         acc = {s: {n: 0.0 for n in held} for s in stages}
         prior = 0.0
         rng = np.random.default_rng(c["seed"])
