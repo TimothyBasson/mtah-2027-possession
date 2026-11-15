@@ -239,6 +239,7 @@ def build_skillcorner():
         # frames. The scores stay on `labels`; this one is what the control classifier trains on
         # (external/README.md, "SkillCorner's training labels").
         phase10 = np.where(alive, np.where(phase_team == 0, "H", "A"), "D").astype("<U1")
+        assert np.array_equal(phase10 == "D", lab10 == "D"), f"{mid}: the two disagree on dead"
 
         parts, halves, start = [], [], 0
         for k in (1, 2):

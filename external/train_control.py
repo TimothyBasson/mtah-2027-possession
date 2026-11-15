@@ -64,7 +64,7 @@ def code(labels):
     return np.select([labels == "H", labels == "A", labels == "D"], [0, 1, 2], -1)
 
 
-def load_matches():
+def load_matches(scored_labels=False):
     """{match: (X, Xs, label codes on the cached frames, column names, frames, frames in the match)}"""
     matches = {}
     for path in sorted(glob.glob(os.path.join(CACHE, "control_v8_*_*.npz"))):
@@ -73,8 +73,11 @@ def load_matches():
             continue
         z = np.load(path)
         d = dict(np.load(os.path.join(ROOT, "data", "external", name + ".npz")))
-        if "train_labels" in d:  # SkillCorner: the phase-of-play team (external/build.py)
-            d["labels"] = d["train_labels"]
+        if name.startswith("skillcorner") and not scored_labels:
+            if "train_labels" not in d:  # an npz built before build.py saved them
+                sys.exit("{} has no train_labels: rebuild it (python external/build.py "
+                         "skillcorner), or pass --scored-labels for v8's target".format(name))
+            d["labels"] = d["train_labels"]  # the phase-of-play team (external/build.py)
         labels = control_labels(d)
         matches[name] = (z["X"], z["Xs"], code(labels)[z["frames"]], list(z["names"]),
                          z["frames"], len(labels))
@@ -129,8 +132,12 @@ def main():
                     "columns whose names contain any of them (an ablation)")
     ap.add_argument("--out", help="model path (default {}) or, with --loso, the posteriors' "
                     "file name in the cache".format(os.path.relpath(MODEL_PATH, ROOT)))
+    ap.add_argument("--scored-labels", action="store_true", help="train SkillCorner on the labels "
+                    "it is scored against (v8's target), not on its phase-of-play team")
     a = ap.parse_args()
-    matches = load_matches()
+    matches = load_matches(a.scored_labels)
+    print("SkillCorner target: {}".format("scored labels (per-frame group)" if a.scored_labels
+                                          else "train_labels (phase-of-play team)"))
     names = next(iter(matches.values()))[3]
     keep = keep_columns(names, [d for d in a.drop.split(",") if d])
     if len(keep) < len(names):

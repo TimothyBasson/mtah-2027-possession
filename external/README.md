@@ -361,9 +361,21 @@ Metrica. Folded spellF1 at weight 0.2, each set held out:
 | per-frame group (v8) | 0.644 | 0.816 | 0.480 | 0.647 |
 | phase-of-play team | 0.674 | 0.808 | 0.480 | 0.654 |
 
-IDSSE is up on 7 of 7 matches against hmm_v6 either way; Metrica's 0.008 is three matches and
-inside the 0.01 noise. At weights 0.15 / 0.25 the second row is 0.668 / 0.680, 0.814 / 0.803,
-0.480 / 0.478.
+Paired by match, new minus old: IDSSE +0.030 (standard error 0.005, 7 of 7 up, bootstrap 5-95%
++0.023 to +0.038), Metrica -0.008 (0.011, 1 of 3 up, -0.021 to +0.004). At weights 0.15 / 0.25
+the second row is 0.668 / 0.680, 0.814 / 0.803, 0.480 / 0.478.
+
+What it costs: against the labels as they are (not folded), IDSSE gains +0.019 (0.543 to 0.563)
+but Metrica loses 0.036 (0.765 to 0.730, 3 of 3 down), with 255 predicted possessions a match
+where there were 268. The classifier names fewer short possessions, which the folded view does
+not count and Metrica's event labels do.
+
+On BAR-ATH (`python -m hmm.decode`, old against refitted `control_state.npz`), label-free: 97.2%
+of graded frames get the same label. First half 127 possessions (mean 13.6 s, 10% under 2 s)
+become 108 (16.1 s, 8%), D 46% to 45%; second half 137 (12.0 s) become 138 (11.9 s), D 48% both.
+One run under 1 s in each. As a regression check only, never to choose anything: the public
+window scores spellF1 0.679 before and 0.688 after, macroF1 0.861 and 0.844, with 16 and 15
+predicted possessions against 17 true.
 
 Measured the same day and not adopted, because each changes what is graded rather than the model:
 
