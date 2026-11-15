@@ -101,8 +101,46 @@ provider down) in every view. SkillCorner gains least.
   the truth being learned, as before. The folded labels in `paired.py` use the scored match's
   ball to build the yardstick, never a prediction.
 
-Not tried here: a teacher that reads the ball, distilled into this net (the labels already carry
-most of what such a teacher knows); labels cleaned with the ball.
+## Copying a ball-seeing teacher (2026-11-15): no gain, not kept
+
+The teacher `tb` (`--teach`, the same net with the real ball appended to every player's features)
+scores 0.80 to 0.85 on unseen IDSSE and Metrica matches where bt scores 0.62 to 0.69. Two ways of
+having bt copy it on the training matches, the ball still never an input to the student:
+
+- `kd` (`--distill tb`): the teacher's per-frame probabilities as soft targets beside the labels.
+- `fd` (`--hint tb`): the teacher is run on every training window (same players lost, plus the
+  ball) and the student copies its inner state (the 128 numbers every head reads, through a
+  throw-away linear map) and its answers softened at temperature 2.
+
+Held out by provider, one seed each against bt's two seeds (`paired.py bt,bts1 kd`), student
+minus bt:
+
+| | IDSSE (7) | Metrica (3) | SkillCorner (20) | provider mean |
+|---|---|---|---|---|
+| kd, shipped decode, labels as they are | -0.002 | -0.002 | +0.007 | 0.545 -> 0.546 |
+| kd, shipped decode, folded labels | -0.009 | -0.003 | +0.011 | 0.626 -> 0.626 |
+| kd, 2 s minimum, folded labels | -0.006 | -0.003 | +0.010 | 0.642 -> 0.642 |
+| fd, shipped decode, labels as they are | -0.006 | -0.007 | +0.009 | 0.545 -> 0.544 |
+| fd, shipped decode, folded labels | -0.006 | -0.009 | +0.012 | 0.626 -> 0.626 |
+| fd, 2 s minimum, folded labels | 0.000 | -0.007 | +0.005 | 0.642 -> 0.641 |
+
+Neither moves the mean (standard error 0.002 to 0.003) and both are down on IDSSE and Metrica,
+the two providers with trustworthy labels and the ones closest to BAR-ATH. SkillCorner's +0.01 is
+the spread between bt's own two seeds there (0.410 and 0.400). Second seeds were not run: no
+seed turns a mean of 0.000 into the +0.01 bar.
+
+Why there is nothing to copy: on its training matches the teacher agrees with the labels on 97
+to 99% of IDSSE and Metrica frames with almost no doubt left (entropy 0.05 to 0.08 nats), so its
+answers are the labels again; and what its inner state knows beyond the labels is where the ball
+is, which bt is already taught directly (the pointer, ball velocity, touches). What separates the
+teacher from the student is seeing the ball when the match is labelled, and that cannot be copied
+into a net that does not see it.
+
+```bash
+sh deep/queue.sh deep/jobs_distill.txt   # kd and fd; needs data/cache/deep/tb/ (deep/jobs_short.txt)
+```
+
+Not tried here: labels cleaned with the ball.
 
 ```bash
 sh deep/queue.sh deep/jobs.txt             # the runs above, three at a time, resumable
