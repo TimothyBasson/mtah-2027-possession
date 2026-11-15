@@ -38,6 +38,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="bt")
     ap.add_argument("--out", default="deep.csv")
+    ap.add_argument("--tags", action="store_true",
+                    help="use Smart Tagging set pieces to draw stoppages the model plays through (stops/tags.py)")
     ap.add_argument("--threads", type=int, default=1,
                     help="pinned so a rerun does the same arithmetic; 1, 4 and 8 give the same file (README)")
     a = ap.parse_args()
@@ -49,6 +51,16 @@ def main():
     np.savez_compressed(os.path.join(ROOT, "data", "cache", "deep", a.tag, "bar_ath_probs.npz"),
                         **{f"p{i}": p for i, p in enumerate(probs)})
     pred = decode.labels_from(probs, halves, n, **DECODE)
+    if a.tags:  # not players-only: Metrica's automatic set-piece tags, where the model shows no stoppage
+        sys.path.insert(0, os.path.join(ROOT, "stops"))
+        import tags
+        starts, mins = tags.set_pieces(), {k: 25 * v for k, v in ((0, DECODE["min_team"]), (1, DECODE["min_team"]), (2, DECODE["min_dead"]))}
+        for p, (s, e) in zip(probs, halves):
+            lp = np.log(np.clip(decode.upsample(p, e - s + 1), 1e-6, 1))
+            lp, hit = tags.apply(lp, decode.absorb(decode.viterbi(lp, DECODE["cost"]), mins), s, starts)
+            if hit:
+                pred[s:e + 1] = decode.LETTERS[decode.absorb(decode.viterbi(lp, DECODE["cost"]), mins)]
+                print("stoppage drawn for the set pieces tagged at frames", hit)
     for (s, _), kick in zip(halves, KICKOFF_VIDEO_FRAMES.values()):  # graded frames before a kickoff are D
         pred[s:kick] = "D"
     print("wrote", write_submission(os.path.join(RESULTS_DIR, a.out), pred))
