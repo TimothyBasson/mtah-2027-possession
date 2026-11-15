@@ -8,7 +8,7 @@ pip install -r requirements-deep.txt
 python deep/train.py --fold idsse      # and metrica, skillcorner: one provider held out each
 python deep/decode.py --tag v2         # THE score: held-out mean spellF1
 python deep/train.py --fold none --steps 2000   # all 30 matches -> copy net.pt to deep/models/v2.pt
-python deep/run.py                     # BAR-ATH -> evaluation/results/deep.csv
+python deep/run.py                     # BAR-ATH -> evaluation/results/deep.csv (the ball-taught model, bt)
 python deep/explain.py --match all     # each stage's output, for viz/combined/make_combined.py --deep
 ```
 
@@ -78,6 +78,14 @@ provider down) in every view. SkillCorner gains least.
   nearest player still tracked. With players knocked out as on BAR-ATH bt loses 0.014 (0.540 to
   0.526) and v2 loses 0.013 (0.529 to 0.516), so the pointer is no more fragile than the rest.
   Teaching it only where a tracked player is within 3 m of the ball is untried.
+
+- **bt labels BAR-ATH from 2026-11-15** (Gambtt's choice): `run.py` defaults to `--tag bt`;
+  `--tag v2` still gives the earlier labels. Two runs give byte-identical files that pass
+  `evaluation/validate_submission.py`. Where bt is live and v2 dead (3,126 frames in 96
+  stretches, median 0.3 s, 7 over 5 s) 56% of the frames lie within 5 s of a Smart Tagging set
+  piece, against 35% of all graded frames, and the reverse disagreement is the same (57%): the
+  two differ on when a restart begins and ends, not on playing through stoppages. Smart Tagging
+  marks only 59 set pieces, so this is a coarse check, and it was looked at, not tuned on.
 
 **How the no-ball rule is kept.**
 
