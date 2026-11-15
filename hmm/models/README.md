@@ -1,18 +1,28 @@
 # Committed model
 
-`control_state.npz` is the v7 control classifier (hmm/control.py), exported to plain arrays by
-hmm/trees.py. It holds only tree arrays, the 94 feature names and the class prior. It loads with
+`control_state.npz` is the v8 control classifier (hmm/control.py), exported to plain arrays by
+hmm/trees.py. It holds only tree arrays, the 248 feature names and the class prior. It loads with
 `allow_pickle=False` and nothing in it comes from BAR-ATH.
 
 | | |
 |---|---|
-| sha256 | `4223a1c46e92ad2402ce4ff52289c2d36a6e82cb1c3e52ddd2d330ac600bc8f9` |
+| sha256 | `695a6ad67a551cdf3000a271cbc62722149ff7f578b58f4cc6ed584b7138288c` |
 | Trained by | `python external/control_features.py && python external/train_control.py` |
-| Library | scikit-learn 1.6.1 (requirements-dev.txt), HistGradientBoostingClassifier, `random_state=0` |
+| Library | scikit-learn 1.6.1 (requirements-dev.txt), HistGradientBoostingClassifier, 300 rounds, no early stopping, `random_state=0` |
 | Target | per-frame H / A / D, folded towards the control rule (external/control.py, 2 s, 2 touches) |
-| Training data | the 30 external matches in data/external (external/README.md), every 5th labelled frame, both team orientations |
+| Training data | the 30 external matches in data/external (external/README.md), every 5th frame where labelled, both team orientations, the three providers weighted equally |
 
-Retrained from the same features with the pinned scikit-learn, the file comes out byte-identical.
+The v7 model (94 columns, sha256 `4223a1c4...`) is at commit fe457a3; the v8 features leave out
+columns it needs, so this decoder cannot run it.
+
+**A refit is not byte-identical.** v7's file was. A second fit of v8 from the same cached features,
+same code and same pinned scikit-learn (4 threads both times) gave sha256 `318d4069...`: the same
+900 trees in shape and count, equal up to tree 189, then leaf values that differ in the last
+float digits, and from there a few different splits. On two matches' features the two models'
+probabilities differ by 0.013 at most and 0.00001 on average, and name the same state on every
+row. The likely cause is the order threads add up the weighted histograms in (v7 had no sample
+weights). So the submission is reproducible from this committed file, which is what the decoder
+reads, and not from a retrain.
 `train_control.py` prints the sha256 so that you can check.
 
 Training data sources (external/README.md has how to fetch them):

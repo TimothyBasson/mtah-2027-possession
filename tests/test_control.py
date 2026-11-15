@@ -63,3 +63,36 @@ def test_exported_trees_reproduce_scikit_learn(tmp_path):
     path = tmp_path / "m.npz"
     trees.export(model, path)
     assert np.allclose(trees.predict_proba(trees.load(path), X), model.predict_proba(X), atol=1e-9)
+
+
+def test_joint_features_leave_out_the_ball_alone_and_swap_with_the_teams():
+    from hmm.control import BALL_ALONE, STRIDE, hold, joint_features
+    px, py, team, bx, by = _toy_match()
+    args = (bx, by, (105.0, 68.0), 25, [(0, 400)])
+    X, names, frames = joint_features(px, py, team, *args)
+    assert list(frames) == list(range(0, 400, STRIDE)) and X.shape == (len(frames), len(names))
+    assert len(set(names)) == len(names)
+    assert not [n for n in names if any(b in n for b in BALL_ALONE) or n.startswith("k_")]
+    assert "gap" in names and "p_width_diff" in names and "b_gap" in names
+    Xs = joint_features(px, py, team, *args, swap=True)[0]
+    Y = joint_features(px, py, 1 - team, *args)[0]
+    assert np.array_equal(np.isnan(Xs), np.isnan(Y))
+    assert np.allclose(np.nan_to_num(Xs), np.nan_to_num(Y))
+    held = hold(np.arange(len(frames)), 400)
+    assert list(held[:8]) == [0, 0, 0, 1, 1, 1, 1, 1] and held[-1] == len(frames) - 1
+
+
+def test_the_committed_model_reads_columns_joint_features_makes():
+    import os
+    from hmm.control import control_log_ratio, hold, joint_features
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hmm",
+                        "models", "control_state.npz")
+    model = trees.load(path)
+    px, py, team, bx, by = _toy_match()
+    args = (px, py, team, bx, by, (105.0, 68.0), 25, [(0, 400)])
+    X, names, frames = joint_features(*args)
+    assert not set(model["names"]) - set(names)
+    cols = [names.index(n) for n in model["names"]]
+    ratio = control_log_ratio(model, X[:, cols], joint_features(*args, swap=True)[0][:, cols])
+    assert ratio.shape == (len(frames), 3) and np.all(np.isfinite(ratio))
+    assert hold(ratio, 400).shape == (400, 3)
