@@ -79,7 +79,8 @@ def run(name):
     fold = int(round(STATE["min_possession"] * fps))
     for w in (0.0,) + tuple(weights):
         pred = dec.decode(clues, trans, start, segments, kickoffs=(), extra=extra,
-                          direct=w * ratio if w else None, min_possession=fold if w else 0)
+                          direct=w * ratio if w else None, min_possession=fold if w else 0,
+                          before_stoppage=int(round(STATE["before_stoppage"] * fps)) if w else 0)
         pred[d["labels"] == "X"] = "X"
         out["hmm_v6" if w == 0 else "v8 w{:g}".format(w)] = [sh.score(gt, pred) for gt in views]
     return name, out
@@ -95,6 +96,10 @@ def main():
     ap.add_argument("--min-possession", type=float, default=dec.MIN_POSSESSION_SECONDS,
                     help="seconds under which the decoder folds a possession between two spells "
                          "of the other team (default {}: none)".format(dec.MIN_POSSESSION_SECONDS))
+    ap.add_argument("--before-stoppage", type=float, default=dec.BEFORE_STOPPAGE_SECONDS,
+                    help="seconds under which the decoder folds a possession between the other "
+                         "team and a stoppage (default {}: none)".format(
+                             dec.BEFORE_STOPPAGE_SECONDS))
     ap.add_argument("--fold-seconds", type=float, default=CONTROL_SECONDS,
                     help="spell length under which the folded view folds (external/control.py)")
     a = ap.parse_args()
@@ -106,7 +111,7 @@ def main():
         sys.exit("no {}: run external/train_control.py --loso first".format(loso_path))
     state = dict(paths=paths, tables=tables(paths), loso=dict(np.load(loso_path)),
                  weights=[float(w) for w in a.weights.split(",")], fold_seconds=a.fold_seconds,
-                 min_possession=a.min_possession)
+                 min_possession=a.min_possession, before_stoppage=a.before_stoppage)
     with Pool(a.jobs, initializer=_init, initargs=(state,)) as pool:
         rows = dict(pool.map(run, list(paths)))
     models = list(next(iter(rows.values())))

@@ -296,6 +296,18 @@ CONTROL_FEATURES = "joint1"
 # of the other team. That was looked at once, to check the assumption, not to choose the number.
 MIN_POSSESSION_SECONDS = 0.0
 
+# A possession briefer than this that follows the other team and ends in a stoppage is given back
+# to that team after decoding (fold_before_stoppage): the last touch that puts the ball out, or a
+# foul won, is not controlled possession. Off by default. On the external matches, against the
+# control-folded labels, 1.5 s takes v8's 0.644 / 0.816 / 0.480 to 0.649 / 0.822 / 0.487 and 2 s to
+# 0.649 / 0.820 / 0.490, up on all 30 matches (external/post_sweep.py); with the length chosen on
+# the other two providers each time the mean gain is 0.003. As with MIN_POSSESSION_SECONDS, the
+# folded labels are made by a rule of this shape (external/control.py), so part of the gain is the
+# yardstick's construction: against the labels as they are 2 s costs IDSSE 0.007 and Metrica 0.012
+# and gains SkillCorner 0.006. The public window has four stoppages; the possessions before them
+# are 7.4, 3.6, 3.5 and 7.6 s, so it neither confirms nor contradicts a limit of 2 s or less.
+BEFORE_STOPPAGE_SECONDS = 0.0
+
 
 def gap_table():
     """log p(gap bin | state), states x gap bins."""
@@ -454,15 +466,34 @@ def fold_brief_possessions(path, min_frames):
     return path
 
 
+def fold_before_stoppage(path, min_frames):
+    """Copy of a state path with every H or A run shorter than min_frames that follows the other
+    team and ends in a stoppage given back to that team. One pass, on purpose: repeating it would
+    fold the run it has just lengthened into the one before, and so on back up a chain."""
+    path = np.array(path, copy=True)
+    if min_frames <= 1:
+        return path
+    edges = np.flatnonzero(path[1:] != path[:-1]) + 1
+    starts, stops = np.r_[0, edges], np.r_[edges, len(path)]
+    for i in range(1, len(starts) - 1):
+        a, b = starts[i], stops[i]
+        before = path[a - 1]
+        if (b - a < min_frames and path[a] != D and path[b] == D and before != D
+                and before != path[a]):
+            path[a:b] = before
+    return path
+
+
 def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIGHT, extra=(),
-           direct=None, min_possession=0):
+           direct=None, min_possession=0, before_stoppage=0):
     """Labels for every video frame: one Viterbi path per half, X everywhere else.
 
     clues is a list of (obs, log_table), each obs covering every video frame, all at `weight`.
     extra is a list of (obs, log_table, weight) for clues with a weight of their own. direct is a
     (frames, 3) array added to the log emissions as it is (the control clue, already weighted).
     min_possession, in frames, folds briefer possessions between two spells of the other team
-    (fold_brief_possessions); 0 leaves the path as Viterbi gives it."""
+    (fold_brief_possessions); 0 leaves the path as Viterbi gives it. before_stoppage, in frames,
+    then folds briefer possessions between the other team and a stoppage (fold_before_stoppage)."""
     labels = np.full(len(clues[0][0]), "X", dtype="<U1")
     for lo, hi in segments:
         log_emit = build_log_emit([(obs[lo:hi], table, weight) for obs, table in clues]
@@ -470,8 +501,8 @@ def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIG
         if direct is not None:
             log_emit = log_emit + direct[lo:hi]
         pin_dead_before_kickoff(log_emit, lo, hi, kickoffs)
-        labels[lo:hi] = STATES[fold_brief_possessions(viterbi(log_emit, log_trans, log_start),
-                                                      min_possession)]
+        path = fold_brief_possessions(viterbi(log_emit, log_trans, log_start), min_possession)
+        labels[lo:hi] = STATES[fold_before_stoppage(path, before_stoppage)]
     return labels
 
 
@@ -700,6 +731,10 @@ def main():
                         help="seconds under which a possession between two spells of the other "
                              "team is folded (default {}; 0 for none)".format(
                                  MIN_POSSESSION_SECONDS))
+    parser.add_argument("--before-stoppage", type=float, default=BEFORE_STOPPAGE_SECONDS,
+                        help="seconds under which a possession between the other team and a "
+                             "stoppage is folded (default {}; 0 for none)".format(
+                                 BEFORE_STOPPAGE_SECONDS))
     parser.add_argument("--weight", type=float, default=WEIGHT,
                         help="emission weight (v5: {}, v4: {})".format(WEIGHT, WEIGHT_V4))
     parser.add_argument("--hand-gap", action="store_true",
@@ -745,7 +780,8 @@ def main():
         model_path=args.control_model)
     fold = 0 if args.no_control else int(round(args.min_possession * FPS))
     labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight, extra=extra,
-                    direct=direct, min_possession=fold)
+                    direct=direct, min_possession=fold,
+                    before_stoppage=0 if args.no_control else int(round(args.before_stoppage * FPS)))
     ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),
                                            ("_cw{:g}".format(args.control_weight),
                                             not args.no_control
@@ -753,6 +789,9 @@ def main():
                                            ("_mp{:g}".format(args.min_possession),
                                             not args.no_control
                                             and args.min_possession != MIN_POSSESSION_SECONDS),
+                                           ("_bs{:g}".format(args.before_stoppage),
+                                            not args.no_control
+                                            and args.before_stoppage != BEFORE_STOPPAGE_SECONDS),
                                            ("_handgap", args.hand_gap),
                                            ("_nowidth", args.no_width),
                                            ("_fitplace", args.fit_place)) if on)

@@ -305,3 +305,14 @@ def test_folding_repeats_until_nothing_brief_is_left():
     path = np.array([H] * 8 + [A] * 2 + [H] * 3 + [A] * 8)
     # the 2-frame A run folds into H, which makes one 13-frame H run that stays
     assert list(fold_brief_possessions(path, 4)) == [H] * 13 + [A] * 8
+
+
+def test_a_brief_possession_between_the_other_team_and_a_stoppage_is_folded():
+    from hmm.decode import fold_before_stoppage
+    from hmm.model import A, D, H
+    path = np.array([H] * 10 + [A] * 3 + [D] * 5 + [H] * 2 + [D] * 4 + [A] * 9 + [H] * 6 + [D] * 3)
+    out = fold_before_stoppage(path, 5)
+    assert list(out[:13]) == [H] * 13            # H A D: the last touch goes back to H
+    assert list(out[18:20]) == [H] * 2           # D H D: between two stoppages, left alone
+    assert list(out[33:39]) == [H] * 6           # long enough, left alone
+    assert np.array_equal(fold_before_stoppage(path, 0), path)
