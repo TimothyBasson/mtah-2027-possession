@@ -1,6 +1,6 @@
 """Label BAR-ATH with the learned model and write the submission.
 
-    python deep/run.py [--tag v2]      # -> evaluation/results/deep.csv
+    python deep/run.py [--tag bt]      # -> evaluation/results/deep.csv
 
 Uses the network trained on all 30 outside matches (deep/train.py --fold none). Players only.
 """
@@ -17,7 +17,7 @@ ROOT = os.path.dirname(HERE)
 sys.path[:0] = [HERE, os.path.join(ROOT, "possession"), os.path.join(ROOT, "external"), ROOT]
 import data as D  # noqa: E402
 import decode  # noqa: E402
-from net import PossessionNet  # noqa: E402
+from net import load_net  # noqa: E402
 from train import predict_half  # noqa: E402
 
 DECODE = dict(cost=4, min_team=1, min_dead=1)  # what two of the three held-out folds picked
@@ -26,8 +26,7 @@ DECODE = dict(cost=4, min_team=1, min_dead=1)  # what two of the three held-out 
 def probabilities(tag):
     import load
     players, ball, team, halves = load.load()
-    net = PossessionNet(nfeat=D.NFEAT)
-    net.load_state_dict(torch.load(os.path.join(HERE, "models", tag + ".pt")))  # train.py --fold none
+    net = load_net(os.path.join(HERE, "models", tag + ".pt"), D.NFEAT)  # train.py --fold none
     probs = []
     for a, b in halves:
         X, M, bxy, fr = D.half_tensors(players, ball, team, a, b, load.PITCH, load.FPS)
@@ -37,7 +36,7 @@ def probabilities(tag):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tag", default="v2")
+    ap.add_argument("--tag", default="bt")
     ap.add_argument("--out", default="deep.csv")
     ap.add_argument("--threads", type=int, default=1,
                     help="pinned so a rerun does the same arithmetic; 1, 4 and 8 give the same file (README)")

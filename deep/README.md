@@ -8,8 +8,106 @@ pip install -r requirements-deep.txt
 python deep/train.py --fold idsse      # and metrica, skillcorner: one provider held out each
 python deep/decode.py --tag v2         # THE score: held-out mean spellF1
 python deep/train.py --fold none --steps 2000   # all 30 matches -> copy net.pt to deep/models/v2.pt
-python deep/run.py                     # BAR-ATH -> evaluation/results/deep.csv
+python deep/run.py                     # BAR-ATH -> evaluation/results/deep.csv (the ball-taught model, bt)
 python deep/explain.py --match all     # each stage's output, for viz/combined/make_combined.py --deep
+```
+
+## bt (2026-11-14): taught by the ball, still blind to it, 0.540
+
+The ball may teach the model on the training matches; it may never be read when a match is
+labelled. v2 used it in one weak way (a side head guessing the ball's position, shown not to
+matter). `--ptr` makes the ball's lesson part of the path to the answer:
+
+- **Who is on the ball.** After the convolutions the net points at one of the frame's players (a
+  distribution over the set). On training matches the pointing is taught by the real ball: the
+  target is a softmax of minus distance to the ball over 2 m. What it pointed at (that player's
+  features, where he stands, and how the pointing splits between the two teams) is handed on to
+  the GRU, so the label is decided with "who has it" in hand. This is the two-level design of
+  Kim et al. (KDD 2023).
+- **Three more ball targets** on side heads: the ball's velocity, "the ball was struck or stopped
+  within 0.2 s" (its velocity jumps by more than 5 m/s between 0.2 s steps), and how far the ball
+  is from the nearest player (loose or held).
+
+Held out by provider, validation-picked decode (`decode.py`), spellF1:
+
+| | IDSSE | Metrica | SkillCorner | mean |
+|---|---|---|---|---|
+| v2, seed 0 | 0.554 | 0.633 | 0.398 | 0.529 |
+| v2, seed 1 (`v2s1`) | 0.544 | 0.616 | 0.398 | 0.519 |
+| control `btc`: the pointer stage, nothing of the ball in the loss (`--stage --ball 0`) | 0.552 | 0.614 | 0.397 | 0.521 |
+| **bt**, seed 0 (`--ptr 0.5`) | 0.568 | 0.637 | 0.410 | **0.539** |
+| **bt**, seed 1 (`bts1`) | 0.570 | 0.650 | 0.400 | **0.540** |
+
+Both bt runs beat both v2 runs on every provider. The control says the gain is the ball's
+teaching, not the extra layer. Paired by match, two seeds a side (`paired.py v2,v2s1 bt,bts1`),
+bt minus v2:
+
+| | IDSSE (7) | Metrica (3) | SkillCorner (20) | provider mean | matches up |
+|---|---|---|---|---|---|
+| shipped decode, labels as they are | +0.029 | +0.019 | +0.004 | 0.527 -> 0.545 | 25 / 30 |
+| shipped decode, folded labels | +0.016 | +0.018 | +0.002 | 0.614 -> 0.626 | 23 / 30 |
+| 2 s minimum possession, labels as they are | +0.016 | +0.014 | +0.009 | 0.524 -> 0.537 | 26 / 30 |
+| 2 s minimum possession, folded labels | +0.017 | +0.018 | +0.009 | 0.628 -> 0.642 | 24 / 30 |
+
+The standard error of the 30-match difference is 0.002 to 0.003. It clears the bar (+0.01, no
+provider down) in every view. SkillCorner gains least.
+
+- **Where the gain is** (`bylength.py`): possessions of 2 to 5 s found rise from 37 / 43 / 27% to
+  43 / 46 / 29% (IDSSE / Metrica / SkillCorner); under 2 s is unchanged at 3 to 10%. Team
+  accuracy moves little (0.886 -> 0.888): the ball teaching sharpens when a possession starts and
+  ends more than whose it is.
+- **Players missing as on BAR-ATH** (`predict.py --tag bt --out btk --knock`): 0.526, against
+  v2's 0.516.
+- **BAR-ATH public 5 minutes, check only, nothing chosen on it:** `deep/models/bt.pt` (all 30
+  matches, 2,000 steps, seed 0) scores 0.745 with 12 possessions; v2 scores 0.826 with 14; truth
+  17. That is one or two possessions apart on a window whose noise is about +-0.2, so it neither
+  confirms nor contradicts the 30-match result. Over the full match the two agree on 96.0% of
+  graded frames (275 against 281 possessions, median 7.1 s against 6.8 s).
+
+- **BAR-ATH without labels** (review of #35). Per half bt gives 126 / 149 possessions and v2
+  130 / 151; 13% / 13% of bt's are under 2 s (v2 14% / 11%) and 37% / 40% under 5 s (v2 42% /
+  42%). Both call 44 to 48% of graded frames dead, against 20% in the public window, so the
+  window's 17 possessions do not scale to the match by frame count: per live minute the window
+  has 4.2 possessions and bt 4.8. The two disagree on 4.0% of graded frames, and less, not more,
+  where players are missing: 2.2% with 15 or fewer tracked, 2.6% with 16 to 18, 4.2% with 21 or
+  more. Half of the disagreement is bt live where v2 is dead.
+- **The decode suits bt** (`compare.py --tag bt --sweep`, one setting in all folds): the shipped
+  cost 4 with 1 s minimums scores 0.545, the best of the 20 settings 0.546 (cost 2). A lower
+  minimum does not help: 0.543 at 0.5 s or none.
+- **The pointer when the carrier is not tracked** (review of #35): the target then names the
+  nearest player still tracked. With players knocked out as on BAR-ATH bt loses 0.014 (0.540 to
+  0.526) and v2 loses 0.013 (0.529 to 0.516), so the pointer is no more fragile than the rest.
+  Teaching it only where a tracked player is within 3 m of the ball is untried.
+
+- **bt labels BAR-ATH from 2026-11-15** (Gambtt's choice): `run.py` defaults to `--tag bt`;
+  `--tag v2` still gives the earlier labels. Two runs give byte-identical files that pass
+  `evaluation/validate_submission.py`. Where bt is live and v2 dead (3,126 frames in 96
+  stretches, median 0.3 s, 7 over 5 s) 56% of the frames lie within 5 s of a Smart Tagging set
+  piece, against 35% of all graded frames, and the reverse disagreement is the same (57%): the
+  two differ on when a restart begins and ends, not on playing through stoppages. Smart Tagging
+  marks only 59 set pieces, so this is a coarse check, and it was looked at, not tuned on.
+
+**How the no-ball rule is kept.**
+
+- `PossessionNet.forward(x, mask)` is handed the players and nothing else; the ball enters only
+  `train.ball_targets`, which is called on training batches.
+- Held out: a fold's ball targets come from the two training providers only. The held-out
+  provider's ball is never read by training, by prediction or by the choice of decode settings
+  (those are picked on validation matches from the training providers, by their labels).
+- BAR-ATH: its ball is never read. `bt.pt` is trained on the 30 outside matches.
+- `tests/test_deep_no_ball.py` replaces a match's ball with blanks, noise and its own reverse and
+  requires the input tensors and the predictions to be identical bit for bit, for v2 and bt.
+- The labels of the outside matches were made by their providers with the ball in view; that is
+  the truth being learned, as before. The folded labels in `paired.py` use the scored match's
+  ball to build the yardstick, never a prediction.
+
+Not tried here: a teacher that reads the ball, distilled into this net (the labels already carry
+most of what such a teacher knows); labels cleaned with the ball.
+
+```bash
+sh deep/queue.sh deep/jobs.txt             # the runs above, three at a time, resumable
+python deep/train.py --fold none --steps 2000 --ptr 0.5 --tag bt   # -> deep/models/bt.pt
+python deep/run.py --tag bt --out deep_bt.csv
 ```
 
 ## v2 (2026-11-13): the pitch turned the right way, 0.529

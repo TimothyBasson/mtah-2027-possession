@@ -1,0 +1,14 @@
+# TAG FOLD [train.py options]. The runs behind README's "bt" section.
+bt idsse --steps 1500 --ptr 0.5
+bt metrica --steps 1500 --ptr 0.5
+bt skillcorner --steps 1500 --ptr 0.5
+v2s1 idsse --steps 1500 --seed 1
+v2s1 metrica --steps 1500 --seed 1
+v2s1 skillcorner --steps 1500 --seed 1
+bts1 idsse --steps 1500 --ptr 0.5 --seed 1
+bts1 metrica --steps 1500 --ptr 0.5 --seed 1
+bts1 skillcorner --steps 1500 --ptr 0.5 --seed 1
+# btc: the control, the pointer stage with nothing of the ball in the loss
+btc idsse --steps 1500 --stage --ball 0
+btc metrica --steps 1500 --stage --ball 0
+btc skillcorner --steps 1500 --stage --ball 0

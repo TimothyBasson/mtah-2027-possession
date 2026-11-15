@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path[:0] = [HERE, os.path.join(ROOT, "external"), os.path.join(ROOT, "possession")]
 import data as D  # noqa: E402
-from net import PossessionNet  # noqa: E402
+from net import load_net  # noqa: E402
 from train import predict_half  # noqa: E402
 
 
@@ -38,8 +38,7 @@ def main():
         src = os.path.join(base, a.tag, fold)
         if not os.path.exists(os.path.join(src, "net.pt")):
             continue
-        net = PossessionNet(nfeat=D.NFEAT)
-        net.load_state_dict(torch.load(os.path.join(src, "net.pt")))
+        net = load_net(os.path.join(src, "net.pt"), D.NFEAT)
         os.makedirs(os.path.join(base, a.out, fold), exist_ok=True)
         for f in sorted(glob.glob(os.path.join(src, "*.npz"))):
             name = os.path.basename(f)
