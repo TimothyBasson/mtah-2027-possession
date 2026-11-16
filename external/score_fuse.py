@@ -99,6 +99,8 @@ def run(name):
         direct = wc * ratio + np.where(seen, wn, wu) * (net_team + wd * net_dead)
         pred = dec.decode(clues, trans, start, segments, kickoffs=(), weight=wk,
                           extra=[(width, width_t, ww)], direct=direct, min_possession=fold)
+        if STATE.get("hold_restart"):
+            pred = dec.hold_restarts(pred, bx, by, fps)
         pred[d["labels"] == "X"] = "X"
         out[label] = [sh.score(gt, pred) for gt in views]
     return name, out
@@ -145,6 +147,8 @@ def main():
     ap.add_argument("--loso", default="control_loso.npz")
     ap.add_argument("--min-possession", type=float, default=dec.MIN_POSSESSION_SECONDS)
     ap.add_argument("--fold-seconds", type=float, default=CONTROL_SECONDS)
+    ap.add_argument("--hold-restart", action="store_true",
+                    help="hold each stoppage until a still, seen ball is kicked (hmm.decode.hold_restarts)")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
     paths = {os.path.basename(p)[:-4]: p
@@ -156,7 +160,7 @@ def main():
     state = dict(paths=paths, tables=sc.tables(all_paths), shares=label_shares(all_paths),
                  loso=dict(np.load(os.path.join(CACHE, a.loso))), variants=variants,
                  tags=a.tag.split(","), fold_seconds=a.fold_seconds,
-                 min_possession=a.min_possession)
+                 min_possession=a.min_possession, hold_restart=a.hold_restart)
     with Pool(a.jobs, initializer=_init, initargs=(state,)) as pool:
         rows = dict(pool.map(run, list(paths), chunksize=1))
     report(rows, next(iter(variants)))
