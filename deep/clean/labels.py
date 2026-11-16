@@ -6,6 +6,8 @@ themselves), and nothing here is used when a match is labelled.
              there is one within `window` seconds and the move does not swallow a neighbouring spell
     mask     live frames where the ball contradicts the label are left out of the loss (set to X):
              the ball is within 1.5 m of a player, a metre nearer the other team, for 0.6 s or more
+    fold     spells under 2 s with fewer than two touches by their team go back to the team that had
+             the ball (external/control.py, the folded yardstick's rule, here on training labels)
     lastmask live frames where the last touch was by the other team are left out of the loss, for at
              most `hold` seconds after that touch
 
@@ -101,6 +103,10 @@ def clean(d, mode):
             lab, _ = retime(lab, touches, fps)
         elif step == "mask":
             lab[contradicted(lab, dh, da, fps)] = "X"
+        elif step == "fold":  # spells that fail the controlled-possession test go back (external/control.py)
+            sys.path.insert(0, os.path.join(ROOT, "external"))
+            from control import fold_uncontrolled
+            lab = fold_uncontrolled(lab, touches["frame"], touches["team"], fps)
         elif step == "lastmask":
             lab[last_touch_against(lab, touches, fps)] = "X"
         else:

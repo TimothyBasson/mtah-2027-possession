@@ -8,3 +8,9 @@ lcaux idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --label-weight skill
 # lchead: SkillCorner at a quarter, its labels on a head of their own
 lchead metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --own-head skillcorner
 lchead idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --own-head skillcorner
+# lcfold: SkillCorner at a quarter, its labels folded to the controlled-possession rule; the others' labels as built
+lcfold metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean fold --clean-prov skillcorner
+lcfold idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean fold --clean-prov skillcorner
+# lchead50: SkillCorner at half the windows as in bt, its labels on a head of their own
+lchead50 metrica --steps 1500 --ptr 0.5 --own-head skillcorner
+lchead50 idsse --steps 1500 --ptr 0.5 --own-head skillcorner
