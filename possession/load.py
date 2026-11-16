@@ -6,6 +6,12 @@ model code path serves both:
     team     (K,)       0 home, 1 away
     halves   [(first, last)] graded video frames of each half, inclusive
 
+By default the goalkeeper slots are corrected (possession/keepers.py): a keeper slot near a goal
+counts for the team defending it, via two extra slots (so K is the ATD's 46 plus 2), and frozen
+tracks are unseen. load(keepers=False), or MTAH_RAW_KEEPERS=1 in the environment (for every caller
+at once), gives the tracking as delivered. Caches of anything computed from load() should carry
+cache_suffix() in their name, so the two versions never mix.
+
 Parsing the 199k-line ATD takes a minute, so the arrays are cached under data/cache/ (gitignored).
 """
 
@@ -38,7 +44,25 @@ def parse(raw_path, n_frames, n_slots):
     return xy[:, :-1], xy[:, -1]
 
 
-def load():
+KEEPERS = os.environ.get("MTAH_RAW_KEEPERS", "") != "1"
+
+
+def cache_suffix(keepers=None):
+    """"_k" for the corrected keepers, "" for the tracking as delivered (the names caches had before)."""
+    return "_k" if (KEEPERS if keepers is None else keepers) else ""
+
+
+def load(keepers=None, report=None):
+    keepers = KEEPERS if keepers is None else keepers
+    players, ball, team, halves = load_raw()
+    if keepers:
+        import keepers as KP
+        players, team = KP.fix(players, team, halves, KP.keeper_slots(require(["atd_meta"])[0]),
+                               PITCH[0], FPS, speed, report)
+    return players, ball, team, halves
+
+
+def load_raw():
     if os.path.exists(CACHE):
         z = np.load(CACHE)
         return z["players"], z["ball"], z["team"], [tuple(h) for h in z["halves"]]
