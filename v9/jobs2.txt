@@ -1,0 +1,7 @@
+# second and third seeds of pf (players only, folded labels)
+pfs1 idsse --labels folded --seed 1
+pfs1 metrica --labels folded --seed 1
+pfs1 skillcorner --labels folded --seed 1
+pfs2 idsse --labels folded --seed 2
+pfs2 metrica --labels folded --seed 2
+pfs2 skillcorner --labels folded --seed 2

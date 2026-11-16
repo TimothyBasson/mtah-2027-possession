@@ -76,11 +76,14 @@ def run(name):
     for si, tags in enumerate(STATE["sets"]):
         lp = net_logp(name, tags, d)
         prior = np.log(STATE["prior"])
-        for wc, wd, hw in STATE["grid"]:
+        lp2 = net_logp(name, STATE["nets2"], d) if STATE["nets2"] else None
+        for wc, wd, hw, w2 in STATE["grid"]:
             if si and wd == 0:
                 continue
             direct = wc * ratio + wd * (lp - prior)
-            keep((si, wc, wd, hw), dec.decode(clues, trans, start, segments, kickoffs=(), extra=extra,
+            if w2:
+                direct = direct + w2 * (lp2 - prior)
+            keep((si, wc, wd, hw, w2), dec.decode(clues, trans, start, segments, kickoffs=(), extra=extra,
                                               direct=direct, weight=hw * dec.WEIGHT if hw else 0.0))
         probs = [np.exp(lp[a:b][::5]) for a, b in segments]
         spans = [(a, b - 1) for a, b in segments]
@@ -96,14 +99,16 @@ def main():
     ap.add_argument("--wd", default="0,0.1,0.2,0.3,0.5")
     ap.add_argument("--wc", default="0.2,0.1,0")
     ap.add_argument("--hw", default="1", help="multipliers of the v6 clues' weight (0: none)")
+    ap.add_argument("--nets2", default="", help="a second set of nets with a weight of its own (--w2)")
+    ap.add_argument("--w2", default="0")
     ap.add_argument("--jobs", type=int, default=4)
     a = ap.parse_args()
     paths = {os.path.basename(p)[:-4]: p for p in sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))}
-    grid = list(itertools.product(*[[float(v) for v in s.split(",")] for s in (a.wc, a.wd, a.hw)]))
+    grid = list(itertools.product(*[[float(v) for v in s.split(",")] for s in (a.wc, a.wd, a.hw, a.w2)]))
     alone = [dict(cost=4, min_team=1, min_dead=1), dict(cost=4, min_team=2, min_dead=1),
              dict(cost=8, min_team=2, min_dead=1)]
     state = dict(paths=paths, tables=sc.tables(paths), loso=dict(np.load(os.path.join(CACHE, "control_loso.npz"))),
-                 sets=[s.split(",") for s in a.nets], grid=grid, alone=alone, prior=np.array([0.3, 0.3, 0.4]))
+                 sets=[s.split(",") for s in a.nets], nets2=[t for t in a.nets2.split(",") if t], grid=grid, alone=alone, prior=np.array([0.3, 0.3, 0.4]))
     with Pool(a.jobs, initializer=_init, initargs=(state,)) as pool:
         rows = dict(pool.map(run, list(paths)))
     keys = list(next(iter(rows.values())))
