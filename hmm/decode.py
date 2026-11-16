@@ -83,7 +83,8 @@ those numbers come from (1,500 steps, a provider held out), not the same nets.
 The net runs on one thread with torch pinned, so a rerun on the same machine does the same
 arithmetic. Across CPUs with different instruction sets the last bits of a probability can
 differ, and a near-tie in the Viterbi path could then move a boundary: two runs on one machine
-give the same file (sha256 cf1a838d...2ce02d31), and it has not been checked on a second one.
+give the same file (sha256 cf1a838d...2ce02d31 for PR 47; e76d697a...bedc7221ed with the restart hold
+and the keeper fix of PR 57), and it has not been checked on a second one.
     python -m hmm.decode --no-control       # v6 again (v7 is commit fe457a3: its classifier read
                                             # columns the v8 features leave out)
     python -m hmm.decode --no-control --no-width   # v5 again
@@ -328,7 +329,8 @@ NET_WEIGHT = 0.3
 # kicked (over RESTART_KICK m/s) within RESTART_WAIT s, the stoppage is held until the kick
 # (hold_restarts). The gap clue reads a player standing over a placed free kick or goal kick as
 # possession, calling restarts live while the ball is being placed.
-# Optional (--hold-restart). Held out by provider it is flat: 0.726 / 0.807 / 0.496 against
+# On by default since 2026-11-16 (--no-hold-restart turns it off). Held out by provider it is
+# flat: 0.726 / 0.807 / 0.496 against
 # v9's 0.725 / 0.807 / 0.496, since the outside providers hide or freeze the ball in a stoppage
 # and the rule rarely fires there; spellF1 averages IoU 0.3-0.7, so a few seconds at the start of
 # a long spell seldom changes a match.
@@ -812,8 +814,9 @@ def main():
                         help="exported classifier (default hmm/models/control_state.npz)")
     parser.add_argument("--control-weight", type=float, default=CONTROL_WEIGHT,
                         help="weight on the control clue (default {})".format(CONTROL_WEIGHT))
-    parser.add_argument("--hold-restart", action="store_true",
-                        help="hold a stoppage until a still, seen ball is kicked (hold_restarts)")
+    parser.add_argument("--no-hold-restart", dest="hold_restart", action="store_false",
+                        help="ablation: end a stoppage where Viterbi does, without holding it until "
+                             "a still, seen ball is kicked (hold_restarts)")
     parser.add_argument("--no-net", action="store_true",
                         help="ablation: without the players-only net, which is v8")
     parser.add_argument("--net-model", default=",".join(NET_MODELS),
@@ -905,7 +908,7 @@ def main():
                                            ("_handgap", args.hand_gap),
                                            ("_nowidth", args.no_width),
                                            ("_fitplace", args.fit_place),
-                                           ("_hold", args.hold_restart)) if on)
+                                           ("_nohold", not args.hold_restart)) if on)
     path = write_submission(
         args.out or os.path.join(RESULTS_DIR, "hmm_v{}{}.csv".format(
             6 if args.no_control else 9 if use_net else 8, ablation)), labels)
