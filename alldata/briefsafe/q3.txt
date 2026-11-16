@@ -1,0 +1,8 @@
+kq idsse --extra --brief 3 --focal 1 --backed 0.1 --pseudo c1e
+kq skillcorner --extra --brief 3 --focal 1 --backed 0.1 --pseudo c1e
+kq metrica --extra --brief 3 --focal 1 --backed 0.1 --pseudo c1e
+kqs1 idsse --extra --brief 3 --focal 1 --backed 0.1 --pseudo c1e --seed 1
+kqs1 skillcorner --extra --brief 3 --focal 1 --backed 0.1 --pseudo c1e --seed 1
+kqs1 metrica --extra --brief 3 --focal 1 --backed 0.1 --pseudo c1e --seed 1
+kqN none --extra --brief 3 --focal 1 --backed 0.1 --pseudo cNe
+kqNs1 none --extra --brief 3 --focal 1 --backed 0.1 --pseudo cNe --seed 1

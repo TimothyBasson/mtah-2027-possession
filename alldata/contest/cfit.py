@@ -105,8 +105,8 @@ def batch(train, rng, B, T, a, sym):
             continue
         # pseudo-labelled matches are not reweighted: their brief spells are the teacher's own
         # guesses, and weighting them makes the adapted net cut finer still (review of PR 61).
-        # --backed runs (alldata/briefsafe) were trained with them reweighted when the ball backs them.
-        bw = 1.0 if prov == "pseudo" and a.backed is None else a.brief
+        # --weigh-pseudo brings that back (alldata/briefsafe's kb runs were trained with it).
+        bw = 1.0 if prov == "pseudo" and not a.weigh_pseudo else a.brief
         if a.backed is not None:
             key = ("bk", bw, rows, v)
             if key not in h:
@@ -166,6 +166,8 @@ def main():
     ap.add_argument("--focal", type=float, default=0.0)
     ap.add_argument("--backed", type=float, default=None,
                     help="weigh only brief possessions the ball backs (last kink margin >= this; needs --extra)")
+    ap.add_argument("--weigh-pseudo", action="store_true",
+                    help="also weigh brief spells of pseudo-labelled matches (the kb runs; off since the PR 61 review)")
     ap.add_argument("--brief-skip", nargs="*", default=[],
                     help="providers whose windows are not brief-weighted (e.g. skillcorner pseudo)")
     ap.add_argument("--mine-skip", nargs="*", default=["skillcorner", "pseudo"])

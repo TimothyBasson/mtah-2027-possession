@@ -1,2 +1,2 @@
-kbN none --extra --brief 3 --focal 1 --backed 0.1 --pseudo cNe
-kbNs1 none --extra --brief 3 --focal 1 --backed 0.1 --pseudo cNe --seed 1
+kbN none --extra --brief 3 --focal 1 --backed 0.1 --weigh-pseudo --pseudo cNe
+kbNs1 none --extra --brief 3 --focal 1 --backed 0.1 --weigh-pseudo --pseudo cNe --seed 1
