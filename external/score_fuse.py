@@ -147,8 +147,9 @@ def main():
     ap.add_argument("--loso", default="control_loso.npz")
     ap.add_argument("--min-possession", type=float, default=dec.MIN_POSSESSION_SECONDS)
     ap.add_argument("--fold-seconds", type=float, default=CONTROL_SECONDS)
-    ap.add_argument("--hold-restart", action="store_true",
-                    help="hold each stoppage until a still, seen ball is kicked (hmm.decode.hold_restarts)")
+    ap.add_argument("--no-hold-restart", dest="hold_restart", action="store_false",
+                    help="v9 as of PR 47: without holding each stoppage until a still, seen ball is "
+                         "kicked (hmm.decode.hold_restarts, on by default)")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
     paths = {os.path.basename(p)[:-4]: p
