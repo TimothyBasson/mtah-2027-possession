@@ -82,8 +82,8 @@ those numbers come from (1,500 steps, a provider held out), not the same nets.
 
 The net runs on one thread with torch pinned, so a rerun on the same machine does the same
 arithmetic. Across CPUs with different instruction sets the last bits of a probability can
-differ, and a near-tie in the Viterbi path could then move a boundary: the file has not been
-checked byte for byte on a second machine.
+differ, and a near-tie in the Viterbi path could then move a boundary: two runs on one machine
+give the same file (sha256 cf1a838d...2ce02d31), and it has not been checked on a second one.
     python -m hmm.decode --no-control       # v6 again (v7 is commit fe457a3: its classifier read
                                             # columns the v8 features leave out)
     python -m hmm.decode --no-control --no-width   # v5 again

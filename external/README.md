@@ -324,11 +324,41 @@ against 0.35). No provider mean here has a bootstrap interval: with 3, 7 and 20 
 paired standard errors in the first table are what there is, and by them Metrica's drop is noise
 and SkillCorner's gain is small but consistent.
 
-**Not checked on BAR-ATH.** The gated data was not on the machine that did this work.
-`python -m hmm.decode` now needs torch (`requirements-deep.txt`) and writes `hmm_v9.csv`;
-`--no-net` gives v8. Before submitting, compare it with `hmm_v8.csv` and `deep.csv` on the
-public window and by eye. The outside sets lose the ball at random and BAR-ATH loses it around
-restarts in long gaps (above), so how much of IDSSE's gain carries over is the open question.
+**On BAR-ATH (2026-11-16, check only; nothing was chosen on it).** `python -m hmm.decode` and
+`python -m hmm.decode --no-net` on the tactical tracking, with `deep/run.py` (`bt` alone) beside
+them:
+
+| full match, no labels read | `hmm_v8` | `hmm_v9` | `deep` (`bt`) |
+|---|---|---|---|
+| possessions, half 1 / half 2 | 127 / 137 | 117 / 124 | 125 / 147 |
+| mean possession | 13.6 / 12.0 s | 14.9 / 13.3 s | 13.9 / 11.4 s |
+| median possession | 8.0 / 7.8 s | 8.4 / 9.1 s | 7.5 / 7.0 s |
+| possessions under 2 s | 10% / 10% | 6% / 8% | |
+| dead share of graded frames | 46% / 48% | 45% / 48% | 45% / 47% |
+| home's share of live frames | 64% / 58% | 66% / 59% | 65% / 58% |
+| stoppages | 110 | 102 | |
+| a decoded restart within 2 s of the 58 tagged set pieces | 54 | 53 | |
+
+v9 has 8.7% fewer possessions than v8 (241 against 264) and the same dead share. The public
+window's possessions have a mean of 14.2 s. v8 and v9 differ on 5.8% of graded frames: 6.8% where
+the ball is seen (59% of frames) and 4.3% where it is not; where both call the ball live they
+name different teams on 5.0%; v8 is dead where v9 is live on 1.7% and the reverse on 1.5%. v9
+sits between its two parents: it differs from `deep` on 5.3% of graded frames, where v8 differs
+from `deep` on 10.5%.
+
+| public 5 minutes, `run_evaluation.py --bootstrap 1000` (17 possessions) | spellF1 (5-95%) | macroF1 (5-95%) | alive/dead | team, both alive | possessions |
+|---|---|---|---|---|---|
+| `hmm_v8` | 0.679 (0.48 to 0.84) | 0.861 (0.62 to 0.90) | 0.962 | 0.916 | 16 |
+| `hmm_v9` | 0.774 (0.58 to 0.90) | 0.904 (0.64 to 0.95) | 0.972 | 0.943 | 14 |
+| `deep` (`bt`) | 0.745 (0.51 to 0.89) | 0.900 (0.68 to 0.97) | 0.960 | 0.977 | 12 |
+
+The intervals overlap almost entirely, so the window does not say v9 is better; it says nothing
+has gone wrong. `hmm_v9.csv` passes `evaluation/validate_submission.py`, and two runs on the same
+machine (Intel Xeon with AVX-512, torch 2.15.0, one thread) give the same file, sha256
+`cf1a838d...2ce02d31`. It has not been regenerated on a second CPU. `python -m hmm.decode` needs
+torch (`requirements-deep.txt`); `--no-net` gives v8 without it. The outside sets lose the ball at
+random and BAR-ATH loses it around restarts in long gaps (above), so the size of IDSSE's gain
+should not be expected here; the direction on the public window is the same.
 
 ## hmm_v8: the control classifier retrained, `score_control.py`
 
