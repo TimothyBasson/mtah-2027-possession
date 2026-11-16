@@ -1,0 +1,155 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+Using CPython 3.11.18 interpreter at: /usr/bin/python3.11
+Creating virtual environment at: .venv
+Downloading kiwisolver (1.4MiB)
+Downloading jedi (4.7MiB)
+Downloading aiohttp (1.8MiB)
+Downloading babel (9.7MiB)
+Downloading numpy (16.1MiB)
+Downloading notebook (5.3MiB)
+Downloading lxml (5.0MiB)
+Downloading pillow (6.8MiB)
+Downloading matplotlib (9.4MiB)
+Downloading pygments (1.2MiB)
+Downloading fonttools (5.2MiB)
+Downloading jupyterlab (16.4MiB)
+Downloading pandas (11.8MiB)
+Downloading debugpy (2.9MiB)
+ Downloaded fonttools
+ Downloaded jupyterlab
+ Downloaded numpy
+ Downloaded pillow
+ Downloaded matplotlib
+ Downloaded babel
+ Downloaded lxml
+ Downloaded notebook
+ Downloaded kiwisolver
+ Downloaded aiohttp
+ Downloaded debugpy
+ Downloaded pygments
+ Downloaded pandas
+ Downloaded jedi
+Installed 113 packages in 157ms
+Downloading nvidia-cudnn-cu13 (495.1MiB)
+Downloading nvidia-cublas (386.1MiB)
+Downloading nvidia-cusparselt-cu13 (162.3MiB)
+Downloading nvidia-cusparse (144.0MiB)
+Downloading nvidia-cufft (208.1MiB)
+Downloading nvidia-cuda-cupti (11.4MiB)
+Downloading sympy (6.0MiB)
+Downloading nvidia-nccl-cu13 (206.0MiB)
+Downloading scipy (33.7MiB)
+Downloading nvidia-cuda-runtime (2.2MiB)
+Downloading nvidia-nvshmem-cu13 (129.1MiB)
+Downloading nvidia-cusolver (217.4MiB)
+Downloading torch (514.2MiB)
+Downloading triton (272.5MiB)
+Downloading scikit-learn (12.9MiB)
+Downloading cuda-bindings (8.0MiB)
+Downloading nvidia-cuda-nvrtc (44.8MiB)
+Downloading nvidia-nvjitlink (44.5MiB)
+Downloading nvidia-cufile (1.3MiB)
+Downloading networkx (2.0MiB)
+Downloading nvidia-cuda-cccl (3.9MiB)
+ Downloaded nvidia-cuda-runtime
+ Downloaded nvidia-nvshmem-cu13
+ Downloaded nvidia-cuda-nvrtc
+ Downloaded nvidia-cusparse
+ Downloaded nvidia-nvjitlink
+ Downloaded nvidia-cuda-cupti
+ Downloaded scikit-learn
+ Downloaded scipy
+ Downloaded cuda-bindings
+ Downloaded sympy
+ Downloaded nvidia-cufile
+ Downloaded networkx
+ Downloaded nvidia-cuda-cccl
+ Downloaded nvidia-cusolver
+ Downloaded nvidia-cusparselt-cu13
+ Downloaded triton
+ Downloaded nvidia-cufft
+ Downloaded nvidia-nccl-cu13
+ Downloaded nvidia-cublas
+ Downloaded nvidia-cudnn-cu13
+ Downloaded torch
+Installed 35 packages in 250ms
+idsse_J03WMX 13 s
+idsse_J03WN1 11 s
+idsse_J03WOH 11 s
+idsse_J03WOY 11 s
+idsse_J03WPY 12 s
+idsse_J03WQQ 11 s
+idsse_J03WR9 10 s
+metrica_1 8 s
+metrica_2 8 s
+metrica_3 10 s
+skillcorner_1874553 12 s
+skillcorner_1886347 13 s
+skillcorner_1899585 13 s
+skillcorner_1925299 13 s
+skillcorner_1927964 11 s
+skillcorner_1953632 10 s
+skillcorner_1959846 10 s
+skillcorner_1986691 10 s
+skillcorner_1996435 10 s
+skillcorner_1996436 9 s
+skillcorner_2006229 11 s
+skillcorner_2006363 10 s
+skillcorner_2007448 9 s
+skillcorner_2007721 11 s
+skillcorner_2010085 10 s
+skillcorner_2011166 10 s
+skillcorner_2013725 9 s
+skillcorner_2015213 10 s
+skillcorner_2016236 13 s
+skillcorner_2017461 12 s
+
+real	6m34.839s
+user	4m49.712s
+sys	1m33.153s
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+idsse        left out: 1050142 rows, 426 s, held-out log loss 0.24
+metrica      left out: 1279232 rows, 469 s, held-out log loss 0.53
+skillcorner  left out: 573038 rows, 261 s, held-out log loss 0.76
+-> /home/user/mtah-2027-possession/data/cache/control_loso.npz
+
+real	20m8.022s
+user	72m56.877s
+sys	0m32.292s
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+
+idsse (7 matches): spellF1 raw | folded (change from 0.2:0 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  0.2:0                  0.543 | 0.644 (+0.000, se 0.000, up 0/7) | 0.964 0.900 | 254
+  0:0.2                  0.611 | 0.703 (+0.059, se 0.010, up 7/7) | 0.960 0.918 | 284
+  0.2:0.05               0.560 | 0.670 (+0.026, se 0.003, up 7/7) | 0.969 0.908 | 256
+  0.2:0.1                0.574 | 0.689 (+0.045, se 0.007, up 7/7) | 0.971 0.912 | 259
+  0.2:0.2                0.597 | 0.715 (+0.072, se 0.011, up 7/7) | 0.972 0.919 | 264
+  0.1:0.2                0.607 | 0.713 (+0.070, se 0.009, up 7/7) | 0.970 0.919 | 272
+  0.2:0.3                0.612 | 0.728 (+0.084, se 0.010, up 7/7) | 0.972 0.921 | 272
+
+metrica (3 matches): spellF1 raw | folded (change from 0.2:0 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  0.2:0                  0.765 | 0.816 (+0.000, se 0.000, up 0/3) | 0.932 0.966 | 268
+  0:0.2                  0.743 | 0.795 (-0.021, se 0.004, up 0/3) | 0.923 0.963 | 264
+  0.2:0.05               0.759 | 0.819 (+0.003, se 0.004, up 1/3) | 0.931 0.966 | 263
+  0.2:0.1                0.747 | 0.816 (-0.000, se 0.008, up 1/3) | 0.929 0.967 | 260
+  0.2:0.2                0.738 | 0.807 (-0.009, se 0.006, up 1/3) | 0.927 0.966 | 259
+  0.1:0.2                0.744 | 0.810 (-0.006, se 0.002, up 0/3) | 0.927 0.965 | 260
+  0.2:0.3                0.732 | 0.807 (-0.009, se 0.007, up 1/3) | 0.926 0.964 | 255
+
+skillcorner (20 matches): spellF1 raw | folded (change from 0.2:0 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  0.2:0                  0.420 | 0.480 (+0.000, se 0.000, up 0/20) | 0.942 0.845 | 288
+  0:0.2                  0.428 | 0.489 (+0.009, se 0.005, up 13/20) | 0.951 0.844 | 281
+  0.2:0.05               0.426 | 0.489 (+0.009, se 0.001, up 18/20) | 0.947 0.845 | 285
+  0.2:0.1                0.431 | 0.495 (+0.015, se 0.002, up 20/20) | 0.950 0.846 | 284
+  0.2:0.2                0.433 | 0.496 (+0.016, se 0.003, up 18/20) | 0.953 0.846 | 288
+  0.1:0.2                0.433 | 0.497 (+0.017, se 0.004, up 17/20) | 0.954 0.845 | 284
+  0.2:0.3                0.433 | 0.497 (+0.016, se 0.004, up 16/20) | 0.954 0.845 | 291
+
+mean of the providers: raw | folded | alive/dead | team acc
+  0.2:0                  0.576 | 0.6468 | 0.946 | 0.904   (0.644 / 0.816 / 0.480)
+  0:0.2                  0.594 | 0.6623 | 0.945 | 0.908   (0.703 / 0.795 / 0.489)
+  0.2:0.05               0.582 | 0.6593 | 0.949 | 0.907   (0.670 / 0.819 / 0.489)
+  0.2:0.1                0.584 | 0.6665 | 0.950 | 0.908   (0.689 / 0.816 / 0.495)
+  0.2:0.2                0.590 | 0.6729 | 0.951 | 0.910   (0.715 / 0.807 / 0.496)
+  0.1:0.2                0.595 | 0.6735 | 0.950 | 0.910   (0.713 / 0.810 / 0.497)
+  0.2:0.3                0.592 | 0.6772 | 0.951 | 0.910   (0.728 / 0.807 / 0.497)
