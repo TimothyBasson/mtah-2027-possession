@@ -7,9 +7,12 @@ runs), plus:
 
 --extra         the contest columns of cfeats.py join the rows (who the ball came off / goes to)
 --brief W       frames of a possession shorter than --brief-len seconds that follows the other
-                team's possession weigh W times as much in the loss (each head on its own labels)
+                team's possession weigh W times as much in the loss (each head on its own labels);
+                not on pseudo-labelled matches
 --focal G       hard-example mining inside the loss: a frame's loss is scaled by
-                (1 - p of its label) ** G, so frames the net already has right fade out
+                (1 - p of its label) ** G, so frames the net already has right fade out. Frames
+                not mined keep 0.5 ** G, so as the net fits, their share of the gradient grows
+                and --share no longer holds exactly
 --mine-skip P   providers whose frames are not mined (SkillCorner's labels are the noisy ones;
                 mining them chases the noise)
 """
@@ -83,9 +86,12 @@ def batch(train, rng, B, T, a, sym):
         X, y, y2 = h["F"][v][s:s + T], yall[s:s + T], h["yf"][s:s + T]
         if len(X) < T or (y >= 0).mean() < 0.3:
             continue
-        key = ("bw", a.brief, rows)
+        # pseudo-labelled matches are not reweighted: their brief spells are the teacher's own
+        # guesses, and weighting them makes the adapted net cut finer still (review of PR 61)
+        bw = 1.0 if prov == "pseudo" else a.brief
+        key = ("bw", bw, rows)
         if key not in h:
-            h[key] = brief_weights(yall, a.brief, rows), brief_weights(h["yf"], a.brief, rows)
+            h[key] = brief_weights(yall, bw, rows), brief_weights(h["yf"], bw, rows)
         w, w2 = h[key][0][s:s + T], h[key][1][s:s + T]
         if rng.random() < 0.5:
             X, y, y2 = X[:, perm] * sw, swap_y(y), swap_y(y2)

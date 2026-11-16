@@ -41,6 +41,40 @@ labels are the noisy ones (thread "Clean up noisy training labels") and punish i
 showed up in the players-only `sp` run. Hard-example mining alone does nothing; the inputs alone
 help a little everywhere except SkillCorner (−0.006).
 
+## Review of PR 61 (paired intervals, pseudo-label weighting)
+
+**Paired differences** (`paired.py`, touch decode, mean of provider means, 90% bootstrap over
+matches within each provider; share of the 30 matches up, then IDSSE / Metrica / SkillCorner):
+
+| | as built | folded |
+|---|---|---|
+| inputs `pc1e` − `pw1e` | +0.010 [+0.006, +0.015], 43% up (+0.023 / +0.014 / −0.006) | +0.003 [−0.000, +0.007], 43% (+0.013 / +0.002 / −0.006) |
+| reweighted `pcr1e` − `pw1e` | +0.015 [+0.009, +0.021], 37% (+0.040 / +0.018 / −0.013) | +0.006 [+0.002, +0.010], 33% (+0.032 / +0.007 / −0.020) |
+| same, pseudo-labels not reweighted `qcr1e` − `pw1e` | +0.015 [+0.008, +0.022], 40% (+0.040 / +0.019 / −0.013) | +0.005 [+0.001, +0.008], 30% (+0.031 / +0.001 / −0.018) |
+| seed noise: `pc1s1` − `pc1` | −0.000 [−0.004, +0.003] | +0.004 [+0.002, +0.005] |
+| seed noise: `pcr1s1` − `pcr1` | −0.002 [−0.005, +0.001] | +0.002 [−0.001, +0.005] |
+| seed noise: `qcr1s1` − `qcr1` | +0.005 [+0.003, +0.007] | +0.002 [−0.002, +0.006] |
+
+The means clear seed noise on labels as built; folded, only the reweighted runs do, and by little.
+Most matches are SkillCorner (20 of 30), which goes down, hence the low share up. The variants
+were compared on the test folds themselves (five one-seed configurations), so the winner's margin
+carries some selection bias.
+
+**Pseudo-label weighting.** `--brief` used to weigh the BAR-ATH (or held-out) pseudo-labelled
+matches too; it no longer does (`cfit.py`). Retrained (`qcr1`, `qcr1s1`, `qcrN`, `qcrNs1`): held
+out unchanged (0.706 / 0.638 against 0.706 / 0.639, slice 0.124 / 0.190), and BAR-ATH still cuts
+175 + 178 possessions (`alldata_contest_q_touch.csv`, sha256 `f0e6a1b5...dc7df41f18`, public
+window 0.615). So the over-cutting comes from weighting brief possessions in the labelled
+training matches, not from self-training on its own flicker. The inputs-only file (150 + 159) is
+on the public pace; if either is used, it is the safer one.
+
+**Focal and `--share`.** Frames not mined (SkillCorner, pseudo) keep a constant 0.5^G while mined
+frames fade as the net fits, so their share of the gradient grows over training and
+`--share skillcorner=0.25` no longer holds exactly under `--focal`.
+
+**Kink check.** It scores real touches that have a kink within 0.5 s: 52 / 64 / 68% of them
+(IDSSE / Metrica / SkillCorner). The 93-96% is the kink's team accuracy on those, not its recall.
+
 ## BAR-ATH
 
 All-match nets `models/pcrN.pt`, `pcrNs1.pt` (inputs + brief x3 + focal 1, adapted to BAR-ATH
