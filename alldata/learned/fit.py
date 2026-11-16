@@ -139,9 +139,14 @@ def swap_y(y):
 def batch(train, rng, B, T, a, sym):
     perm, sw, mi = sym
     provs = sorted({m["provider"] for m in train})
+    # --share skillcorner=0.25: that provider's share of windows; the others split the rest equally
+    # (SkillCorner's labels are the noisy ones: thread "Clean up noisy training labels", PR 42)
+    fixed = {k: v for k, v in a.share.items() if k in provs}
+    rest = (1 - sum(fixed.values())) / max(len(provs) - len(fixed), 1)
+    pw = np.array([fixed.get(k, rest) for k in provs])
     Xs, ys, es, ws, y2s = [], [], [], [], []
     while len(Xs) < B:
-        prov = provs[rng.integers(len(provs))]
+        prov = provs[rng.choice(len(provs), p=pw / pw.sum())]
         ms = [m for m in train if m["provider"] == prov]
         m = ms[rng.integers(len(ms))]
         h = m["halves"][rng.integers(len(m["halves"]))]
@@ -200,11 +205,13 @@ def main():
     ap.add_argument("--noise", type=float, default=0.0)
     ap.add_argument("--edge", type=float, default=0.3)
     ap.add_argument("--drop-cols", nargs="*", default=[])
+    ap.add_argument("--share", nargs="*", default=[], help="provider=share of training windows, e.g. skillcorner=0.25")
     ap.add_argument("--pseudo", default="")
     ap.add_argument("--conf", type=float, default=0.7)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--threads", type=int, default=1)
     a = ap.parse_args()
+    a.share = {k: float(v) for k, v in (x.split("=") for x in a.share)}
     torch.set_num_threads(a.threads)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
