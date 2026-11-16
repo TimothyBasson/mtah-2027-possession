@@ -1,5 +1,9 @@
 """Tim's HMM v8 (tim.py's held-out labels) under this folder's yardstick: spellF1 per provider on
-the labels as built and folded, ball as recorded.    python alldata/learned/bench.py"""
+the labels as built and folded.
+
+    python alldata/learned/bench.py        # ball as recorded (tim.py)
+    python alldata/learned/bench.py 1      # BAR-ATH-like ball, version 1 (tim_barlike.py)
+"""
 import glob
 import os
 import sys
@@ -12,8 +16,11 @@ import score as S  # noqa: E402
 import possession_metrics as pm  # noqa: E402
 
 rows = {}
-for f in sorted(glob.glob(os.path.join(S.ROOT, "data", "cache", "alldata", "tim", "*_*.npz"))):
-    name = os.path.basename(f)[:-4]
+V = sys.argv[1] if len(sys.argv) > 1 else ""
+for f in sorted(glob.glob(os.path.join(S.ROOT, "data", "cache", "alldata", "tim", f"*_*.v{V}.npz" if V else "*_*.npz"))):
+    name = os.path.basename(f)[:-4].split(".")[0]
+    if not V and ".v" in os.path.basename(f):
+        continue
     raw, fold, _ = S.truths(name)
     pred = pm.label_codes(np.load(f)["labels"])
     rows[name] = [pm.evaluate(t, pred, bootstrap_n=0)["spell_f1_mean"] for t in (raw, fold)]

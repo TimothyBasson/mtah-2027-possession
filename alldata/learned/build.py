@@ -43,6 +43,16 @@ def bt_probs(name, nhalves):
     return [np.mean([o[i] for o in out], 0) for i in range(nhalves)]
 
 
+def ball_version(d, name, v):
+    """(n, 2) ball of version v: 0 as recorded, 1.. made to look like BAR-ATH's under seed v."""
+    bxy = d["ball"][:, :2].astype(np.float32).copy()
+    if v:
+        rng = np.random.default_rng(zlib.crc32(f"{name} {v}".encode()))
+        for a, b in ((int(h[0]), int(h[1])) for h in d["halves"]):
+            bxy[a:b + 1] = feats.bar_like(bxy[a:b + 1], d["labels"][a:b + 1], rng, int(d["fps"]))
+    return bxy
+
+
 def one(args):
     path, versions = args
     name = os.path.basename(path)[:-4]
@@ -57,19 +67,16 @@ def one(args):
     bt = bt_probs(name, len(halves))
     if bt is None:
         return name + " (no bt probabilities, skipped)"
-    # Tim's HMM as optional inputs (tim.py); fit.py --drop-cols tim trains without them
-    tim_in = tim.inputs(name, [np.arange(a, b + 1, feats.STEP) for a, b in halves])
+    # Tim's HMM as optional inputs (tim.py), run on the same ball as each version;
+    # fit.py --drop-cols tim trains without them
     code = lambda l: np.select([l == "H", l == "A", l == "D"], [0, 1, 2], -1).astype(np.int8)  # noqa: E731
     out = {}
     for v in range(versions + 1):
-        rng = np.random.default_rng(zlib.crc32(f"{name} {v}".encode()))
-        bxy = d["ball"][:, :2].astype(np.float32).copy()
-        if v:
-            for a, b in halves:
-                bxy[a:b + 1] = feats.bar_like(bxy[a:b + 1], lab[a:b + 1], rng, int(d["fps"]))
+        bxy = ball_version(d, name, v)
+        tim_v = tim.inputs(name, [np.arange(a, b + 1, feats.STEP) for a, b in halves], v)
         for i, (a, b) in enumerate(halves):
             F, fr = feats.half_features(d["players"], bxy, d["team"], a, b, d["pitch"], int(d["fps"]),
-                                        extra=[("bt", bt[i])] + tim_in[i])
+                                        extra=[("bt", bt[i])] + tim_v[i])
             out[f"F{v}_{i}"] = F
             if v == 0:
                 out[f"y_{i}"], out[f"yf_{i}"], out[f"fr_{i}"] = code(lab[fr]), code(fold[fr]), fr

@@ -110,17 +110,68 @@ gaps say nothing. One seed (`s1`), each head on its own labelling: 0.587 / 0.678
 (players-only 0.940). What the simulation cannot vouch for is the smoothing itself: it matches
 BAR-ATH's statistics, not its tracker.
 
+## How far the simulation can be trusted
+
+The held-out numbers are on outside matches with a simulated BAR-ATH ball, not on BAR-ATH. Three
+checks of the simulation itself (`heads.py`, `lagcheck.py`; one seed, `s1`, each head on its own
+labelling; the reference is 0.594 / 0.685, players-only 0.545 / 0.641):
+
+| the ball the nets are shown | as built | folded |
+|---|---|---|
+| as trained (window half-width 14 to 18 frames) | 0.594 | 0.685 |
+| visible through every stoppage (`--always-seen`) | 0.587 | 0.678 |
+| less smoothing, half-width 8 (`hw=8`) | 0.622 | 0.709 |
+| more smoothing, half-width 24 (`hw=24`) | 0.542 | 0.649 |
+| 0.32 s late (`shift=8`) | 0.557 | 0.655 |
+| 0.32 s early (`shift=-8`) | 0.557 | 0.651 |
+| 0.48 s late (`shift=12`) | 0.509 | 0.611 |
+
+So the gain survives the gaps saying nothing, and a ball a third of a second early or late
+(still ahead of players-only), but not a ball half a second late or one smoothed half as much
+again. Does BAR-ATH's ball do either? `lagcheck.py` measures it without labels: at each sharp
+turn of the ball's path, when is the nearest player closest to the ball?
+
+| | turns | closest approach, median | quartiles | velocity change at the turn, median / 90th pct |
+|---|---|---|---|---|
+| BAR-ATH | 1,065 | -0.08 s | -0.32 / +0.32 s | 2.9 / 4.6 m/s |
+| Metrica samples, BAR-ATH-like | 934, 1,137 | 0.00, -0.04 s | -0.44 / +0.48 s | 2.9 / 4.5 m/s |
+| IDSSE, BAR-ATH-like | 1,107, 590 | -0.24, -0.28 s | -0.6 / +0.36 s | 2.8 / 4.1 m/s |
+| Metrica samples, as recorded | 1,592, 1,778 | 0.00 s | -0.04 / +0.1 s | 11.9 / 23.1 m/s |
+
+BAR-ATH's ball is not late against its players (under 0.1 s), and its turns are as sharp as the
+simulated Metrica balls' and a little tighter in time, which points to the simulation being, if
+anything, slightly too smooth. Neither failure case of the first table is what BAR-ATH shows.
+This is the strongest label-free evidence available; it is still not a score on BAR-ATH.
+
 ## BAR-ATH
 
-- File: `evaluation/results/alldata_learned.csv` (also `/mnt/project-files/alldata/learned/`):
-  244 possessions of mean 13.6 s, 48% of graded frames dead. It agrees with the players-only
-  file on 91.5% of graded frames and with `hmm_v8.csv` on 90.7%.
-- Public 5 minutes, a check and not a yardstick (17 possessions, noise about +-0.2): spellF1
-  0.648, macroF1 0.913; the players-only file 0.745 and 0.904; `hmm_v8` 0.679 and 0.861. The
-  gap to the players-only file is two possessions. One is worth knowing: in the second
-  possession of the match the truth gives the ball to Barcelona for 8 s while the tracked ball
-  sits 1 to 5 m from Athletic players and 6 to 9 m from Barcelona's; the players-only net calls
-  it for Barcelona, this model waits for a Barcelona touch. Nothing was chosen on the window.
+- File: `evaluation/results/alldata_learned.csv` (also `/mnt/project-files/alldata/learned/`).
+  Without labels (`barath_report.py`), per half:
+
+  | file | possessions | median length | under 2 s | per live minute | dead | stoppages |
+  |---|---|---|---|---|---|---|
+  | this model | 104 / 140 | 10.2 / 6.8 s | 6% / 11% | 3.7 / 5.2 | 47% / 49% | 49 / 62 |
+  | players-only `deep` bt | 126 / 149 | 7.5 / 6.6 s | 13% / 13% | 4.3 / 5.3 | 44% / 47% | 46 / 55 |
+  | `hmm_v8` | 127 / 137 | 8.0 / 7.8 s | 10% / 10% | 4.4 / 5.0 | 46% / 48% | 50 / 60 |
+
+  The public window has 4.2 possessions per live minute. This model agrees with the players-only
+  file on 91.7% of graded frames where the ball is seen and 91.4% where it is not, and with
+  `hmm_v8` on 88.7% and 93.6%. All three call 85 to 89% of ball-unseen frames dead and 17 to 19%
+  of ball-seen frames dead.
+- The two heads on BAR-ATH (`run.py --head built|folded`): 110 / 153 possessions from the head
+  taught on labels as built, 102 / 136 from the folded head, 104 / 140 from their average; each
+  agrees with the average on over 99% of frames, so the choice of head moves little here.
+- Public 5 minutes, a check and not a yardstick (17 possessions): spellF1 0.648 (bootstrap
+  interval 0.46 to 0.82), macroF1 0.913; the players-only file 0.745 (0.52 to 0.90) and 0.904;
+  `hmm_v8` 0.679 (0.50 to 0.85) and 0.861. Possession by possession the whole gap to the
+  players-only file is the first hand-over of the match: the truth gives the ball to Barcelona
+  at frame 11,351, this model 5.4 s later and `hmm_v8` 4.9 s later, the players-only net 0.2 s
+  later. In those seconds the tracked ball lies 1 to 5 m from Athletic players and 6 to 9 m from
+  Barcelona's, so both ball-reading models wait for a Barcelona touch. That costs two matched
+  possessions (the 6.6 s and the 8.1 s). On the other 19 stretches this model is level with the
+  players-only file or ahead: it finds part of the 14.5 s stoppage at frame 18,027 that the
+  players-only file plays through. All three files miss the 0.8 s, 1.3 s and 3.5 s possessions.
+  Nothing was chosen on the window.
 
 ## With Tim's model as an input ("explore both")
 

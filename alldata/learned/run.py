@@ -26,11 +26,14 @@ import fit as T  # noqa: E402
 DECODE = dict(cost=4, min_team=1, min_dead=1)
 
 
+WHICH = "both"
+
+
 def head(q):
     """The two heads averaged: taught on the labels as built and on the folded labels. Held out,
     the average is within 0.005 of the better head under either labelling (heads.py), and which
     labelling BAR-ATH's truth is closer to is not known."""
-    return (q[:, :3] + q[:, 3:]) / 2
+    return (q[:, :3] + q[:, 3:]) / 2 if WHICH == "both" else q[:, :3] if WHICH == "built" else q[:, 3:]
 
 
 def bt_probabilities():
@@ -91,11 +94,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tags", nargs="+", default=["psN", "psNs1"])
     ap.add_argument("--out", default="alldata_learned.csv")
+    ap.add_argument("--head", default="both", choices=["both", "built", "folded"],
+                    help="both (the file), or one head alone, to compare them on BAR-ATH")
     ap.add_argument("--features", action="store_true", help="only build BAR-ATH's feature cache")
     a = ap.parse_args()
     if a.features:
         features(with_tim=True)
         return
+    global WHICH
+    WHICH = a.head
     torch.set_num_threads(1)
     from starter.baseline import RESULTS_DIR, write_submission
     from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES

@@ -66,9 +66,11 @@ def bar():
     np.savez_compressed(os.path.join(OUT, "BAR-ATH.npz"), labels=lab, post=post.astype(np.float32))
 
 
-def inputs(name, frames_per_half):
-    """[(feature name, (T, 3) probabilities)] for feats.half_features, per half."""
-    z = np.load(os.path.join(OUT, name + ".npz"))
+def inputs(name, frames_per_half, version=0):
+    """[(feature name, (T, 3) probabilities)] for feats.half_features, per half. version: the
+    ball his model was run on (build.ball_version); 1.. come from tim_barlike.py."""
+    f = os.path.join(OUT, f"{name}.v{version}.npz")
+    z = np.load(f if version and os.path.exists(f) else os.path.join(OUT, name + ".npz"))
     out = []
     for fr in frames_per_half:
         lab = z["labels"][fr]
