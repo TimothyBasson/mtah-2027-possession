@@ -27,7 +27,7 @@ import data as D  # noqa: E402
 import feats  # noqa: E402
 import tim  # noqa: E402
 
-OUT = os.path.join(ROOT, "data", "cache", "alldata", "feats")
+OUT = os.path.join(ROOT, "data", "cache", "alldata", "feats" + tim.SUFFIX)
 BT = ("bt",)  # one net, as on BAR-ATH (deep/models/bt.pt)
 
 

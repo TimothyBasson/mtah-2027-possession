@@ -31,7 +31,7 @@ sys.path[:0] = [HERE, os.path.join(ROOT, "deep")]
 import feats  # noqa: E402
 
 CACHE = os.path.join(ROOT, "data", "cache", "alldata")
-FEATS = os.path.join(CACHE, "feats")  # build.py's match files
+FEATS = os.path.join(CACHE, "feats" + ("" if os.environ.get("TIM_VERSION", "v8") == "v8" else "_" + os.environ["TIM_VERSION"]))  # build.py's match files
 EVAL = {0: "p", 1: "s", 4: "l", 7: "m"}  # saved probabilities: key by ball version (as recorded, parabolic, low-pass, mix)
 VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3, "soccertrack": 1}
 

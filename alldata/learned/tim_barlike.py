@@ -3,6 +3,13 @@
 
     python alldata/learned/tim_barlike.py features   # his classifier's features on those balls
     python alldata/learned/tim_barlike.py decode     # -> data/cache/alldata/tim/<match>.v<k>.npz
+    TIM_VERSION=v9 python alldata/learned/tim_barlike.py decode   # his v9 -> data/cache/alldata/tim_v9/
+
+v9 is v8 with the players-only net of deep/ added to the decoder's emissions (hmm/net_clue.py,
+hmm.decode.NET_WEIGHT), measured the way external/score_fuse.py measures it: each match is read
+by the fold nets that never saw its provider (bt and b2: sw25 for the IDSSE and Metrica folds, a
+second seed of bt for the SkillCorner fold), against the class shares of the providers they were
+trained on. The net reads no ball, so it is the same for every ball version.
 
 His classifier is refitted with each provider left out exactly as external/train_control.py
 --loso does it (his rows(), fit() and cached features, so it learns from his own balls, as the
@@ -71,9 +78,13 @@ def decode_job(job):
              (place, dec.place_table()), (sh.speed_cats(d), speed_t), (sh.flight_cats(d, ball), flight_t)]
     extra = [(sh.width_cats(d), width_t, dec.WIDTH_WEIGHT)]
     ratio = np.log(np.clip(post, 1e-6, 1)) - np.log(prior)
+    direct = dec.CONTROL_WEIGHT * ratio
+    if tim.TIM_VERSION == "v9":
+        direct = direct + dec.NET_WEIGHT * tim.net_clue(name, d, STATE["shares"])
     pred = dec.decode(clues, dec.transitions(), np.log(dec.START), segments, kickoffs=(), extra=extra,
-                      direct=dec.CONTROL_WEIGHT * ratio,
+                      direct=direct,
                       min_possession=int(round(dec.MIN_POSSESSION_SECONDS * fps)))
+    os.makedirs(tim.OUT, exist_ok=True)
     np.savez_compressed(os.path.join(tim.OUT, f"{name}.v{v}.npz"), labels=pred, post=post.astype(np.float32))
     return f"{name} v{v}"
 
@@ -102,6 +113,9 @@ def main():
             np.savez_compressed(os.path.join(FEAT, f"{n}.v{v}.post.npz"), post=hold(p, matches[n][5]), prior=prior)
         print(k, "left out: classifier fitted and read", flush=True)
     STATE.update(tables=sc.tables(paths()))
+    if tim.TIM_VERSION == "v9":
+        import score_fuse
+        STATE.update(shares=score_fuse.label_shares(paths()))
     with Pool(4) as pool:
         for r in pool.imap_unordered(decode_job, jobs):
             print(r, flush=True)

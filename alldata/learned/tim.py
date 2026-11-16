@@ -23,7 +23,12 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path[:0] = [ROOT, os.path.join(ROOT, "evaluation"), os.path.join(ROOT, "external")]
-OUT = os.path.join(ROOT, "data", "cache", "alldata", "tim")
+# Which of Tim's versions feeds the model: v8 (the default, what the shipped nets read) or v9 (v8
+# plus the players-only net as a clue, from the fold nets that never saw the provider). Each has
+# its own caches: TIM_VERSION=v9 python alldata/learned/tim.py, tim_barlike.py decode, build.py.
+TIM_VERSION = os.environ.get("TIM_VERSION", "v8")
+SUFFIX = "" if TIM_VERSION == "v8" else "_" + TIM_VERSION
+OUT = os.path.join(ROOT, "data", "cache", "alldata", "tim" + SUFFIX)
 STATE = {}
 
 
@@ -45,18 +50,34 @@ def run(name):
     extra = [(sh.width_cats(d), width_t, dec.WIDTH_WEIGHT)]
     post = STATE["loso"][name]
     ratio = np.log(np.clip(post, 1e-6, 1)) - np.log(STATE["loso"]["prior_" + name])
+    direct = dec.CONTROL_WEIGHT * ratio
+    if TIM_VERSION == "v9":
+        direct = direct + dec.NET_WEIGHT * net_clue(name, d, STATE["shares"])
     pred = dec.decode(clues, dec.transitions(), np.log(dec.START), segments, kickoffs=(), extra=extra,
-                      direct=dec.CONTROL_WEIGHT * ratio,
+                      direct=direct,
                       min_possession=int(round(dec.MIN_POSSESSION_SECONDS * fps)))
     os.makedirs(OUT, exist_ok=True)
     np.savez_compressed(os.path.join(OUT, name + ".npz"), labels=pred, post=post.astype(np.float32))
     return name
 
 
+def net_clue(name, d, shares):
+    """v9's net term for an outside match, as external/score_fuse.py builds it (--tag bt,b2)."""
+    from hmm.net_clue import log_ratio
+    k = name.split("_")[0]
+    tags = ("bt", "bts1" if k == "skillcorner" else "sw25")
+    probs = []
+    for tag in tags:
+        z = np.load(os.path.join(ROOT, "data", "cache", "deep", tag, k, name + ".npz"))
+        probs.append([z["p%d" % i] for i in range(len(d["halves"]))])
+    prior = np.mean([s for o, s in shares.items() if o != k], axis=0)
+    return log_ratio(probs, d["halves"], len(d["labels"]), prior)
+
+
 def bar():
     import pandas as pd
     import hmm.decode as dec
-    lab = pd.read_csv(os.path.join(ROOT, "evaluation", "results", "hmm_v8.csv"))["label"].astype(str).to_numpy(dtype="U1")
+    lab = pd.read_csv(os.path.join(ROOT, "evaluation", "results", f"hmm_{TIM_VERSION}.csv"))["label"].astype(str).to_numpy(dtype="U1")
     ratio = dec.load_control()  # log posterior - log prior, 0 outside the halves
     import hmm.trees as trees
     prior = np.asarray(trees.load(dec.CONTROL_MODEL)["prior"], float)
@@ -89,6 +110,9 @@ if __name__ == "__main__":
     from control_features import CACHE
     paths = {os.path.basename(p)[:-4]: p for p in sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))}
     STATE.update(paths=paths, tables=sc.tables(paths), loso=dict(np.load(os.path.join(CACHE, "control_loso.npz"))))
+    if TIM_VERSION == "v9":
+        import score_fuse
+        STATE.update(shares=score_fuse.label_shares(paths))
     with Pool(int(os.environ.get("JOBS", 3))) as pool:
         for n in pool.imap(run, list(paths)):
             print(n, flush=True)
