@@ -30,10 +30,11 @@ def main():
     ap.add_argument("--base", nargs="+", default=["tpsN", "tpsNs1"])
     ap.add_argument("--fine", nargs="+", default=["kbN", "kbNs1"])
     ap.add_argument("--m", type=float, default=0.1)
-    ap.add_argument("--out", default="alldata_briefsafe_touch.csv")
+    ap.add_argument("--out", default="", help="default alldata_briefsafe_touch.csv, or alldata_briefsafe_strict_touch.csv with --strict")
     ap.add_argument("--strict", action="store_true",
                     help="keep the submission everywhere except team swaps the kink backs (its dead calls stay)")
     a = ap.parse_args()
+    a.out = a.out or ("alldata_briefsafe_strict_touch.csv" if a.strict else "alldata_briefsafe_touch.csv")
     torch.set_num_threads(1)
     C = mod("contest_run", os.path.join(ROOT, "alldata", "contest", "run.py"))
     R, T = C.R, C.T
