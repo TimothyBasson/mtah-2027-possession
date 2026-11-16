@@ -5,17 +5,28 @@ as the players, and is judged on spellF1 alone. Nothing in `deep/`, `hmm/` or th
 is changed. The sibling folder `alldata/physics/` attacks the same goal with rules and physics.
 
 ```bash
-pip install -r requirements-deep.txt
-python alldata/learned/run.py            # BAR-ATH -> evaluation/results/alldata_learned.csv
-python alldata/learned/run.py --tags tpsN tpsNs1 --out alldata_learned_tim.csv   # the with-Tim file
+pip install -r requirements-deep.txt     # or: uv sync --group deep
+python alldata/learned/run.py            # BAR-ATH -> evaluation/results/alldata_learned_tim.csv, the submission
+python alldata/learned/run.py --tags pwN pwNs1 --out alldata_learned.csv   # the fallback, independent of hmm/
 ```
 
-`run.py` uses the two committed nets in `models/` (`pwN`, `pwNs1`) and `deep/models/bt.pt`. Two
-runs give the same file (sha256 `8a3e1bc4...8438db63`), and it passes
-`evaluation/validate_submission.py`. It reads no ground truth. The with-Tim file (sha256
-`75139e82...d6ec5b762`) also needs `evaluation/results/hmm_v8.csv` and his control classifier
-(`tim.py --bar`). The first file of this folder (`--tags psN psNs1`, sha256 `0c1ce4a7...c58b935`)
-is still reproducible from its committed nets.
+**The submission file is `alldata_learned_tim.csv`** (Gambtt's choice, 2026-11-16): this model
+with Tim's `hmm/` v8 as an input, nets `tpsN` and `tpsNs1`. Held out it is the best row measured
+on BAR-ATH-like balls (0.623 / 0.705 against 0.616 / 0.696 without his model), with the caveats
+in "With Tim's model as an input" below: the gain is on IDSSE only, it is within seed noise, and
+his inputs come from simulated balls in training and from the real ball on BAR-ATH. The plain
+file `alldata_learned.csv` (nets `pwN`, `pwNs1`) and the players-only file (`deep/run.py`, sw)
+are the fallbacks.
+
+One command makes the submission from the provided data alone. `run.py` uses the committed nets
+in `models/`, `deep/models/bt.pt`, and for the default nets Tim's v8 on BAR-ATH, which it
+produces itself when missing by running his code unchanged (`python -m hmm.decode --no-net`,
+then `tim.py --bar`). It reads no ground truth. Checked on 2026-11-16 in a fresh clone holding
+only `data/tactical/`: two runs, the second with every cache removed, give the same file byte
+for byte (sha256 `75139e82...d6ec5b762`, about 2 minutes on one CPU), and it passes
+`evaluation/validate_submission.py` (199,319 rows). The fallback from the same clone is
+sha256 `8a3e1bc4...8438db63`, as before. The first file of this folder (`--tags psN psNs1`,
+sha256 `0c1ce4a7...c58b935`) is still reproducible from its committed nets.
 
 ## The result in one table
 
