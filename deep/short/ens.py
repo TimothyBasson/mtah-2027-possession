@@ -10,6 +10,7 @@ sys.path[:0] = [ROOT, os.path.join(ROOT, "deep"), os.path.join(ROOT, "external")
 import decode, score_hmm as sh
 from control import control_labels
 from run import DECODE
+DECODE = dict(DECODE, **{k: float(v) for k, v in (kv.split("=") for kv in os.environ.get("DEC", "").split(",") if kv)})  # DEC=min_team=2,cost=8
 
 def one(args):
     path, sets = args
