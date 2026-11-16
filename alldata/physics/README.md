@@ -163,9 +163,9 @@ possessions played inside a gap (IDSSE 0.40 to 0.20).
 | second half, this file | 136 | 12.1 / 7.7 s | 10% | 55 | 46% | 0 |
 | second half, players-only | 149 | 11.3 / 6.6 s | 13% | 54 | 45% | 0 |
 
-(The spans run from kick-off to the last tracked frame of each half's video block, so they
-include the time after the whistle, which both files call dead; that is why D is 45% here and
-20% in the public window.) The public window's rate (17 possessions in 5 minutes) would give
+(D is 45% here and 20% in the public window because the ball is missing on 41% of these frames
+and both files call most of a gap dead, while the public window has the ball in view 88% of the
+time.) The public window's rate (17 possessions in 5 minutes) would give
 about 350 over the match; both files have about 260 to 275, so both merge possessions, this one
 slightly more. The public window is the easy part (ball in view 88% against 59% overall).
 
