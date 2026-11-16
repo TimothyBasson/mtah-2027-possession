@@ -55,8 +55,8 @@ def sweep(tag):
     import possession_metrics as pm
     grid = [dict(cost=c, min_team=t, min_dead=d) for t, d in ((0, 0), (0.5, 0.5), (1, 1), (2, 3)) for c in (0, 1, 2, 4, 8)]
     base = os.path.join(ROOT, "data", "cache", "deep", tag)
-    z = np.load(os.path.join(base, "bar_ath_probs.npz"))  # written by deep/run.py
     import load
+    z = np.load(os.path.join(base, f"bar_ath_probs{load.cache_suffix()}.npz"))  # written by deep/run.py
     halves = load.load()[3]
     n = max(e for _, e in halves) + 1
     scores = {}
