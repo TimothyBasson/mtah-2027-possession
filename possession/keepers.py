@@ -90,14 +90,18 @@ def fix(players, team, halves, keepers, length, fps, speed_fn, report=None):
     if sorted(team[keepers].tolist()) != [0, 1]:
         warnings.warn(f"expected one keeper slot per team, got {keepers}; keepers left as they are")
         keepers = []
-    for a, b in halves:
+    lows = [0 if home_defends_low_x(xy[a:b + 1, :K, 0], team, keepers) else 1 for a, b in halves] if keepers else []
+    if len(lows) == 2 and lows[0] == lows[1]:   # as hmm/clues.py: the teams must switch ends at halftime
+        warnings.warn("the teams do not switch ends at halftime; keepers left as they are")
+        keepers = []
+    for i, (a, b) in enumerate(halves):
         seg = xy[a:b + 1]                    # a view: edits land in xy
         fz = frozen(seg, fps)
         counts["frozen"] += int(fz.sum())
         seg[fz] = np.nan
         if not keepers:
             continue
-        low = 0 if home_defends_low_x(seg[:, :K, 0], team, keepers) else 1   # team defending x = 0
+        low = lows[i]                        # team defending x = 0
         for k in keepers:
             x = seg[:, k, 0]
             with np.errstate(invalid="ignore"):
