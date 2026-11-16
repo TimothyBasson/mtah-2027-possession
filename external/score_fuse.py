@@ -4,7 +4,8 @@
     sh deep/queue.sh deep/jobs.txt                      # the bt fold nets (first three lines)
     python external/score_fuse.py [--variants "0.2:0,0.2:0.1,..."] [--tag bt]
 
-Each variant is "control weight:net weight[:width weight[:clue weight]]". The net's per-frame
+Each variant is "control weight:net weight[:width weight[:clue weight[:net weight where the
+ball is unseen[:multiple on the net's alive/dead part]]]]"; -1 keeps a default. The net's per-frame
 p(H, A, D) for a match comes from the fold net that never saw the match's provider
 (data/cache/deep/<tag>/<provider>/), turned into a log ratio against the class shares of the
 providers it was trained on and added to the decoder's log emissions next to the control
@@ -29,6 +30,7 @@ import score_control as sc  # noqa: E402
 import score_hmm as sh  # noqa: E402
 from control import CONTROL_SECONDS, control_labels  # noqa: E402
 from control_features import CACHE, match_ball  # noqa: E402
+from hmm.net_clue import log_ratio  # noqa: E402
 from hmm.clues import ball_is_usable, ball_place_category, gap_distance_category  # noqa: E402
 
 STATE = {}
@@ -38,26 +40,12 @@ def _init(state):
     STATE.update(state)
 
 
-def upsample(p, n, step=5):
-    """(T, 3) on every step-th frame -> (n, 3) by linear interpolation (deep/decode.py)."""
-    t = np.arange(len(p)) * step
-    return np.stack([np.interp(np.arange(n), t, p[:, k]) for k in range(p.shape[1])], 1)
-
-
-def net_posteriors(name, d, tags):
-    """(frames, 3) p(H, A, D) of the held-out fold nets, averaged over tags; 1/3 outside halves."""
-    out = np.full((len(d["labels"]), 3), 1.0 / 3)
-    acc = 0
+def net_probs(name, n_halves, tags):
+    """Per tag, the held-out fold net's (T, 3) p(H, A, D) for each half of a match."""
+    out = []
     for tag in tags:
         z = np.load(os.path.join(CACHE, "deep", tag, name.split("_")[0], name + ".npz"))
-        for i, (a, b) in enumerate(d["halves"]):
-            a, b = int(a), int(b)
-            if tag == tags[0]:
-                out[a:b + 1] = 0
-            out[a:b + 1] += upsample(z["p%d" % i], b - a + 1)
-        acc += 1
-    for a, b in d["halves"]:
-        out[int(a):int(b) + 1] /= acc
+        out.append([z["p%d" % i] for i in range(n_halves)])
     return out
 
 
@@ -94,12 +82,21 @@ def run(name):
     width = sh.width_cats(d)
     ratio = np.log(np.clip(loso[name], 1e-6, 1)) - np.log(loso["prior_" + name])
     prior = np.mean([STATE["shares"][o] for o in sh.SETS if o != k], axis=0)
-    net = np.log(np.clip(net_posteriors(name, d, STATE["tags"]), 1e-6, 1)) - np.log(prior)
+    net = log_ratio(net_probs(name, len(d["halves"]), STATE["tags"]), d["halves"],
+                    len(d["labels"]), prior)
     trans, start = dec.transitions(), np.log(dec.START)
     fold = int(round(STATE["min_possession"] * fps))
     out = {}
-    for label, (wc, wn, ww, wk) in variants.items():
-        direct = wc * ratio + wn * net
+    seen = ball_is_usable(bx, by, pitch)[:, None]
+    # the net's log ratio split into its alive/dead part (the same for H and A) and its team part
+    live = np.logaddexp(net[:, 0], net[:, 1]) - np.log(2)
+    net_dead = np.column_stack([live, live, net[:, 2]])
+    net_team = net - net_dead
+    for label, v in variants.items():
+        wc, wn, ww, wk = v[:4]
+        wu = v[4] if len(v) > 4 else wn      # net weight where the ball is not seen
+        wd = v[5] if len(v) > 5 else 1.0     # the alive/dead part's weight, as a multiple
+        direct = wc * ratio + np.where(seen, wn, wu) * (net_team + wd * net_dead)
         pred = dec.decode(clues, trans, start, segments, kickoffs=(), weight=wk,
                           extra=[(width, width_t, ww)], direct=direct, min_possession=fold)
         pred[d["labels"] == "X"] = "X"
@@ -112,6 +109,7 @@ def parse(spec):
     for item in spec.split(","):
         v = [float(x) for x in item.split(":")]
         v += [dec.WIDTH_WEIGHT, dec.WEIGHT][len(v) - 2:] if len(v) < 4 else []
+        v = [dec.WIDTH_WEIGHT if x < 0 else x for x in v[:3]] + [dec.WEIGHT if x < 0 else x for x in v[3:4]] + v[4:]
         out[item] = tuple(v)
     return out
 

@@ -1,13 +1,18 @@
-"""The players-only net of deep/ as an input to the control classifier (hmm_v9).
+"""The players-only net of deep/ as a clue in the decoder (hmm_v9).
 
-The net (deep/net.py, the ball-taught "bt" kind) reads the players and nothing else. Mid-network
-it points at the player it believes is on the ball; at the end it gives p(H, A, D) and guesses
-where the ball is. This module runs it over a half and turns what it says into per-frame columns,
-some of them measured against the ball the decoder is shown: does the pointer sit on the player
-nearest the ball, is the ball where the net expects it. The classifier then decides, frame by
-frame, how far to trust the net and how far the ball.
+The net (deep/net.py, the ball-taught "bt" kind) reads the players and nothing else, and gives
+p(H, A, D) for every 5th frame. log_ratio() turns that into a scaled likelihood, as
+hmm/control.py does for the control classifier, and the decoder adds it to its log emissions at
+NET_WEIGHT (hmm/decode.py). The two models err in different places: the classifier follows the
+ball and is lost where the ball is missing, the net reads all 22 players and is blind to short
+possessions. Held out by provider the sum scores 0.674 against 0.647 for v8 (external/README.md).
 
-The net's own inputs never include the ball (tests/test_deep_no_ball.py); the ball is joined here.
+Tried and not kept: the net's outputs as columns of the control classifier instead
+(net_outputs(), half_columns(), external/net_features.py, train_control.py --net): its p(H, A, D),
+its pointer's lean, and how the pointer and its guess of the ball sit against the visible ball.
+That scores 0.658, and no better than this module's sum when both are used.
+
+The net's own inputs never include the ball (tests/test_deep_no_ball.py).
 """
 
 import os
@@ -22,6 +27,32 @@ NEAR = 3.0   # metres: "on the ball"
 # 5 fps samples either side for the windowed means, and for the one-sided means.
 WINDOWS = ((5, "1s"), (15, "3s"))
 SIDED = (10, "2s")
+
+
+# Class shares (H, A, D) of the labels the shipped net was trained on: the 30 outside matches as
+# labelled, the three providers counting equally, H and A made equal (external/score_fuse.py
+# label_shares). The net's posterior is divided by these before it joins the emissions.
+NET_PRIOR = np.array([0.324, 0.324, 0.352])
+STEP = 5  # the net's frame spacing (deep/data.py STEP)
+
+
+def upsample(p, n, step=STEP):
+    """(T, 3) on every step-th frame -> (n, 3) by linear interpolation (deep/decode.py)."""
+    t = np.arange(len(p)) * step
+    return np.stack([np.interp(np.arange(n), t, p[:, k]) for k in range(p.shape[1])], 1)
+
+
+def log_ratio(probs, halves, n_frames, prior=NET_PRIOR, floor=1e-6):
+    """(n_frames, 3) log p(state | players) - log p(state), 0 outside the halves. probs is one
+    (T, 3) array per half, or a list of such lists (several nets, averaged); halves are
+    (first, last) frames, last included."""
+    if isinstance(probs[0], (list, tuple)):
+        probs = [np.mean([np.asarray(p[i]) for p in probs], axis=0) for i in range(len(halves))]
+    out = np.zeros((n_frames, 3))
+    for p, (a, b) in zip(probs, halves):
+        a, b = int(a), int(b)
+        out[a:b + 1] = np.log(np.clip(upsample(np.asarray(p), b - a + 1), floor, 1)) - np.log(prior)
+    return out
 
 
 def _deep():
