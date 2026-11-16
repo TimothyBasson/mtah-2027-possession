@@ -26,8 +26,8 @@ sys.path.append(os.path.join(C.ROOT, "possession"))
 
 def bar_probs(touch, fold):
     """(n, 2) touch probabilities on BAR-ATH, cached per detector."""
-    dst = os.path.join(C.TOUCH, "runs", touch, fold, "BAR-ATH.npz")
     import load
+    dst = os.path.join(C.TOUCH, "runs", touch, fold, f"BAR-ATH{load.cache_suffix()}.npz")
     players, ball, team, halves = load.load()
     n = len(ball)
     if os.path.exists(dst):
