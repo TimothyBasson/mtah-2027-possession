@@ -62,14 +62,14 @@ def hide_frozen(xy, fps=25, seconds=1.0):
     return xy
 
 
-def bar_like(xy, labels, rng, fps=25):
+def bar_like(xy, labels, rng, fps=25, q=None):
     """An outside match's ball made to look like BAR-ATH's: parked balls hidden, visibility as
     simulate_visibility, then smoothed."""
-    xy = simulate_visibility(hide_frozen(xy, fps), labels, rng, fps)
+    xy = simulate_visibility(hide_frozen(xy, fps), labels, rng, fps, q)
     return smooth(xy, rng.uniform(14.0, 18.0) * fps / 25).astype(np.float32)
 
 
-def simulate_visibility(xy, labels, rng, fps=25):
+def simulate_visibility(xy, labels, rng, fps=25, q=None):
     """A ball seen the way BAR-ATH's is: tracked through live play, lost for the core of most
     stoppages and now and then in open play. xy (n, 2) with NaN where unseen; labels H/A/D/X.
     Sources differ (IDSSE sees the ball always, Metrica's samples never in a stoppage), so both
@@ -79,7 +79,7 @@ def simulate_visibility(xy, labels, rng, fps=25):
     xy = xy.copy()
     n = len(xy)
     seen = np.isfinite(xy[:, 0])
-    q = rng.uniform(0.6, 1.0)   # BAR-ATH: 59% of frames seen with about 45% dead, so most stoppages are mostly hidden
+    q = rng.uniform(0.6, 1.0) if q is None else q  # BAR-ATH: 59% of frames seen with about 45% dead, so most stoppages are mostly hidden
     m1, m2 = rng.uniform(0.3, 4.0, 2)
     dead = labels == "D"
     s, t, v = _runs(dead)

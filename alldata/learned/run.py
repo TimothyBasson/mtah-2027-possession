@@ -1,6 +1,7 @@
 """Label BAR-ATH with the all-data model and write the submission.
 
-    python alldata/learned/run.py --tags f1 f1s1 [--out alldata_learned.csv]
+    python alldata/learned/run.py --features          # BAR-ATH's feature cache (before fit.py --fold none)
+    python alldata/learned/run.py [--tags psN psNs1] [--out alldata_learned.csv]
 
 Averages the probabilities of the named runs' all-match nets (train.py --fold none), decodes
 them as deep/run.py does, and writes evaluation/results/<out>. Reads BAR-ATH's players and
@@ -23,7 +24,13 @@ import feats  # noqa: E402
 import fit as T  # noqa: E402
 
 DECODE = dict(cost=4, min_team=1, min_dead=1)
-HEAD = slice(0, 3)  # the head taught on the labels as built; slice(3, 6) is the folded one
+
+
+def head(q):
+    """The two heads averaged: taught on the labels as built and on the folded labels. Held out,
+    the average is within 0.005 of the better head under either labelling (heads.py), and which
+    labelling BAR-ATH's truth is closer to is not known."""
+    return (q[:, :3] + q[:, 3:]) / 2
 
 
 def bt_probabilities():
@@ -67,19 +74,22 @@ def features(with_tim=False):
 def probabilities(tags, Fs, names):
     probs = [0] * len(Fs)
     for tag in tags:
-        ck = torch.load(os.path.join(T.CACHE, "runs", tag, "none", "net.pt"), map_location="cpu")
+        path = os.path.join(HERE, "models", tag + ".pt")  # the committed nets; else a fresh fit.py --fold none
+        if not os.path.exists(path):
+            path = os.path.join(T.CACHE, "runs", tag, "none", "net.pt")
+        ck = torch.load(path, map_location="cpu")
         cols = [names.index(n) for n in ck["names"]]
         net = T.Net(len(cols), ck["d"])
         net.load_state_dict(ck["sd"])
         sym = feats.symmetry(ck["names"])
         for i, F in enumerate(Fs):
-            probs[i] = probs[i] + T.predict(net, F[:, cols], sym)[:, HEAD] / len(tags)
+            probs[i] = probs[i] + head(T.predict(net, F[:, cols], sym)) / len(tags)
     return probs
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tags", nargs="+", default=[])
+    ap.add_argument("--tags", nargs="+", default=["psN", "psNs1"])
     ap.add_argument("--out", default="alldata_learned.csv")
     ap.add_argument("--features", action="store_true", help="only build BAR-ATH's feature cache")
     a = ap.parse_args()
