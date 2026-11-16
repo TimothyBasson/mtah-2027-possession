@@ -155,6 +155,7 @@ NBALL = 6
 def batch(train, rng, B, T, a):
     provs = sorted({m["provider"] for m in train})
     Xs, Ms, ys, bs, es, ws, rs, qs = [], [], [], [], [], [], [], []
+    batch.prov = []  # each window's provider, for --label-weight and --own-head
     while len(Xs) < B:
         if a.share:  # e.g. soccertrack=0.15: that provider's share of windows, the rest split equally
             w = np.array([a.share.get(q, np.nan) for q in provs])
@@ -208,7 +209,7 @@ def batch(train, rng, B, T, a):
             if swapped:
                 q = q[:, [1, 0, 2]]
             qs.append(q)
-        Xs.append(X); Ms.append(M); ys.append(y); bs.append(ball); es.append(e)
+        Xs.append(X); Ms.append(M); ys.append(y); bs.append(ball); es.append(e); batch.prov.append(prov)
     t = lambda v: torch.from_numpy(np.stack(v))  # noqa: E731
     R = tuple(t([r[i] for r in rs]) for i in range(3)) if rs else None
     return t(Xs), t(Ms), t(ys), t(bs), t(es), t(ws), R, (t(qs) if qs else None)
@@ -273,6 +274,17 @@ def main():
     ap.add_argument("--bvel", type=float, default=0.3, help="v4: ball velocity loss")
     ap.add_argument("--touch", type=float, default=0.3, help="v4: ball struck/stopped loss")
     ap.add_argument("--free", type=float, default=0.2, help="v4: ball-to-nearest-player distance loss")
+    ap.add_argument("--label-weight", nargs="*", default=[],
+                    help="provider=weight of its windows in the label losses, e.g. skillcorner=0: the provider "
+                         "still teaches through the ball targets, its labels count less or not at all")
+    ap.add_argument("--own-head", nargs="*", default=[],
+                    help="providers whose labels train a label head of their own on the shared network; "
+                         "prediction uses the main head, so their way of cutting possessions stays out of it")
+    ap.add_argument("--drop", nargs="*", default=[], help="training matches to leave out, by name")
+    ap.add_argument("--clean", default="",
+                    help="train on labels cleaned with each training match's ball (deep/clean/labels.py), "
+                         "e.g. retime+lastmask+mask; scoring labels are untouched")
+    ap.add_argument("--clean-prov", nargs="*", default=[], help="providers to clean; default all in training")
     ap.add_argument("--teach", action="store_true",
                     help="a TEACHER: the real ball is an input. Never labels a match; see --distill")
     ap.add_argument("--distill", default="", help="tag of a --teach run: its probabilities on the training matches are soft targets")
@@ -294,6 +306,7 @@ def main():
     a = ap.parse_args()
     a.provw = {k: float(v) for k, v in (kv.split("=") for kv in a.provw.split(",") if kv)}
     a.share = {k: float(v) for k, v in (kv.split("=") for kv in a.share)}
+    a.label_weight = {k: float(v) for k, v in (kv.split("=") for kv in a.label_weight)}
     torch.set_num_threads(a.threads)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
@@ -304,6 +317,18 @@ def main():
             m["knocked"] = k["halves"]
     matches = [m for m in matches if m["provider"] in ("idsse", "metrica", "skillcorner") or m["provider"] in a.extra]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
+    if a.clean:
+        assert not a.knock, "--clean does not relabel the knocked copies"
+        from clean.labels import clean
+        for m in train:
+            if a.clean_prov and m["provider"] not in a.clean_prov:
+                continue
+            lab = clean(np.load(D.match_path(m["name"])), a.clean)
+            code = np.full(len(lab), -1, np.int64)
+            for i, c in enumerate(D.CLASSES):
+                code[lab == c] = i
+            for h in m["halves"]:
+                h["y"] = code[h["frames"]]
     if a.distill:
         for m in train:
             z = np.load(os.path.join(D.ROOT, "data", "cache", "deep", a.distill, a.fold, m["name"] + ".npz"))
@@ -318,8 +343,10 @@ def main():
     if a.style:
         for m in train:
             m["raw"] = D.load_raw(D.match_path(m["name"]))
+    train = [m for m in train if m["name"] not in a.drop]
+    assert not set(a.drop) - {m["name"] for m in matches}, "--drop names a match that is not there"
     net = PossessionNet(nfeat=D.NFEAT + (NBALL if a.teach else 0), d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage, restart=a.restart > 0,
-                        ptime=PTIME[a.ptime] if a.ptime else None)
+                        ptime=PTIME[a.ptime] if a.ptime else None, alt=bool(a.own_head))
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
     out = os.path.join(D.ROOT, "data", "cache", "deep", a.tag, a.fold)
@@ -339,10 +366,24 @@ def main():
         X, M, y, ball, e, w, R, q = batch(train, rng, a.batch, a.window, a)
         logits, bhat, ehat, extra = net(X, M)
         g = y >= 0
-        loss_c = (F.cross_entropy(logits[g], y[g], reduction="none") * w[g]).sum() / w[g].sum()
+        if a.label_weight or a.own_head:
+            # a provider whose labels are trusted less: its windows weigh less in the label losses
+            # (0: it teaches only through the ball), or its labels go to a head of their own
+            lw = torch.tensor([a.label_weight.get(pv, 1.0) for pv in batch.prov])[:, None]
+            own = torch.tensor([pv in a.own_head for pv in batch.prov])[:, None]
+            gm, go, wm = g & ~own, g & own, w * lw
+            num = (F.cross_entropy(logits[gm], y[gm], reduction="none") * wm[gm]).sum()
+            if go.any():
+                num = num + (F.cross_entropy(extra["cls_alt"][go], y[go], reduction="none") * w[go]).sum()
+            loss_c = num / (wm[gm].sum() + w[go].sum()).clamp(min=1.0)
+        else:
+            loss_c = (F.cross_entropy(logits[g], y[g], reduction="none") * w[g]).sum() / w[g].sum()
         bg = g & (y < 2) & torch.isfinite(ball[..., 0])
         loss_b = F.smooth_l1_loss(bhat[bg], ball[bg], beta=0.1) if bg.any() else logits.sum() * 0
-        if a.provw:  # w carries the provider's label weight; the edge target is made of labels too
+        if a.label_weight or a.own_head:  # an own-head provider's edges train nothing either
+            we = (lw * ~own).expand_as(e)[g]
+            loss_e = (F.binary_cross_entropy_with_logits(ehat[g], e[g], reduction="none") * we).sum() / we.sum().clamp(min=1.0)
+        elif a.provw:  # w carries the provider's label weight; the edge target is made of labels too
             wn = (w[g] / w[g].mean()).clamp(max=4) if a.spell <= 0 else torch.ones_like(w[g])
             loss_e = (F.binary_cross_entropy_with_logits(ehat[g], e[g], reduction="none") * wn).mean()
         else:

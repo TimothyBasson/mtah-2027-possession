@@ -102,7 +102,7 @@ class PossessionNet(nn.Module):
     is never an input: forward() takes the players and their mask and nothing else."""
 
     def __init__(self, nfeat=8, d_set=64, d=128, dilations=(1, 2, 4, 8, 16, 32, 1, 2, 4, 8, 16, 32),
-                 gru=True, drop=0.1, set_blocks=2, ptr=False, restart=False, ptime=None):
+                 gru=True, drop=0.1, set_blocks=2, ptr=False, restart=False, ptime=None, alt=False):
         super().__init__()
         self.enc = FrameEncoder(nfeat, d_set, blocks=set_blocks, out=d, ptime=ptime)
         self.tcn = nn.Sequential(*[TCNBlock(d, k, drop) for k in dilations])
@@ -118,6 +118,9 @@ class PossessionNet(nn.Module):
             self.bvel = nn.Linear(d, 2)    # the ball's velocity
             self.touch = nn.Linear(d, 1)   # "the ball is struck or stopped within 0.2 s"
             self.free = nn.Linear(d, 1)    # how far the ball is from the nearest player (log metres)
+        self.alt = alt
+        if alt:  # train.py --own-head: a second label head for a provider that cuts possessions its own way; never used to predict
+            self.cls_alt = nn.Linear(d, 3)
         self.restart = restart
         if restart:  # training targets only (deep/restarts.py): kind of the next restart, time to and since a stop/start
             self.rkind = nn.Linear(d, 5)
@@ -143,6 +146,8 @@ class PossessionNet(nn.Module):
             h = h + self.gru(h)[0]
         if self.ptr:
             extra.update(bvel=self.bvel(h), touch=self.touch(h).squeeze(-1), free=self.free(h).squeeze(-1))
+        if self.alt:
+            extra["cls_alt"] = self.cls_alt(h)
         if self.restart:
             extra.update(rkind=self.rkind(h), rtime=self.rtime(h))
         return self.cls(h), self.ball(h), self.edge(h).squeeze(-1), extra
@@ -159,6 +164,7 @@ def load_net(path, nfeat=8):
     pt = sorted({int(k.split(".")[2]) for k in sd if k.startswith("enc.ptime.")})
     ptime = [[sd[f"enc.ptime.{i}.convs.{j}.weight"] is not None and PTIME[len(pt)][i][j]
               for j in range(len(PTIME[len(pt)][i]))] for i in pt] or None
-    net = PossessionNet(nfeat=nfeat, ptr="ptr_q.weight" in sd, restart="rkind.weight" in sd, ptime=ptime)
+    net = PossessionNet(nfeat=nfeat, ptr="ptr_q.weight" in sd, restart="rkind.weight" in sd, ptime=ptime,
+                        alt="cls_alt.weight" in sd)
     net.load_state_dict(sd)
     return net.eval()
