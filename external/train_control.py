@@ -58,8 +58,9 @@ def code(labels):
     return np.select([labels == "H", labels == "A", labels == "D"], [0, 1, 2], -1)
 
 
-def load_matches():
-    """{match: (X, Xs, label codes on the cached frames, column names, frames, frames in the match)}"""
+def load_matches(net=""):
+    """{match: (X, Xs, label codes on the cached frames, column names, frames, frames in the match)}
+    With net, the columns of external/net_features.py for that deep/ tag are joined on."""
     matches = {}
     for path in sorted(glob.glob(os.path.join(CACHE, "control_v8_*_*.npz"))):
         name = os.path.basename(path)[len("control_v8_"):-4]
@@ -68,8 +69,12 @@ def load_matches():
         z = np.load(path)
         labels = control_labels(dict(np.load(os.path.join(ROOT, "data", "external",
                                                           name + ".npz"))))
-        matches[name] = (z["X"], z["Xs"], code(labels)[z["frames"]], list(z["names"]),
-                         z["frames"], len(labels))
+        X, Xs, names = z["X"], z["Xs"], list(z["names"])
+        if net:
+            e = np.load(os.path.join(CACHE, "netfeat_{}_{}.npz".format(net, name)))
+            assert np.array_equal(e["frames"], z["frames"])
+            X, Xs, names = np.hstack([X, e["N"]]), np.hstack([Xs, e["Ns"]]), names + list(e["names"])
+        matches[name] = (X, Xs, code(labels)[z["frames"]], names, z["frames"], len(labels))
     if not matches:
         sys.exit("no features in {}: run external/control_features.py first".format(CACHE))
     return matches
@@ -121,10 +126,16 @@ def main():
                     "columns whose names contain any of them (an ablation)")
     ap.add_argument("--out", help="model path (default {}) or, with --loso, the posteriors' "
                     "file name in the cache".format(os.path.relpath(MODEL_PATH, ROOT)))
+    ap.add_argument("--net", default="", help="deep/ tag whose columns (external/net_features.py) "
+                    "are joined to the features: the v9 classifier")
+    ap.add_argument("--only", default="", help="comma-separated substrings: train on the columns "
+                    "whose names contain any of them, and no others (an ablation)")
     a = ap.parse_args()
-    matches = load_matches()
+    matches = load_matches(a.net)
     names = next(iter(matches.values()))[3]
     keep = keep_columns(names, [d for d in a.drop.split(",") if d])
+    if a.only:
+        keep = [i for i in keep if any(o in names[i] for o in a.only.split(","))]
     if len(keep) < len(names):
         print("leaving out {} of {} columns".format(len(names) - len(keep), len(names)))
         matches = {n: (m[0][:, keep], m[1][:, keep]) + m[2:] for n, m in matches.items()}
