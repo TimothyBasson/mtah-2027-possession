@@ -1,6 +1,6 @@
 """Label BAR-ATH with the learned model and write the submission.
 
-    python deep/run.py [--tag bt]      # -> evaluation/results/deep.csv
+    python deep/run.py [--tag sw]      # -> evaluation/results/deep.csv (--tag bt, --tag v2: earlier models)
 
 Uses the network trained on all 30 outside matches (deep/train.py --fold none). Players only.
 """
@@ -36,7 +36,7 @@ def probabilities(tag):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tag", default="bt")
+    ap.add_argument("--tag", default="sw")
     ap.add_argument("--out", default="deep.csv")
     ap.add_argument("--tags", action="store_true",
                     help="use Smart Tagging set pieces to draw stoppages the model plays through (stops/tags.py)")
