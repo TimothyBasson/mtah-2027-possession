@@ -66,7 +66,24 @@ The gap clue counts a goalkeeper slot near a goal for the team defending that go
 the metadata gives the slot: the tracker sometimes carries one keeper under the other keeper's
 slot (hmm/clues.py).
 
-    python -m hmm.decode                    # writes evaluation/results/hmm_v8.csv
+v9 adds the players-only net of deep/ (hmm/net_clue.py) as one more clue: its p(H, A, D) per
+frame, as a log ratio against the class shares it was trained on, at NET_WEIGHT. The net reads all
+22 players and never the ball, so it speaks where the ball is missing, which is where v8 loses
+most. Held out by provider the mean goes from 0.647 to 0.677 (IDSSE 0.644 to 0.728, Metrica 0.816
+to 0.807, SkillCorner 0.480 to 0.497; external/README.md). It needs torch (requirements-deep.txt).
+
+The weight was read off the held-out matches: picked for each provider on the other two the mean
+is 0.664. The nets that ship (2,000 steps on all 30 matches) are near neighbours of the fold nets
+those numbers come from (1,500 steps, a provider held out), not the same nets.
+
+    pip install -r requirements.txt -r requirements-deep.txt    # v9 needs torch (pinned)
+    python -m hmm.decode                    # writes evaluation/results/hmm_v9.csv
+    python -m hmm.decode --no-net           # v8 again, no torch needed
+
+The net runs on one thread with torch pinned, so a rerun on the same machine does the same
+arithmetic. Across CPUs with different instruction sets the last bits of a probability can
+differ, and a near-tie in the Viterbi path could then move a boundary: two runs on one machine
+give the same file (sha256 cf1a838d...2ce02d31), and it has not been checked on a second one.
     python -m hmm.decode --no-control       # v6 again (v7 is commit fe457a3: its classifier read
                                             # columns the v8 features leave out)
     python -m hmm.decode --no-control --no-width   # v5 again
@@ -295,6 +312,16 @@ CONTROL_FEATURES = "joint1"
 # possessions: the public window has two of 17, 0.76 s and 1.32 s long, each between two spells
 # of the other team. That was looked at once, to check the assumption, not to choose the number.
 MIN_POSSESSION_SECONDS = 0.0
+# v9: the players-only net of deep/ (hmm/net_clue.py), its log ratio added to the emissions next
+# to the control clue. Two nets trained on all 30 outside matches, their probabilities averaged:
+# bt, and sw25 (bt with SkillCorner's labels at a quarter weight; deep/README.md). Held out by
+# provider, 0.3 is the best single weight and the score is within 0.005 of it from 0.2 to 0.4
+# (external/README.md). The 0.3 was read off the same matches it is scored on: 0.677 with it,
+# 0.664 with the weight picked for each provider on the other two, against v8's 0.647. Nearly all
+# of the gain is on IDSSE, whose ball is knocked out at random, which is not how BAR-ATH's goes
+# missing.
+NET_MODELS = tuple(os.path.join(ROOT, "deep", "models", name) for name in ("bt.pt", "sw25.pt"))
+NET_WEIGHT = 0.3
 
 
 def gap_table():
@@ -524,6 +551,38 @@ def load_control(game=GAME, data_dir=None, model_path=CONTROL_MODEL):
     return out
 
 
+def load_net(model_paths=NET_MODELS, threads=1):
+    """(frames, 3) net clue for every video frame: log p(state | players) - log p(state) from the
+    players-only net(s) of deep/ on the graded halves, 0 elsewhere (hmm/net_clue.py). Needs torch
+    (requirements-deep.txt). The same tensors and prediction as deep/run.py; one thread, so a
+    rerun does the same arithmetic."""
+    for path in (os.path.join(ROOT, "deep"), os.path.join(ROOT, "possession"),
+                 os.path.join(ROOT, "external")):
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    try:
+        import torch
+    except ImportError:
+        sys.exit("hmm_v9 reads the players-only net and needs torch: pip install -r "
+                 "requirements-deep.txt (or uv sync --group deep), or pass --no-net for v8")
+    import data as D
+    import load
+    from net import load_net as load_weights
+    from train import predict_half
+    from hmm.net_clue import log_ratio
+    torch.set_num_threads(threads)
+    players, ball, team, halves = load.load()
+    probs = []
+    for path in model_paths:
+        net = load_weights(path, D.NFEAT)
+        probs.append([])
+        for a, b in halves:
+            X, M, bxy, _ = D.half_tensors(players, ball, team, a, b, load.PITCH, load.FPS)
+            probs[-1].append(predict_half(net, dict(X=X, M=M, y=np.zeros(len(X), np.int64),
+                                                    ball=bxy)))
+    return log_ratio(probs, halves, len(players))
+
+
 def load_observations(game=GAME, data_dir=None):
     """(gap-distance, place, speed, flight, width) categories for every video frame."""
     meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
@@ -688,14 +747,21 @@ def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", help="default evaluation/results/hmm_v8.csv (hmm_v6.csv with "
-                        "--no-control), with the variant flags in the name if any is set")
+    parser.add_argument("--out", help="default evaluation/results/hmm_v9.csv (hmm_v8.csv with "
+                        "--no-net, hmm_v6.csv with --no-control), with the variant flags in the name if any is set")
     parser.add_argument("--no-control", action="store_true",
                         help="ablation: without the control classifier, which is v6")
     parser.add_argument("--control-model", default=CONTROL_MODEL,
                         help="exported classifier (default hmm/models/control_state.npz)")
     parser.add_argument("--control-weight", type=float, default=CONTROL_WEIGHT,
                         help="weight on the control clue (default {})".format(CONTROL_WEIGHT))
+    parser.add_argument("--no-net", action="store_true",
+                        help="ablation: without the players-only net, which is v8")
+    parser.add_argument("--net-model", default=",".join(NET_MODELS),
+                        help="comma-separated deep/ nets to average (default bt.pt and sw25.pt "
+                             "in deep/models)")
+    parser.add_argument("--net-weight", type=float, default=NET_WEIGHT,
+                        help="weight on the net clue (default {})".format(NET_WEIGHT))
     parser.add_argument("--min-possession", type=float, default=MIN_POSSESSION_SECONDS,
                         help="seconds under which a possession between two spells of the other "
                              "team is folded (default {}; 0 for none)".format(
@@ -743,6 +809,9 @@ def main():
     extra = [] if args.no_width else [(width, width_table(), WIDTH_WEIGHT)]
     direct = None if args.no_control else args.control_weight * load_control(
         model_path=args.control_model)
+    use_net = not (args.no_net or args.no_control)
+    if use_net:
+        direct = direct + args.net_weight * load_net(tuple(args.net_model.split(",")))
     fold = 0 if args.no_control else int(round(args.min_possession * FPS))
     labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight, extra=extra,
                     direct=direct, min_possession=fold)
@@ -750,6 +819,8 @@ def main():
                                            ("_cw{:g}".format(args.control_weight),
                                             not args.no_control
                                             and args.control_weight != CONTROL_WEIGHT),
+                                           ("_nw{:g}".format(args.net_weight),
+                                            use_net and args.net_weight != NET_WEIGHT),
                                            ("_mp{:g}".format(args.min_possession),
                                             not args.no_control
                                             and args.min_possession != MIN_POSSESSION_SECONDS),
@@ -758,7 +829,7 @@ def main():
                                            ("_fitplace", args.fit_place)) if on)
     path = write_submission(
         args.out or os.path.join(RESULTS_DIR, "hmm_v{}{}.csv".format(
-            6 if args.no_control else 8, ablation)), labels)
+            6 if args.no_control else 9 if use_net else 8, ablation)), labels)
     print("-> {}".format(os.path.relpath(path, ROOT)))
     summarise(labels, segments)
     report_dead_runs(labels, place, segments, load_smart_tagging())

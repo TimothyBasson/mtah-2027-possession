@@ -120,6 +120,11 @@ as `sw` by another route, the label weight instead of the share of windows, with
 `python deep/train.py --fold none --steps 2000 --ptr 0.5 --provw skillcorner=0.25 --spell 0.5 --tag sp`,
 seed 0, 1 thread (`deep/jobs_all.txt`).
 
+`deep/models/sw25.pt` (2026-11-16) is the second net `hmm_v9` averages with `bt.pt`
+(`hmm.decode.NET_MODELS`, `external/README.md`): `python deep/train.py --fold none --steps 2000
+--ptr 0.5 --provw skillcorner=0.25 --threads 1 --tag sw25`, seed 0, sha256 `14032614...`. It does
+not label BAR-ATH on its own; `run.py` still defaults to `bt`.
+
 **What the labels allow (a measuring stick, never a labeller).** `--teach` trains the same net
 with the real ball as an input (`tb`). spellF1 on labels as given, shipped decode:
 
