@@ -32,9 +32,11 @@ def test_retime_leaves_far_touches_stoppages_and_neighbours_alone():
     assert retime(y, touches((20, 1)), FPS)[1] == 0          # 3.2 s away
     assert retime(y, touches((95, 0)), FPS)[1] == 0          # the losing team's touch
     assert retime(lab(("H", 100), ("D", 100)), touches((95, 1)), FPS)[1] == 0
-    y = lab(("H", 100), ("A", 10), ("H", 100))               # a touch beyond the short spell's end
-    out, _ = retime(y, touches((115, 1)), FPS)
-    assert (out == y).all() or ((out[100:110] == "A").any() and (out[110:] == "H").all())
+    y = lab(("H", 100), ("A", 10), ("H", 100))
+    out, moved = retime(y, touches((115, 1)), FPS)           # a touch beyond the short spell's end:
+    assert moved == 0 and (out == y).all()                   # moving there would swallow the spell
+    out, moved = retime(y, touches((105, 1)), FPS)           # a touch inside it: the spell shrinks, survives
+    assert moved == 1 and (out[:105] == "H").all() and (out[105:110] == "A").all() and (out[110:] == "H").all()
 
 
 def test_masks_only_name_live_frames_the_ball_contradicts():
