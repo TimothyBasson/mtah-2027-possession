@@ -62,11 +62,50 @@ def hide_frozen(xy, fps=25, seconds=1.0):
     return xy
 
 
-def bar_like(xy, labels, rng, fps=25, q=None):
+def lowpass(xy, order, cutoff, fps=25):
+    """A zero-lag low-pass (Butterworth, run forward and backward) over each seen stretch.
+    BAR-ATH's ball has the spectrum of a raw ball passed through one of order 5 at 0.7 Hz: flat
+    to 0.6 Hz, a hundredth of the power at 1 Hz, a ten-thousandth at 1.4 Hz
+    (alldata/robust/fitfilter.py). The parabolic window of smooth() removes more below 0.6 Hz
+    and leaves 10 to 100 times more above 1 Hz."""
+    from scipy.signal import butter, sosfiltfilt
+    sos = butter(int(order), cutoff, fs=fps, output="sos")
+    out = np.full_like(xy, np.nan)
+    s, t, v = _runs(np.isfinite(xy[:, 0]))
+    for a, b in zip(s[v], t[v]):
+        g = xy[a:b].astype(np.float64)
+        out[a:b] = sosfiltfilt(sos, g, axis=0, padlen=min(3 * fps, b - a - 1)) if b - a > 12 else g.mean(0)
+    return out
+
+
+def shift(xy, k):
+    """The ball k frames late (k < 0: early)."""
+    out = np.full_like(xy, np.nan)
+    if k > 0:
+        out[k:] = xy[:-k]
+    elif k < 0:
+        out[:k] = xy[-k:]
+    else:
+        out[:] = xy
+    return out
+
+
+def bar_like(xy, labels, rng, fps=25, q=None, style="para"):
     """An outside match's ball made to look like BAR-ATH's: parked balls hidden, visibility as
-    simulate_visibility, then smoothed."""
+    simulate_visibility, then smoothed. style: para, the parabolic window of the first nets;
+    lp, the low-pass that matches BAR-ATH's spectrum, with its order and cut-off drawn close to
+    the fit; mix, a wide draw of filters (either kind, light to heavy) and of a small lead or
+    lag, for nets that should not depend on the simulation being right."""
     xy = simulate_visibility(hide_frozen(xy, fps), labels, rng, fps, q)
-    return smooth(xy, rng.uniform(14.0, 18.0) * fps / 25).astype(np.float32)
+    if style == "para":
+        return smooth(xy, rng.uniform(14.0, 18.0) * fps / 25).astype(np.float32)
+    if style == "lp":
+        return lowpass(xy, rng.integers(4, 7), rng.uniform(0.62, 0.80), fps).astype(np.float32)
+    if rng.random() < 0.25:
+        xy = smooth(xy, rng.uniform(8.0, 24.0) * fps / 25)
+    else:
+        xy = lowpass(xy, rng.integers(2, 7), float(np.exp(rng.uniform(np.log(0.45), np.log(1.4)))), fps)
+    return shift(xy, int(rng.integers(-5, 6) * fps / 25)).astype(np.float32)
 
 
 def simulate_visibility(xy, labels, rng, fps=25, q=None):
@@ -252,6 +291,11 @@ def half_features(players, ball_xy, team, a, b, pitch, fps=25, extra=None):
             add(nm, np.ones(n))
         for nm in ("t_last", "t_next", "t_run", "t_runnext", "t_past5", "t_fut5"):
             add(nm, np.zeros(n))
+    # how smooth this half's ball is, one number for the whole half: a net trained on a mix of
+    # filters can then read a change of velocity for what it is under this tracker
+    mv = seen & (speed > 2)
+    if os.environ.get("ALLDATA_SM"):  # tried and not kept (alldata/robust/README.md)
+        add("sm", np.full(n, np.log1p(np.percentile(acc[mv], 90)) / 2 if mv.sum() > 100 else 0.75))
     add("margin", np.clip((np.minimum(dist[:, team == 1].min(1), 60) - np.minimum(dist[:, team == 0].min(1), 60)), -10, 10) / 5)
     T = len(sel)
     for nm, p in (extra or []):

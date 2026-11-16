@@ -32,6 +32,7 @@ import feats  # noqa: E402
 
 CACHE = os.path.join(ROOT, "data", "cache", "alldata")
 FEATS = os.path.join(CACHE, "feats")  # build.py's match files
+EVAL = {0: "p", 1: "s", 4: "l", 7: "m"}  # saved probabilities: key by ball version (as recorded, parabolic, low-pass, mix)
 VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3, "soccertrack": 1}
 
 
@@ -80,17 +81,18 @@ def load_matches(drop_cols=(), folder=FEATS):
     return ms
 
 
-def pseudo_labels(m, tag, fold, conf):
+def pseudo_labels(m, tag, fold, conf, pv=1):
     """The match with y / yf replaced by run `tag`'s decoded labels; -1 where its probability of
     the decoded state is under conf."""
     sys.path.append(os.path.join(ROOT, "deep"))
     import decode
     z = np.load(os.path.join(CACHE, "runs", tag, fold, m["name"] + ".npz"))
     halves = []
-    v = 1 if len(m["halves"][0]["F"]) > 1 else 0   # an outside match in its BAR-ATH-like version
+    v = pv if len(m["halves"][0]["F"]) > 1 else 0   # an outside match in its BAR-ATH-like version
+    k = EVAL[v]
     for i, h in enumerate(m["halves"]):
         new = dict(F=h["F"][v:v + 1], fr=h["fr"])
-        for key, pk in (("y", "s" if v else "p"), ("yf", "fs" if v else "fp")):
+        for key, pk in (("y", k), ("yf", "f" + k)):
             p = z[f"{pk}{i}"]
             lp = np.log(np.clip(p, 1e-6, 1))
             path = decode.absorb(decode.viterbi(lp, 4 / 5), {0: 5, 1: 5, 2: 5}).astype(np.int64)
@@ -151,7 +153,12 @@ def batch(train, rng, B, T, a, sym):
         ms = [m for m in train if m["provider"] == prov]
         m = ms[rng.integers(len(ms))]
         h = m["halves"][rng.integers(len(m["halves"]))]
-        v = rng.integers(1, len(h["F"])) if (rng.random() < a.sim and len(h["F"]) > 1) else 0
+        if rng.random() < a.sim and len(h["F"]) > 1:
+            # --vers: which simulated versions to train on; without it the first three (the
+            # parabolic window), drawn as before the option existed
+            v = a.vers[rng.integers(len(a.vers))] if a.vers else rng.integers(1, min(len(h["F"]), 4))
+        else:
+            v = 0
         yall = h["y"]
         n = len(yall)
         s = rng.integers(0, max(1, n - T))
@@ -207,6 +214,8 @@ def main():
     ap.add_argument("--edge", type=float, default=0.3)
     ap.add_argument("--drop-cols", nargs="*", default=[])
     ap.add_argument("--share", nargs="*", default=[], help="provider=share of training windows, e.g. skillcorner=0.25")
+    ap.add_argument("--vers", nargs="*", type=int, default=[], help="simulated ball versions to train on (build.py: 1-3 parabolic, 4-6 low-pass, 7+ mix)")
+    ap.add_argument("--pv", type=int, default=1, help="ball version the pseudo-labelled matches are shown in (1, 4 or 7)")
     ap.add_argument("--pseudo", default="")
     ap.add_argument("--conf", type=float, default=0.7)
     ap.add_argument("--seed", type=int, default=0)
@@ -223,7 +232,7 @@ def main():
         test = load_matches(drop_cols=a.drop_cols, folder=os.path.join(CACHE, "bar"))
     names = ms[0]["names"]
     if a.pseudo:
-        train = train + [pseudo_labels(m, a.pseudo, a.fold, a.conf) for m in test]
+        train = train + [pseudo_labels(m, a.pseudo, a.fold, a.conf, a.pv) for m in test]
     sym = feats.symmetry(names)
     net = Net(len(names), a.d)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
@@ -252,7 +261,7 @@ def main():
         for m in group:
             o = {}
             for i, h in enumerate(m["halves"]):
-                for k, v in (("p", 0), ("s", 1)):
+                for v, k in EVAL.items():
                     if v < len(h["F"]):
                         q = predict(net, h["F"][v], sym)
                         o[f"{k}{i}"], o[f"f{k}{i}"] = q[:, :3], q[:, 3:]
