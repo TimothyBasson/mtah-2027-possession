@@ -41,6 +41,7 @@ def bar_probs(touch, fold):
         F, names = tfeats.rows(players[a:b + 1], team, ball[a:b + 1, :2].astype(np.float32), load.FPS)
         assert names == ck["names"]
         q[a:b + 1] = tfit.predict(net, F, tfeats.symmetry(names))
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
     np.savez_compressed(dst, q=q.astype(np.float16))
     return q, ball, halves
 
