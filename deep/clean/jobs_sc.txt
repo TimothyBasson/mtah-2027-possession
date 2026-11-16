@@ -14,3 +14,6 @@ lcfold idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean fold --clea
 # lchead50: SkillCorner at half the windows as in bt, its labels on a head of their own
 lchead50 metrica --steps 1500 --ptr 0.5 --own-head skillcorner
 lchead50 idsse --steps 1500 --ptr 0.5 --own-head skillcorner
+# lcsw35: SkillCorner at 35% of the windows, between a quarter and bt's half
+lcsw35 metrica --steps 1500 --ptr 0.5 --share skillcorner=0.35
+lcsw35 idsse --steps 1500 --ptr 0.5 --share skillcorner=0.35
