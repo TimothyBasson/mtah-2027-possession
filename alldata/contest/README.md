@@ -41,6 +41,26 @@ labels are the noisy ones (thread "Clean up noisy training labels") and punish i
 showed up in the players-only `sp` run. Hard-example mining alone does nothing; the inputs alone
 help a little everywhere except SkillCorner (−0.006).
 
+## BAR-ATH
+
+All-match nets `models/pcrN.pt`, `pcrNs1.pt` (inputs + brief x3 + focal 1, adapted to BAR-ATH
+without labels from `crN` / `crNs1`) and `pcN.pt`, `pcNs1.pt` (inputs only). `python
+alldata/contest/run.py` writes `alldata_contest_touch.csv` (sha256 `f9e3c50d...c299d62c`), the
+inputs-only file `alldata_contest_inputs_touch.csv` (`72f68c67...7e865d600`); both pass the
+validator, a second run is byte-identical. Copies in `/mnt/project-files/alldata/contest/`.
+
+| | possessions (half 1 + 2) | median | under 5 s | public 5 min (17 possessions, a check) |
+|---|---|---|---|---|
+| submission (with Tim, touches) | 134 + 167 | 7.7 / 5.8 s | 41 / 47% | 0.613 |
+| plain all-data + touches | 119 + 149 | 8.0 / 6.6 s | 34 / 43% | 0.650 |
+| contest inputs + touches | 150 + 159 | 5.5 / 5.9 s | 47 / 45% | 0.640 |
+| contest + brief x3 + focal + touches | 175 + 180 | 4.4 / 4.8 s | 51 / 51% | 0.626 |
+
+The reweighted file cuts BAR-ATH finer than any earlier file (the players-only `sp` run drew 158 /
+184, the public pace is about 150 a half). In the public window both contest files find the
+20 s Away possession at frame 14,846 and the 3.6 s one at 15,799 that the submission merges
+(IoU 0.46 to 0.90-0.92 and 0.08 to 0.58-0.64), and lose elsewhere; nothing was chosen on it.
+
 ## The contest inputs (`cfeats.py`)
 
 A smoothed ball rounds every corner. At a one-touch block or a first-time clearance the shown
