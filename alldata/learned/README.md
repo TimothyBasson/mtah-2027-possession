@@ -23,9 +23,12 @@ inputs already had). Every model that loads BAR-ATH picks it up; training data i
 `4979aff0...cb536b6cdf887`; 716 graded frames (0.45%) change, public window level (0.6125 both),
 Smart Tagging phase share 0.866 to 0.870. Plain fallback with it `21938e67...364bff442b4c`.
 `--raw-keepers` gives back the files below byte for byte.
-Not switched by default without a choice: whether `4979aff0` replaces `e9f09d6a` as the submitted
-file is Gambtt's call (PR 57). No measured spellF1 gain; the case is that the input is wrong
-without it. Moved keeper frames all lie within the penalty-area width (none with |y - 34| > 20 m).
+With this change merged, the default command writes `4979aff0` as the submission in place of
+`e9f09d6a`: merging PR 57 is that choice, and it is Gambtt's (asked 2026-11-16 19:08Z). There is
+no measured spellF1 gain; the case is that the input is wrong without it. Validator on the new
+file: `OK alldata_learned_tim_touch.csv, 199319 rows, frame 0..199318`. The pseudo-label cache
+`data/cache/alldata/bar/BAR-ATH.npz` (only `fit.py --pseudo` reads it) is rewritten by every
+`run.py` run with whichever keepers that run used. Moved keeper frames all lie within the penalty-area width (none with |y - 34| > 20 m).
 
 **The submission file is `alldata_learned_tim_touch.csv`** (Gambtt, 2026-11-16 18:34Z: "yes
 make it the sub"): the with-Tim model below, decoded with the touches that `alldata/touch/`'s
