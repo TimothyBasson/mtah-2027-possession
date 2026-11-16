@@ -251,27 +251,29 @@ dead frames and 12% of live ones. So IDSSE under `--seen` punishes "missing mean
 our match would.
 Scores also get no help from set-piece tags, because these matches have no Smart Tagging.
 
-## Stoppage edges from the BAR-ATH notes: `hmm.decode --hold-restart`, `edge_diag.py`, `edge_post.py`
+## Stoppage edges: `hmm.decode --hold-restart`, `edge_diag.py`, `edge_post.py`
 
-Notes taken while watching BAR-ATH under hmm_v9 (2026-11-16) flag five restarts called live 3-6 s
-before the kick (free kicks at 144205 and 148692, a goal kick at 37281, 18257, 121243), short
-possessions invented inside a stoppage (129496, 129744, 189462) and one before it (173370). The
-first group has one cause: the ball is put down and stays still with a player standing over it,
-and the gap clue reads that as possession. `hold_restarts` (hmm/decode.py, off by default) keeps
-the stoppage until a seen ball that was still (under 1 m/s for 0.5 s) is kicked (over 5 m/s)
-within 10 s.
+Motivation, stated plainly: this rule came from error analysis by video of BAR-ATH, the scored
+match, under hmm_v9 (2026-11-16). Restarts were called live several seconds before the kick, with
+the ball put down and still and a player standing over it, which the gap clue reads as
+possession. Its parameters were chosen and swept on the outside providers only; nothing about
+BAR-ATH is in the code. `hold_restarts` (hmm/decode.py, off by default) moves the start of the
+spell after a stoppage to the kick, where a seen ball that was still (under 1 m/s for 0.5 s) is
+kicked (over 5 m/s) within 10 s and before that spell ends. A spell is moved, never removed.
 
 | | IDSSE | Metrica | SkillCorner | mean | fair | BAR-ATH public |
 |---|---|---|---|---|---|---|
 | v9 | 0.725 | 0.807 | 0.496 | 0.676 | 0.663 | 0.774 |
-| v9 + `--hold-restart` | 0.726 | 0.807 | 0.496 | 0.6765 | 0.663 | 0.787 |
+| v9 + `--hold-restart` | 0.726 | 0.807 | 0.496 | 0.6764 | 0.663 | 0.787 |
 
 Held out it is flat in every setting tried (still 0.5-2 m/s, kick 3-5 m/s, 0.5-2 s still:
-0.6761-0.6765), because the outside providers hide or freeze the ball in a stoppage and the
-rule rarely fires there. On BAR-ATH it moves seven restarts by 1-6 s; the one inside the public
-window goes from 5.4 s early (18253 against 18389) to 1.0 s early, which lifts spellF1 at
-IoU 0.7. It does not reach throw-ins (the ball moves with the thrower) or restarts with the ball
-unseen (182589).
+0.6761-0.6765), because the outside providers hide or freeze the ball in a stoppage and the rule
+rarely fires there, so the held-out numbers are no evidence either way. The public-window gain is
+one restart (1.0 s early instead of 5.4 s), well inside the bootstrap band. On the full match it
+fires 7 times, moving restarts by 1.4-6.0 s; `--hold-restart` prints each firing with the
+nearest Smart Tagging set piece (4 within 6 s, 3 with none within 18 s; Smart Tagging misses
+about half of all set pieces). It does not reach throw-ins (the ball moves with the thrower) or
+restarts with the ball unseen.
 
 Also measured, not kept: turning an H or A spell between two decoded stoppages into D. Under
 1.5 s it is flat (0.6762), from 2 s on it costs (2 s 0.6754, 3 s 0.6715). Spell errors on the
