@@ -4,7 +4,7 @@ changed; this only calls it.
 
     python external/control_features.py && python external/train_control.py --loso   # his steps
     python alldata/learned/tim.py            # -> data/cache/alldata/tim/<match>.npz
-    python -m hmm.decode                     # his BAR-ATH labels, evaluation/results/hmm_v8.csv
+    python -m hmm.decode --no-net            # his BAR-ATH labels, evaluation/results/hmm_v8.csv (v8; the default is v9 now)
     python alldata/learned/tim.py --bar      # -> data/cache/alldata/tim/BAR-ATH.npz
 
 Outside matches are decoded as external/score_control.py decodes them: the classifier that reads

@@ -1,7 +1,12 @@
 """Label BAR-ATH with the all-data model and write the submission.
 
+    python alldata/learned/run.py                     # the submission: evaluation/results/alldata_learned_tim.csv
+    python alldata/learned/run.py --tags pwN pwNs1 --out alldata_learned.csv   # fallback, independent of hmm/
     python alldata/learned/run.py --features          # BAR-ATH's feature cache (before fit.py --fold none)
-    python alldata/learned/run.py [--tags pwN pwNs1] [--out alldata_learned.csv]
+
+The default nets (tpsN, tpsNs1) read Tim's hmm/ v8 as an input: its decoded labels and its control
+classifier's posteriors on BAR-ATH. When those are not cached, this script first runs
+`python -m hmm.decode --no-net` (v8, unchanged) and tim.py --bar. The fallback nets do not read them.
 
 Averages the probabilities of the named runs' all-match nets (train.py --fold none), decodes
 them as deep/run.py does, and writes evaluation/results/<out>. Reads BAR-ATH's players and
@@ -74,13 +79,29 @@ def features(with_tim=False):
     return out, halves, len(players), names
 
 
+def net_path(tag):
+    path = os.path.join(HERE, "models", tag + ".pt")  # the committed nets; else a fresh fit.py --fold none
+    return path if os.path.exists(path) else os.path.join(T.CACHE, "runs", tag, "none", "net.pt")
+
+
+def needs_tim(tags):
+    return any(n.startswith("tim") for tag in tags for n in torch.load(net_path(tag), map_location="cpu")["names"])
+
+
+def tim_ready():
+    """Tim's v8 on BAR-ATH as tim.inputs reads it; made here when missing, with his own commands."""
+    if os.path.exists(os.path.join(T.CACHE, "tim", "BAR-ATH.npz")):
+        return
+    import subprocess
+    env = dict(os.environ, PYTHONHASHSEED="0")
+    subprocess.run([sys.executable, "-m", "hmm.decode", "--no-net"], cwd=ROOT, env=env, check=True)
+    subprocess.run([sys.executable, os.path.join(HERE, "tim.py"), "--bar"], cwd=ROOT, env=env, check=True)
+
+
 def probabilities(tags, Fs, names):
     probs = [0] * len(Fs)
     for tag in tags:
-        path = os.path.join(HERE, "models", tag + ".pt")  # the committed nets; else a fresh fit.py --fold none
-        if not os.path.exists(path):
-            path = os.path.join(T.CACHE, "runs", tag, "none", "net.pt")
-        ck = torch.load(path, map_location="cpu")
+        ck = torch.load(net_path(tag), map_location="cpu")
         cols = [names.index(n) for n in ck["names"]]
         net = T.Net(len(cols), ck["d"])
         net.load_state_dict(ck["sd"])
@@ -92,13 +113,14 @@ def probabilities(tags, Fs, names):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tags", nargs="+", default=["pwN", "pwNs1"])
-    ap.add_argument("--out", default="alldata_learned.csv")
+    ap.add_argument("--tags", nargs="+", default=["tpsN", "tpsNs1"])
+    ap.add_argument("--out", default="alldata_learned_tim.csv")
     ap.add_argument("--head", default="both", choices=["both", "built", "folded"],
                     help="both (the file), or one head alone, to compare them on BAR-ATH")
     ap.add_argument("--features", action="store_true", help="only build BAR-ATH's feature cache")
     a = ap.parse_args()
     if a.features:
+        tim_ready()
         features(with_tim=True)
         return
     global WHICH
@@ -106,7 +128,10 @@ def main():
     torch.set_num_threads(1)
     from starter.baseline import RESULTS_DIR, write_submission
     from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES
-    Fs, halves, n, names = features(with_tim=os.path.exists(os.path.join(T.CACHE, "tim", "BAR-ATH.npz")))
+    with_tim = needs_tim(a.tags)
+    if with_tim:
+        tim_ready()
+    Fs, halves, n, names = features(with_tim=with_tim)
     probs = probabilities(a.tags, Fs, names)
     os.makedirs(os.path.join(T.CACHE, "bar_ath"), exist_ok=True)
     np.savez_compressed(os.path.join(T.CACHE, "bar_ath", "+".join(a.tags) + ".npz"), **{f"p{i}": p for i, p in enumerate(probs)})
