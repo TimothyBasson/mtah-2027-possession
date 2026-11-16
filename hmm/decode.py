@@ -323,6 +323,21 @@ MIN_POSSESSION_SECONDS = 0.0
 NET_MODELS = tuple(os.path.join(ROOT, "deep", "models", name) for name in ("bt.pt", "sw25.pt"))
 NET_WEIGHT = 0.3
 
+# A restart is the kick, not the moment the ball is put down. Where the decoder ends a stoppage
+# while the ball, seen, stays still (under RESTART_STILL m/s for RESTART_MIN_STILL s) and is then
+# kicked (over RESTART_KICK m/s) within RESTART_WAIT s, the stoppage is held until the kick
+# (hold_restarts). The gap clue reads a player standing over a placed free kick or goal kick as
+# possession; video notes on BAR-ATH (2026-11-16) flag restarts called 3-6 s early that way.
+# Optional (--hold-restart). Held out by provider it is flat: 0.726 / 0.807 / 0.496 against
+# v9's 0.725 / 0.807 / 0.496, since the outside providers hide or freeze the ball in a stoppage
+# and the rule rarely fires there; spellF1 averages IoU 0.3-0.7, so a few seconds at the start of
+# a long spell seldom changes a match.
+RESTART_STILL = 1.0
+RESTART_KICK = 5.0
+RESTART_MIN_STILL = 0.5
+RESTART_WAIT = 10.0
+RESTART_MAX_MISSING = 1.0
+
 
 def gap_table():
     """log p(gap bin | state), states x gap bins."""
@@ -479,6 +494,48 @@ def fold_brief_possessions(path, min_frames):
         if not changed:
             break
     return path
+
+
+def ball_speed(ball_x, ball_y, fps, smooth=0.4):
+    """Ball speed in m/s, a running mean over `smooth` s; NaN where the ball is mostly unseen."""
+    v = np.hypot(np.gradient(np.asarray(ball_x, float)), np.gradient(np.asarray(ball_y, float))) * fps
+    w = max(1, int(round(smooth * fps)))
+    ok = np.isfinite(v)
+    num = np.convolve(np.where(ok, v, 0), np.ones(w), "same")
+    den = np.convolve(ok.astype(float), np.ones(w), "same")
+    return np.where(den > w / 2, num / np.maximum(den, 1), np.nan)
+
+
+def hold_restarts(labels, ball_x, ball_y, fps, still=RESTART_STILL, kick=RESTART_KICK,
+                  min_still=RESTART_MIN_STILL, wait=RESTART_WAIT, max_missing=RESTART_MAX_MISSING):
+    """Copy of a label path with each D -> H/A change moved to the kick, where the ball is seen
+    still after the change and then kicked within `wait` s and before that spell ends (see
+    RESTART_STILL). The spell's start moves to the kick; a spell is never removed."""
+    out = np.array(labels, copy=True)
+    speed = ball_speed(ball_x, ball_y, fps)
+    n = len(out)
+    for i in np.flatnonzero((out[:-1] == "D") & np.isin(out[1:], ["H", "A"])) + 1:
+        j, missing, n_still = i, 0, 0
+        spell_end = i
+        while spell_end < n and out[spell_end] == out[i]:
+            spell_end += 1
+        # the kick must fall inside the spell that follows the stoppage: a spell is moved, never
+        # removed
+        end = min(spell_end, i + int(wait * fps))
+        while j < end:
+            if np.isnan(speed[j]):
+                missing += 1
+                if missing > max_missing * fps:
+                    break
+            elif speed[j] < kick:
+                missing = 0
+                n_still += speed[j] < still
+            else:
+                break
+            j += 1
+        if j < end and speed[j] >= kick and n_still >= min_still * fps:
+            out[i:j] = "D"
+    return out
 
 
 def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIGHT, extra=(),
@@ -755,6 +812,8 @@ def main():
                         help="exported classifier (default hmm/models/control_state.npz)")
     parser.add_argument("--control-weight", type=float, default=CONTROL_WEIGHT,
                         help="weight on the control clue (default {})".format(CONTROL_WEIGHT))
+    parser.add_argument("--hold-restart", action="store_true",
+                        help="hold a stoppage until a still, seen ball is kicked (hold_restarts)")
     parser.add_argument("--no-net", action="store_true",
                         help="ablation: without the players-only net, which is v8")
     parser.add_argument("--net-model", default=",".join(NET_MODELS),
@@ -815,6 +874,25 @@ def main():
     fold = 0 if args.no_control else int(round(args.min_possession * FPS))
     labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight, extra=extra,
                     direct=direct, min_possession=fold)
+    if args.hold_restart:
+        meta_path, raw_path = require(["atd_meta", "atd_raw"])
+        ball_x, ball_y = load_distances(raw_path, team_of_each_track(meta_path),
+                                        source_frames("tactical"), GAMES[GAME]["pitch"], FPS,
+                                        CACHE_DIR, keepers=keeper_slots(meta_path),
+                                        halves=graded_segments())[:2]
+        held = hold_restarts(labels, ball_x, ball_y, FPS)
+        print("hold_restarts: {} frames turned to D".format(int(np.sum(held != labels))))
+        # every firing, label-free check: the nearest Smart Tagging set piece to the new restart
+        pieces = [t["start_frame"] for t in load_smart_tagging() if t["code"].lower() == "set pieces"]
+        moved = np.flatnonzero((held != labels)[1:] & ~(held != labels)[:-1]) + 1
+        for a in moved:
+            b = a
+            while b < len(held) and held[b] != labels[b]:
+                b += 1
+            near = min(pieces, key=lambda f: abs(f - b)) if pieces else None
+            print("  restart {} -> {} (+{:.1f} s); nearest tagged set piece {}".format(
+                a, b, (b - a) / FPS, "none" if near is None else "{:+.1f} s".format((near - b) / FPS)))
+        labels = held
     ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),
                                            ("_cw{:g}".format(args.control_weight),
                                             not args.no_control
@@ -826,7 +904,8 @@ def main():
                                             and args.min_possession != MIN_POSSESSION_SECONDS),
                                            ("_handgap", args.hand_gap),
                                            ("_nowidth", args.no_width),
-                                           ("_fitplace", args.fit_place)) if on)
+                                           ("_fitplace", args.fit_place),
+                                           ("_hold", args.hold_restart)) if on)
     path = write_submission(
         args.out or os.path.join(RESULTS_DIR, "hmm_v{}{}.csv".format(
             6 if args.no_control else 9 if use_net else 8, ablation)), labels)

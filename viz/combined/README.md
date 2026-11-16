@@ -52,7 +52,27 @@ python viz/combined/make_combined.py --pred my_submission.csv --start 1:20:05
   Truth is the top row only where the ground truth has labels, which for the public file is video
   7:27.4 to 12:27.4. Elsewhere the strip shows your estimate alone.
 
-Keyboard: space plays or pauses, ← / → step one frame, shift+← / → step one second.
+Keyboard: space plays or pauses, ← / → step one frame, shift+← / → step one second, N notes the
+moment.
+
+## Notes on mistakes
+
+While watching, press **N** (or **+ Note**) to pause and note the moment on screen: a kind of
+mistake and what happened. The kind is a short tag you pick from the chips (missed stoppage, false
+stoppage, wrong team, change too late or early, missed short possession, truth looks wrong,
+tracking problem, other) or type yourself. Tags you type join the chips. Where the frame has ground
+truth that disagrees with the estimate, the form suggests a tag from the two labels.
+
+Notes show as yellow ticks on both strips and in the label box on the video within 2 s of their
+frame. **Notes** opens the list: how many notes of each kind (click a kind to filter), and every
+note, which you can click to jump to, edit or delete. **Export JSON** downloads them.
+
+Served by `viz/combined/serve.py` (below), notes are saved to `data/viz/notes/<match>.json`, one
+file per match (`BAR-ATH`, `idsse_J03WMX`, ...) shared by every page of that match, so notes taken
+on one prediction's page show on the next one's. Each note keeps the frame, video time and game
+clock, the prediction it was taken against (`model`), and the truth and estimate at that frame
+(`H` / `A` / `D`, `X` for none). Opened from disk or another server, notes stay in that browser
+(localStorage) and move to the file the next time the page is served by `serve.py`.
 
 The page fits the window without scrolling: the video takes whatever height the strips, controls
 and panel leave. Narrow or very short windows (under 900 px wide or 480 px tall) switch to a
@@ -105,15 +125,29 @@ need only if the tracking data changes.
 relative to itself, so keep it where it was written or regenerate it with `--out`.
 
 **On localhost**, for the Claude app's built-in browser or any viewer that blocks local files:
-`.claude/launch.json` has a `viz` config that serves `data/` at `http://localhost:8765`, with the
-range requests the video needs for seeking. In the Claude app, ask Claude to start the `viz`
-preview. Anywhere else, run the same command yourself (needs Node):
+`.claude/launch.json` has a `viz` config that runs `viz/combined/serve.py`, which serves `data/`
+at `http://localhost:8765` with the range requests the video needs for seeking, and keeps the
+notes (above). In the Claude app, ask Claude to start the `viz` preview, but for a long session
+ask it to run the server in a Terminal tab instead: the app stops preview servers after about half
+an hour, and the page then fails on the next tracking chunk it needs ("Couldn't load tracking
+chunk"). Anywhere else, run it yourself (standard library only, any Python 3):
 
 ```bash
-npx --yes http-server@14.1.1 data -p 8765 -c-1
+python3 viz/combined/serve.py
 ```
 
+The config names `/opt/homebrew/bin/python3` because the app can't start Xcode's `python3` on a
+script under `~/Desktop` (macOS privacy blocks it with "Operation not permitted"); change it if your
+Python lives elsewhere. Any static server works for watching (`npx --yes http-server@14.1.1 data -p
+8765 -c-1`), but then notes stay in the browser.
+
 The generator prints the page's URL, e.g. `http://localhost:8765/viz/match_baseline_smooth50.html#f11185`.
+
+"Couldn't load tracking chunk" with the chunk file still on disk usually means iCloud has offloaded
+it (the repo under `~/Desktop` syncs to iCloud, and macOS offloads files when the disk is short):
+`ls -lO data/viz/match` shows them as `dataless`, and the server can't read them back. Bring them
+back with `for f in data/viz/match/*.js; do brctl download "$f"; done`, or in Finder right-click
+`data/viz` and choose Keep Downloaded.
 The overlay and replay pages are written to the same folder, so they open from the same server.
 
 ## The output contains match data
