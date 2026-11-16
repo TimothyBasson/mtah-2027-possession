@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(ROOT, "external"))
 from hmm.control import joint_features  # noqa: E402
 from score import drop_ball  # noqa: E402
 
-SEEN = 0.59
+SEEN = float(os.environ.get("CONTROL_SEEN", 0.59))
 CACHE = os.environ.get("CONTROL_CACHE", os.path.join(ROOT, "data", "cache"))
 
 
