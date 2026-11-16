@@ -58,7 +58,7 @@ def features(with_tim=False):
         out.append(F)
         save.update({f"F0_{i}": F, f"fr_{i}": fr, f"y_{i}": np.full(len(F), -1, np.int8), f"yf_{i}": np.full(len(F), -1, np.int8)})
     names = list(feats.NAMES)
-    if with_tim:
+    if with_tim:  # the full set of columns; fit.py drops what a run does not use
         os.makedirs(os.path.join(T.CACHE, "bar"), exist_ok=True)
         np.savez(os.path.join(T.CACHE, "bar", "BAR-ATH.npz"), names=np.array(names), nhalves=len(halves), **save)
     return out, halves, len(players), names
@@ -79,9 +79,13 @@ def probabilities(tags, Fs, names):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tags", nargs="+", required=True)
+    ap.add_argument("--tags", nargs="+", default=[])
     ap.add_argument("--out", default="alldata_learned.csv")
+    ap.add_argument("--features", action="store_true", help="only build BAR-ATH's feature cache")
     a = ap.parse_args()
+    if a.features:
+        features(with_tim=True)
+        return
     torch.set_num_threads(1)
     from starter.baseline import RESULTS_DIR, write_submission
     from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES

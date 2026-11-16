@@ -56,7 +56,7 @@ def run(name):
 def bar():
     import pandas as pd
     import hmm.decode as dec
-    lab = pd.read_csv(os.path.join(ROOT, "evaluation", "results", "hmm_v8.csv"))["label"].values.astype("<U1")
+    lab = pd.read_csv(os.path.join(ROOT, "evaluation", "results", "hmm_v8.csv"))["label"].astype(str).to_numpy(dtype="U1")
     ratio = dec.load_control()  # log posterior - log prior, 0 outside the halves
     import hmm.trees as trees
     prior = np.asarray(trees.load(dec.CONTROL_MODEL)["prior"], float)

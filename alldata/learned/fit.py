@@ -209,12 +209,12 @@ def main():
     rng = np.random.default_rng(a.seed)
     ms = load_matches(drop_cols=a.drop_cols)
     train, val, test = split(ms, a.fold)
-    if a.fold == "none":
+    if a.fold == "none":  # every outside match trains; the unseen match is BAR-ATH (run.py --features)
         train, val = train + val, []
+        test = load_matches(drop_cols=a.drop_cols, folder=os.path.join(CACHE, "bar"))
     names = ms[0]["names"]
     if a.pseudo:
-        unseen = test if a.fold != "none" else load_matches(drop_cols=a.drop_cols, folder=os.path.join(CACHE, "bar"))
-        train = train + [pseudo_labels(m, a.pseudo, a.fold, a.conf) for m in unseen]
+        train = train + [pseudo_labels(m, a.pseudo, a.fold, a.conf) for m in test]
     sym = feats.symmetry(names)
     net = Net(len(names), a.d)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
