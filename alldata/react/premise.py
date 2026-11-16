@@ -34,13 +34,14 @@ def main():
         have = np.zeros(len(t), bool)
         for r, fr in zip(m.R, m.fr):
             Rm[fr], have[fr] = r, True
+        rows_at = np.flatnonzero(have)  # rows sit at each half's first frame + STEP * k
         for a, b, k in pm.possession_spells(t, pm.valid_runs(t)):
             if a == 0 or t[a - 1] != 1 - k:
                 continue
-            f = a + (-a) % R.STEP  # first row at or after the start
-            f = f if f < len(t) and have[f] else a - a % R.STEP
-            if not have[f]:
+            j = np.searchsorted(rows_at, a)  # first row at or after the start
+            if j == len(rows_at) or rows_at[j] - a >= R.STEP:
                 continue
+            f = rows_at[j]
             sgn = 1.0 if k == 0 else -1.0
             w, l = ("h", "a") if k == 0 else ("a", "h")
             x = Rm[f]

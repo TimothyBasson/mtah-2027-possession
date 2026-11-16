@@ -26,24 +26,24 @@ of spread minus the loser's. In brackets, how often the number is positive (0.50
 
 | possession lasts | n | both, 1 s before | both, next 1 s | both, next 2 s | both, next 4 s | open, next 2 s | open, next 4 s |
 |---|---|---|---|---|---|---|---|
-| IDSSE, 2 to 5 s | 242 | -2.11 (0.24) | -1.02 (0.41) | -0.33 (0.46) | +0.25 (0.55) | +0.17 (0.61) | +0.14 (0.58) |
-| IDSSE, 5 to 10 s | 175 | -1.78 (0.33) | -0.55 (0.39) | +0.31 (0.54) | +1.50 (0.67) | +0.29 (0.66) | +0.37 (0.70) |
-| IDSSE, over 10 s | 239 | -2.88 (0.18) | -1.88 (0.26) | -1.17 (0.36) | -0.16 (0.48) | +0.29 (0.69) | +0.42 (0.79) |
-| Metrica, 2 to 5 s | 86 | -2.11 (0.22) | -1.11 (0.31) | -0.36 (0.50) | +0.39 (0.53) | +0.17 (0.60) | +0.12 (0.57) |
-| Metrica, 5 to 10 s | 70 | -2.12 (0.26) | -1.39 (0.33) | -0.71 (0.44) | +0.45 (0.51) | +0.36 (0.71) | +0.49 (0.79) |
-| Metrica, over 10 s | 124 | -2.77 (0.17) | -1.89 (0.24) | -1.19 (0.29) | -0.14 (0.51) | +0.35 (0.75) | +0.50 (0.81) |
-| SkillCorner, 2 to 5 s | 426 | -0.94 (0.37) | -0.33 (0.45) | -0.01 (0.51) | +0.34 (0.56) | +0.19 (0.62) | +0.14 (0.55) |
-| SkillCorner, 5 to 10 s | 386 | -1.12 (0.32) | -0.35 (0.43) | +0.11 (0.49) | +0.81 (0.58) | +0.33 (0.68) | +0.37 (0.70) |
-| SkillCorner, over 10 s | 629 | -1.35 (0.30) | -0.87 (0.38) | -0.60 (0.41) | -0.15 (0.45) | +0.36 (0.71) | +0.38 (0.73) |
+| IDSSE, 2 to 5 s | 528 | -2.22 (0.23) | -1.12 (0.37) | -0.37 (0.45) | +0.30 (0.54) | +0.12 (0.58) | +0.12 (0.59) |
+| IDSSE, 5 to 10 s | 361 | -2.25 (0.23) | -1.04 (0.34) | -0.15 (0.48) | +1.12 (0.63) | +0.21 (0.63) | +0.31 (0.71) |
+| IDSSE, over 10 s | 450 | -2.90 (0.15) | -1.85 (0.25) | -1.08 (0.35) | -0.01 (0.48) | +0.27 (0.68) | +0.40 (0.78) |
+| Metrica, 2 to 5 s | 166 | -2.36 (0.20) | -1.28 (0.28) | -0.48 (0.46) | +0.36 (0.55) | +0.17 (0.61) | +0.18 (0.61) |
+| Metrica, 5 to 10 s | 130 | -2.19 (0.23) | -1.52 (0.32) | -0.90 (0.42) | +0.23 (0.49) | +0.31 (0.71) | +0.42 (0.78) |
+| Metrica, over 10 s | 255 | -2.32 (0.21) | -1.51 (0.29) | -0.88 (0.36) | +0.10 (0.52) | +0.33 (0.71) | +0.48 (0.78) |
+| SkillCorner, 2 to 5 s | 845 | -0.87 (0.38) | -0.29 (0.46) | +0.03 (0.51) | +0.36 (0.55) | +0.17 (0.59) | +0.14 (0.56) |
+| SkillCorner, 5 to 10 s | 798 | -1.09 (0.34) | -0.36 (0.44) | +0.08 (0.49) | +0.77 (0.57) | +0.29 (0.68) | +0.32 (0.70) |
+| SkillCorner, over 10 s | 1262 | -1.42 (0.30) | -0.87 (0.38) | -0.56 (0.42) | -0.04 (0.47) | +0.34 (0.70) | +0.36 (0.73) |
 
-Under 2 s there are only 8 to 25 turnovers per provider on these labels (full table: run the
+Under 2 s there are only 17 to 58 turnovers per provider on these labels (full table: run the
 script).
 
 - Before a turnover both teams are moving the loser's way at about 2 m/s (it was attacking). Two
   seconds after, they are on average **still** moving the loser's way; the direction turns by
-  four seconds. For a possession of 2 to 5 s the next-2 s movement is a coin flip (0.46 to 0.51).
-- Opening and closing is the better sign, but weak at this range: 0.60 to 0.62 over the next 2 s
-  for a 2 to 5 s possession. It grows with the length of the possession (0.75 to 0.81 over 4 s
+  four seconds. For a possession of 2 to 5 s the next-2 s movement is a coin flip (0.45 to 0.51).
+- Opening and closing is the better sign, but weak at this range: 0.58 to 0.61 over the next 2 s
+  for a 2 to 5 s possession. It grows with the length of the possession (0.73 to 0.78 over 4 s
   when it lasts over 10 s): the reaction belongs to possessions that last.
 
 ## 2. Reactions alone, inside the failure slice (`measure.py`)
