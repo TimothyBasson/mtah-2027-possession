@@ -1,7 +1,7 @@
 """Label BAR-ATH with the all-data model and write the submission.
 
     python alldata/learned/run.py --features          # BAR-ATH's feature cache (before fit.py --fold none)
-    python alldata/learned/run.py [--tags psN psNs1] [--out alldata_learned.csv]
+    python alldata/learned/run.py [--tags pwN pwNs1] [--out alldata_learned.csv]
 
 Averages the probabilities of the named runs' all-match nets (train.py --fold none), decodes
 them as deep/run.py does, and writes evaluation/results/<out>. Reads BAR-ATH's players and
@@ -92,7 +92,7 @@ def probabilities(tags, Fs, names):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tags", nargs="+", default=["psN", "psNs1"])
+    ap.add_argument("--tags", nargs="+", default=["pwN", "pwNs1"])
     ap.add_argument("--out", default="alldata_learned.csv")
     ap.add_argument("--head", default="both", choices=["both", "built", "folded"],
                     help="both (the file), or one head alone, to compare them on BAR-ATH")
