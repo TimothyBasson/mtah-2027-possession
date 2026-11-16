@@ -77,6 +77,18 @@ spellF1, mean of two seeds unless said (IDSSE / Metrica / SkillCorner / provider
   (truth 17); macroF1 0.900 against 0.904. Over the match the two agree on 97.3% of graded frames
   (272 against 275 possessions, median 7.1 s both, 11% against 13% under 2 s, 46% against 45% dead).
   The window cannot tell them apart; the 30 outside matches are the evidence.
+- **BAR-ATH without labels** (review of #42). Per half sw gives 125 / 147 possessions and bt
+  126 / 149; median 7.5 / 7.0 s against 7.5 / 6.6 s; 13% / 10% under 2 s against 13% / 13%; dead
+  45% / 47% against 44% / 47%. Where the ball is tracked (94,214 graded frames) the two agree on
+  97.8% and call 19.0% / 18.6% dead; where it is missing (64,643) they agree on 96.6% and call
+  86.0% / 84.7% dead. A second seed of the all-30 model (`lcswalls1`) agrees with `sw.pt` on
+  97.4% of graded frames, so sw differs from bt on BAR-ATH by no more than two copies of sw
+  differ from each other; on the public window that second seed scores 0.786 (12 possessions),
+  which is the window's noise, not a result.
+- **`sw.pt` regenerates.** It came from a run stopped and resumed twice; an uninterrupted rerun
+  (`lcswall2`: `train.py --fold none --threads 1 --steps 2000 --ptr 0.5 --share skillcorner=0.25`,
+  seed 0) gives a `net.pt` with the same sha256 (`0458e90c...16f4bb`), and `run.py --tag sw`
+  writes the same CSV twice. Same machine and torch 2.15.0 only, as for v2 and bt.
 
 Not tried: folding SkillCorner's labels only; a noise-robust loss; the share in the SkillCorner
 fold's sense (weighting IDSSE against Metrica). Folding every provider's training labels was v4
