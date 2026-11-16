@@ -32,6 +32,27 @@ the shipped recipe `pw1e` from `alldata/contest/paired.py`, with a 90% bootstrap
 folded are inside ±0.002), and it is up on the most matches. It clears +0.01 on labels as built; folded
 it is +0.007.
 
+## After review (PR 62)
+
+- **Do not ship `alldata_briefsafe_touch.csv`.** `bardiff.py` shows that about half of the 4% of
+  frames it changes against the submission (49% in half 1, 70% in half 2) are the fine net's dead
+  calls replacing those of the Tim-input base. The gate only screens team disagreements, and that
+  base has no held-out runs.
+- **`--strict`** keeps the base everywhere except kink-backed team swaps (`gate.py --strict`,
+  `run.py --strict` -> `alldata_briefsafe_strict_touch.csv`). Held out on `kbe` (`gkbs`), against
+  `pw1e`: +0.009 [+0.004, +0.014] as built, +0.006 [+0.004, +0.007] folded; providers +0.016 /
+  +0.009 / +0.002 and +0.018 / −0.002 / +0.001; up on 70% / 63% of matches. On top of the
+  submission it changes only 0.6% of frames (10 possessions, 80 to 100% kink-backed), and the public
+  window is identical (0.613). The Tim-input base already agrees with most of the swaps, so the gate
+  adds little to what ships. **The submission stays as it is.**
+- **Pseudo windows unweighted** (`kq`, `kqs1`, `kqN`, `kqNs1`; now the default, and `--weigh-pseudo`
+  reproduces `kb`). Held out `kqe` +0.012 / +0.008 (SkillCorner −0.005 / −0.007); gated `gkq`
+  +0.010 [+0.005, +0.016] / +0.008 [+0.005, +0.011], providers +0.021 / +0.010 / +0.000 and +0.023 /
+  +0.002 / −0.002. That is the same as `kb` within seed noise (`kqs1` − `kq` +0.004 / +0.002). On
+  BAR-ATH, `kqN` is byte-identical to `kbN`: the pseudo labels there have no brief possession directly
+  after the other team's (confidence gaps sit at the turnovers), so nothing was weighted either
+  way. The 11% to 18% rise in first-half possessions under 2 s does not come from pseudo weighting.
+
 ## Why SkillCorner fell (`scdiag.py`, `support.py`)
 
 - On held-out SkillCorner, `pw1e` predicts 327 possessions against 325 true ones; `pcr1e` predicts 363.
