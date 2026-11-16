@@ -7,6 +7,7 @@ replace one part of the prediction with the truth and rescore:
   stops   the true stoppages; live frames the prediction called dead take its nearest team
   team    the true team on every frame the prediction calls live (true stoppages not given)
   bounds  the true possessions and stoppages, each possession named by the prediction's majority
+          (a tie, or a possession it calls all dead, takes its nearest team at the midpoint)
 Then: true possessions matched at IoU 0.5 by length, predicted possessions matched by length, and
 what the prediction shows inside each missed true possession.
 """
@@ -67,7 +68,7 @@ def one(args):
         q = t.copy()
         for a, b, k in gts:
             h, aw = (p[a:b] == H).sum(), (p[a:b] == A).sum()
-            q[a:b] = k if h == aw else (H if h > aw else A)
+            q[a:b] = ft[(a + b) // 2] if h == aw else (H if h > aw else A)  # a tie takes the prediction's nearest team
         r["bounds"] = spell(t, q)
         prs = pm.possession_spells(p, runs)
         ov = pm.spell_overlaps(gts, prs)

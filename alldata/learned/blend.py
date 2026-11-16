@@ -55,7 +55,8 @@ def one(args):
         for w in weights:
             mix = []
             for h in range(len(spans)):
-                n = min(len(x[h]) for x in cands)
+                assert len({len(x[h]) for x in [b] + srcs}) == 1, (name, h, [len(x[h]) for x in [b] + srcs])  # same 5 fps rows, or the decode's upsampling would stretch the half
+                n = len(b[h])
                 m = (1 - w) * b[h][:n] + w * np.mean([x[h][:n] for x in srcs], 0)
                 mix.append(m / m.sum(1, keepdims=True))
             cands.append(mix)

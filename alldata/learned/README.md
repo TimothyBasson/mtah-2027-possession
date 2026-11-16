@@ -285,8 +285,11 @@ averaged; IDSSE / Metrica / SkillCorner / mean):
 |---|---|---|
 | nothing (the model) | 0.652 / 0.781 / 0.416 / 0.616 | 0.747 / 0.824 / 0.518 / 0.696 |
 | the true stoppages | 0.655 / 0.763 / 0.455 / 0.624 | 0.750 / 0.803 / 0.552 / 0.702 |
-| the true possessions, the model naming each | 0.718 / 0.854 / 0.647 / 0.740 | 0.821 / 0.906 / 0.744 / 0.824 |
+| the true possessions, the model naming each (a tie takes its nearest team) | 0.707 / 0.848 / 0.638 / 0.731 | 0.814 / 0.902 / 0.731 / 0.816 |
 | the true team on the frames it calls live | 0.963 / 0.934 / 0.874 / 0.924 | 0.959 / 0.930 / 0.859 / 0.916 |
+
+These are outside matches with a simulated BAR-ATH-like ball: they show where the model is weak
+in kind, not what a fix would gain on BAR-ATH.
 
 Stoppages are no longer where the score is: perfect ones add under 0.01. The loss is turnovers.
 True possessions found at IoU 0.5 by length, labels as built (IDSSE / Metrica / SkillCorner):
@@ -302,20 +305,51 @@ simulated ball (version 1): Tim's v8 through `tim_barlike.py`, the physics model
 `build.ball_version` (versions 1 and 2). Weighted mean of probabilities, weights fixed in
 advance, same decodes:
 
+Mean of the three providers, then the paired difference to this model per match (standard error;
+matches up of 30):
+
 | | labels as built | folded labels |
 |---|---|---|
 | this model (`pw1e`) | 0.616 | 0.696 |
-| physics alone / Tim's v8 labels alone | 0.547 / 0.501 | 0.641 / 0.594 |
-| + physics at 0.15 / 0.3 / 0.5 | 0.615 / 0.612 / 0.604 | 0.697 / 0.696 / 0.692 |
-| + Tim's v8 labels at 0.15 / 0.3 / 0.5 | 0.613 / 0.607 / 0.564 | 0.697 / 0.693 / 0.667 |
-| + Tim's classifier posteriors at 0.15 / 0.3 / 0.5 | 0.615 / 0.610 / 0.595 | 0.696 / 0.695 / 0.691 |
-| + both at 0.15 / 0.3 / 0.5 | 0.613 / 0.610 / 0.599 | 0.696 / 0.695 / 0.690 |
+| physics alone | 0.547, -0.044 (0.007; 1) | 0.641, -0.042 (0.005; 1) |
+| Tim's v8 labels alone | 0.501, -0.053 (0.017; 14) | 0.594, -0.060 (0.013; 7) |
+| + physics at 0.15 | 0.615, -0.001 (0.001; 12) | 0.697, -0.001 (0.001; 13) |
+| + physics at 0.3 | 0.612, -0.002 (0.001; 13) | 0.696, -0.001 (0.001; 11) |
+| + physics at 0.5 | 0.604, -0.005 (0.002; 12) | 0.692, -0.002 (0.002; 14) |
+| + Tim's v8 labels at 0.15 | 0.613, -0.000 (0.001; 14) | 0.697, +0.003 (0.001; 20) |
+| + Tim's v8 labels at 0.3 | 0.607, -0.002 (0.003; 17) | 0.693, +0.002 (0.003; 22) |
+| + Tim's v8 labels at 0.5 | 0.564, -0.009 (0.012; 19) | 0.667, -0.004 (0.008; 18) |
+| + Tim's classifier posteriors at 0.15 | 0.615, +0.000 (0.001; 14) | 0.696, +0.001 (0.001; 19) |
+| + Tim's classifier posteriors at 0.3 | 0.610, -0.001 (0.002; 18) | 0.695, +0.002 (0.002; 20) |
+| + Tim's classifier posteriors at 0.5 | 0.595, -0.004 (0.006; 19) | 0.691, +0.003 (0.004; 19) |
+| + both at 0.15 | 0.613, -0.001 (0.001; 13) | 0.696, +0.001 (0.001; 16) |
+| + both at 0.3 | 0.610, -0.002 (0.002; 15) | 0.695, +0.001 (0.002; 18) |
+| + both at 0.5 | 0.599, -0.006 (0.004; 13) | 0.690, -0.000 (0.003; 16) |
+
+(The first number weights the providers equally, the difference weights the 30 matches equally,
+20 of them SkillCorner, so the two need not agree in the last digit.)
 
 No row clears +0.01, and none is up on every provider under both labellings. Tim's model fed to
-the network as an input (above, +0.007 / +0.009) remains the only form of combination that
-gains. Why (`union.py`): of the true possessions this model misses, Tim's v8 finds 6 to 13%,
+the network as an input (above, +0.007 / +0.009, all of it on IDSSE and itself within seed
+noise of 0.01) remains the only form of combination that moves the mean at all. Why (`union.py`): of the true possessions this model misses, Tim's v8 finds 6 to 13%,
 the physics model 6 to 8%, the players-only net 7 to 12%, and any of the three 16 to 18%. The
 families miss the same turnovers, so there is little for a blend to recover.
+
+How the physics rows were made (its code is not on main): branch `claude/project-thread-tkn4qq`
+(PR 41) at commit `1700591`, with `phys_shared_ball.patch` of this folder applied, which adds a
+ball mode that loads this folder's simulated balls instead of drawing its own. From that
+checkout, sharing this checkout's `data/`:
+
+```bash
+# here: dump build.ball_version(d, name, v) for v = 1, 2 to data/cache/alldata/learned_ball/<match>.v<v>.npy
+python alldata/physics/build.py --mode learned --tag fL --knock
+python alldata/physics/build.py --mode learned --tag fLb --knock --seed 1
+python alldata/physics/train.py --run sLh --mode learned --tag fL --more fLb --heads   # -> data/cache/alldata/pred/sLh/
+```
+
+Tim's rows: `tim_barlike.py features` and `decode` (version 1 is enough). Then, from the
+repository root, `blend.py --base pw1e --other phys:sLh` (or `timlab`, `tim`, or several) and
+`union.py`, whose run tags are fixed in the script.
 
 ## Reproduce
 
