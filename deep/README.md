@@ -8,7 +8,7 @@ pip install -r requirements-deep.txt
 python deep/train.py --fold idsse      # and metrica, skillcorner: one provider held out each
 python deep/decode.py --tag v2         # THE score: held-out mean spellF1
 python deep/train.py --fold none --steps 2000   # all 30 matches -> copy net.pt to deep/models/v2.pt
-python deep/run.py                     # BAR-ATH -> evaluation/results/deep.csv (the ball-taught model, bt)
+python deep/run.py                     # BAR-ATH -> evaluation/results/deep.csv (sw: ball-taught, SkillCorner down-weighted)
 python deep/explain.py --match all     # each stage's output, for viz/combined/make_combined.py --deep
 ```
 
@@ -67,12 +67,13 @@ spellF1, mean of two seeds unless said (IDSSE / Metrica / SkillCorner / provider
 - **Bar.** +0.013 to +0.015 as built with no provider down clears the +0.01 bar; on the folded
   labels the gain is +0.007, below it. Team accuracy and alive/dead do not move (0.898 to 0.899,
   0.939 to 0.938): as with bt, the gain is in where possessions start and end.
-- **Shipped as an option, not the default**: `deep/models/sw.pt` is the all-30 model on the
-  simpler recipe (`--fold none --steps 2000 --ptr 0.5 --share skillcorner=0.25`, seed 0, one
-  thread). `python deep/run.py --tag sw --out deep_sw.csv`. Cleaning needs the ball only to build
-  training labels, which the ball rule allows, but it adds a touch detector (`hmm.ball.detect_touches`,
-  as `external/control.py` uses for the folded yardstick; no possession model is involved) for no
-  further gain, so it stays a flag.
+- **sw labels BAR-ATH from 2026-11-16** (Gambtt's choice): `deep/models/sw.pt` is the all-30
+  model on the simpler recipe (`--fold none --steps 2000 --ptr 0.5 --share skillcorner=0.25`,
+  seed 0, one thread) and `run.py` defaults to `--tag sw`; `--tag bt` and `--tag v2` still give
+  the earlier labels. Cleaning needs the ball only to build training labels, which the ball rule
+  allows, but it adds a touch detector (`hmm.ball.detect_touches`, as `external/control.py` uses
+  for the folded yardstick; no possession model is involved) for no further gain, so it stays a
+  flag and is not in the shipped model.
 - **BAR-ATH public 5 minutes, check only:** sw 0.745 with 12 possessions, bt 0.745 with 12
   (truth 17); macroF1 0.900 against 0.904. Over the match the two agree on 97.3% of graded frames
   (272 against 275 possessions, median 7.1 s both, 11% against 13% under 2 s, 46% against 45% dead).
@@ -168,7 +169,8 @@ provider down) in every view. SkillCorner gains least.
   0.526) and v2 loses 0.013 (0.529 to 0.516), so the pointer is no more fragile than the rest.
   Teaching it only where a tracked player is within 3 m of the ball is untried.
 
-- **bt labels BAR-ATH from 2026-11-15** (Gambtt's choice): `run.py` defaults to `--tag bt`;
+- **bt labelled BAR-ATH from 2026-11-15 until sw replaced it on 2026-11-16** (`--tag bt` now):
+  `run.py` defaulted to `--tag bt`;
   `--tag v2` still gives the earlier labels. Two runs give byte-identical files that pass
   `evaluation/validate_submission.py`. Where bt is live and v2 dead (3,126 frames in 96
   stretches, median 0.3 s, 7 over 5 s) 56% of the frames lie within 5 s of a Smart Tagging set
