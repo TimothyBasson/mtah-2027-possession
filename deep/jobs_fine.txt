@@ -1,0 +1,3 @@
+# Run with DEEP_STEP=2 DEEP_LAG=2 JOBS=2: 12.5 fps, velocity over 0.16 s, the same frames per step as bt (6 windows of 750)
+fine idsse --steps 1500 --ptr 0.5 --window 750 --batch 6
+fine metrica --steps 1500 --ptr 0.5 --window 750 --batch 6

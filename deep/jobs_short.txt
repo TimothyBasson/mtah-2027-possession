@@ -1,0 +1,13 @@
+# TAG FOLD [train.py options]. The runs behind README's "short possessions" section.
+# tb: the ball-fed teacher (what the labels allow when the ball is seen; soft targets for distilling)
+tb idsse --steps 1500 --ptr 0.5 --teach
+tb metrica --steps 1500 --ptr 0.5 --teach
+tb skillcorner --steps 1500 --ptr 0.5 --teach
+# pp: bt with per-player convolutions through time in the encoder
+pp idsse --steps 1500 --ptr 0.5 --ptime 2
+pp metrica --steps 1500 --ptr 0.5 --ptime 2
+pp skillcorner --steps 1500 --ptr 0.5 --ptime 2
+# sw: bt with SkillCorner's labels weighted down (its ball still teaches); the skillcorner fold has no SkillCorner in training, so it is bt's
+sw25 idsse --steps 1500 --ptr 0.5 --provw skillcorner=0.25
+sw25 metrica --steps 1500 --ptr 0.5 --provw skillcorner=0.25
+sw0 metrica --steps 1500 --ptr 0.5 --provw skillcorner=0
