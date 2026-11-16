@@ -1,0 +1,15 @@
+# seed 0. a0: parabolic window (the first nets' simulation). lp0: low-pass matched to BAR-ATH.
+# mx0: low-pass and the wide mix. mxs0: that, with the half's smoothness as an input (build and
+# fit with ALLDATA_SM=1 in the environment).
+a0 idsse --vers 1 2 3 --drop-cols tim sm
+a0 metrica --vers 1 2 3 --drop-cols tim sm
+a0 skillcorner --vers 1 2 3 --drop-cols tim sm
+lp0 idsse --vers 4 5 6 --drop-cols tim sm
+lp0 metrica --vers 4 5 6 --drop-cols tim sm
+lp0 skillcorner --vers 4 5 6 --drop-cols tim sm
+mx0 idsse --vers 4 5 6 7 8 9 10 --drop-cols tim sm
+mx0 metrica --vers 4 5 6 7 8 9 10 --drop-cols tim sm
+mx0 skillcorner --vers 4 5 6 7 8 9 10 --drop-cols tim sm
+mxs0 idsse --vers 4 5 6 7 8 9 10 --drop-cols tim
+mxs0 metrica --vers 4 5 6 7 8 9 10 --drop-cols tim
+mxs0 skillcorner --vers 4 5 6 7 8 9 10 --drop-cols tim

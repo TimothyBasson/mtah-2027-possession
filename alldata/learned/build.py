@@ -44,17 +44,23 @@ def bt_probs(name, nhalves):
 
 
 def ball_version(d, name, v):
-    """(n, 2) ball of version v: 0 as recorded, 1.. made to look like BAR-ATH's under seed v."""
+    """(n, 2) ball of version v: 0 as recorded, 1.. made to look like BAR-ATH's under seed v.
+    Versions 1 to 3 use the parabolic window of the first nets, 4 to 6 the low-pass matched to
+    BAR-ATH's spectrum, 7 and up a wide mix of filters (feats.bar_like's styles)."""
     bxy = d["ball"][:, :2].astype(np.float32).copy()
     if v:
         rng = np.random.default_rng(zlib.crc32(f"{name} {v}".encode()))
         for a, b in ((int(h[0]), int(h[1])) for h in d["halves"]):
-            bxy[a:b + 1] = feats.bar_like(bxy[a:b + 1], d["labels"][a:b + 1], rng, int(d["fps"]))
+            bxy[a:b + 1] = feats.bar_like(bxy[a:b + 1], d["labels"][a:b + 1], rng, int(d["fps"]), style=style_of(v))
     return bxy
 
 
+def style_of(v):
+    return "para" if v <= 3 else "lp" if v <= 6 else "mix"
+
+
 def one(args):
-    path, versions = args
+    path, versions, with_tim = args
     name = os.path.basename(path)[:-4]
     dst = os.path.join(OUT, name + ".npz")
     if os.path.exists(dst):
@@ -73,7 +79,7 @@ def one(args):
     out = {}
     for v in range(versions + 1):
         bxy = ball_version(d, name, v)
-        tim_v = tim.inputs(name, [np.arange(a, b + 1, feats.STEP) for a, b in halves], v)
+        tim_v = tim.inputs(name, [np.arange(a, b + 1, feats.STEP) for a, b in halves], v) if with_tim else [[] for _ in halves]
         for i, (a, b) in enumerate(halves):
             F, fr = feats.half_features(d["players"], bxy, d["team"], a, b, d["pitch"], int(d["fps"]),
                                         extra=[("bt", bt[i])] + tim_v[i])
@@ -90,10 +96,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--versions", type=int, default=3)
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--no-tim", action="store_true", help="leave out the columns from Tim's model (they exist for versions 0 to 3 only)")
     a = ap.parse_args()
     paths = D.external_paths()
     with ProcessPoolExecutor(a.jobs) as ex:
-        for r in ex.map(one, [(p, a.versions) for p in paths]):
+        for r in ex.map(one, [(p, a.versions, not a.no_tim) for p in paths]):
             print(r, flush=True)
 
 
