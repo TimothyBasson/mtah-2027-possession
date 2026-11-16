@@ -24,7 +24,7 @@ inputs already had). Every model that loads BAR-ATH picks it up; training data i
 Smart Tagging phase share 0.866 to 0.870. Plain fallback with it `21938e67...364bff442b4c`.
 `--raw-keepers` gives back the files below byte for byte.
 With this change merged, the default command writes `4979aff0` as the submission in place of
-`e9f09d6a`: merging PR 57 is that choice, and it is Gambtt's (asked 2026-11-16 19:08Z). There is
+`e9f09d6a`: Gambtt chose it on 2026-11-16 19:43Z ("yes add it and merge it in"), so `4979aff0` is the submission. There is
 no measured spellF1 gain; the case is that the input is wrong without it. Validator on the new
 file: `OK alldata_learned_tim_touch.csv, 199319 rows, frame 0..199318`. The pseudo-label cache
 `data/cache/alldata/bar/BAR-ATH.npz` (only `fit.py --pseudo` reads it) is rewritten by every
