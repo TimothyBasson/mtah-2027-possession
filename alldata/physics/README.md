@@ -201,7 +201,10 @@ Not yet shown from a clean clone. What a rerun needs: the 30 outside matches
 model's probabilities (`deep/train.py`, `deep/run.py`), then the commands at the top. Versions
 used: numpy 2.4.6, pandas 3.1.1, scipy 1.17.1, scikit-learn 1.9.1, lightgbm 4.7.0, numba 0.68.1,
 kloppy 3.18.0, joblib 1.6.0. `models/s5h.joblib` is the model that made the BAR-ATH file
-(`train.py --fold none` rebuilds it; byte-identical output of a rebuild has not been checked).
+(`train.py --fold none` rebuilds it). Retrained from the same feature tables on the same machine,
+the probabilities are identical (largest difference 0.0) and the BAR-ATH file is the same byte for
+byte; the `.joblib` file itself differs in its pickle bytes. A rebuild of the feature tables on
+another machine has not been checked. The Tim-input model (s7h) is not in git.
 
 ## With Tim's decoder as an input
 
@@ -214,6 +217,12 @@ labels to the classifiers as 16 more columns.
 | Tim's v8 alone on the simulated matches | 0.475 | 0.597 | 0.425 | 0.499 | 0.592 |
 | s5h (independent of Tim's model) | 0.566 | 0.683 | 0.393 | 0.548 | 0.629 |
 | s7h (s5h plus Tim's labels) | 0.570 | 0.687 | 0.390 | 0.549 | 0.627 |
+
+Held out by match with every provider in training it is 0.615 / 0.692 against 0.609 / 0.687
+(+0.005 per match, se 0.001, up on 21 of 30): a small gain that again needs the provider's own
+labels in training. Its BAR-ATH file is `alldata_physics_tim.csv` (`tim.py train`, `tim.py
+bar_ath`, `train.py --run s7h --extra tim --fold none`, `run.py --run s7h`): 261 possessions,
+public 5 minutes 0.747 (check only).
 
 Per match s7h is -0.001 as given (se 0.002, up on 10 of 30) and -0.003 folded: no gain, so the
 independent s5h stays the model. His decoder is best on SkillCorner, where this model is
@@ -230,6 +239,7 @@ would need checking there first.
 | Training on folded labels | folded mean +0.001, as given -0.018; IDSSE and Metrica down on both |
 | Averaging with the prior | +0.011 held out by provider, -0.005 to -0.02 with the provider in training: not adopted |
 | Decode settings (24 combinations) | 0.531 to 0.548 as given: flat |
+| Gating: this model where the ball is in view, the players-only model where it is not (hard switch, and blended over 2 s) | 0.540 and 0.542 as given, 0.619 and 0.621 folded, below both. Leaving the gaps to the players-only model does not get the possessions inside gaps back |
 | One three-class classifier | better with the provider in training (+0.008), worse where a dead ball is in view and on BAR-ATH's public window |
 
 ## Files
