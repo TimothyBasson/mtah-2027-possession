@@ -70,7 +70,13 @@ spellF1, mean of two seeds unless said (IDSSE / Metrica / SkillCorner / provider
 - **sw labels BAR-ATH from 2026-11-16** (Gambtt's choice): `deep/models/sw.pt` is the all-30
   model on the simpler recipe (`--fold none --steps 2000 --ptr 0.5 --share skillcorner=0.25`,
   seed 0, one thread) and `run.py` defaults to `--tag sw`; `--tag bt` and `--tag v2` still give
-  the earlier labels. Cleaning needs the ball only to build training labels, which the ball rule
+  the earlier labels (`--tag bt` writes the file it wrote before, byte for byte). Why sw: it is
+  the same model taught the same way, with one sampling weight changed, and it is ahead of bt held
+  out on every IDSSE and Metrica match on two seeds (+0.013 provider mean as built, +0.007
+  folded) at no measured cost on BAR-ATH, whose tracking is Metrica's. BAR-ATH itself cannot
+  separate the two, so the expected effect on the private score is small. Two runs of
+  `python deep/run.py` write byte-identical files (sha256 `ac2f270e...150a214d`) that pass
+  `evaluation/validate_submission.py`; same machine and torch 2.15.0 only. Cleaning needs the ball only to build training labels, which the ball rule
   allows, but it adds a touch detector (`hmm.ball.detect_touches`, as `external/control.py` uses
   for the folded yardstick; no possession model is involved) for no further gain, so it stays a
   flag and is not in the shipped model.
