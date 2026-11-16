@@ -16,7 +16,7 @@ is no seed spread beyond the nets'. Columns: IDSSE / Metrica / SkillCorner / mea
 |---|---|---|---|
 | shipped (cost 4, 1 s / 1 s) | 0.632 / 0.769 / 0.426 / **0.609** | 0.759 / 0.836 / 0.482 / **0.692** | 47% |
 | cost, team-change cost, minimum lengths, picked on validation | 0.630 / 0.767 / 0.431 / 0.610 | 0.757 / 0.834 / 0.491 / 0.694 | 47% |
-| explicit-duration (semi-Markov), picked on validation for folded | 0.631 / 0.745 / 0.437 / 0.604 | 0.757 / 0.833 / 0.501 / 0.697 | 50% |
+| explicit-duration (semi-Markov), picked on validation for folded | 0.631 / 0.745 / 0.437 / 0.604 | 0.757 / 0.833 / 0.501 / 0.697 | 47 to 50% |
 | brief touches written in, peak 0.5 on the as-built head | 0.661 / 0.780 / 0.409 / 0.617 | 0.748 / 0.806 / 0.453 / 0.669 | 41% |
 | same, peak 0.2 | 0.656 / 0.763 / 0.393 / 0.604 | 0.709 / 0.756 / 0.427 / 0.631 | 35% |
 | same, threshold picked on validation for as built | 0.646 / 0.783 / 0.409 / 0.612 | 0.754 / 0.820 / 0.453 / 0.676 | |
@@ -43,7 +43,8 @@ Reading:
 - **A learned scorer does not raise the precision**: fitted on the bump's shape in both heads, it
   matches the single threshold as built and, taught on folded labels, chooses to write nothing.
 - So the limit is the evidence, not the decode. Of the brief sandwiched touches the net shows the
-  right team at 0.5 or more inside about half (IDSSE, Metrica) and under 0.15 inside 20 to 45%;
+  right team at 0.5 or more inside 41 to 78% (IDSSE, Metrica; fewest under 1 s) and under 0.15
+  inside 11 to 45%;
   the touches it does show are mostly already drawn, with the loss in their neighbours being
   given to the same team (the wrong-team mode, not this one).
 
