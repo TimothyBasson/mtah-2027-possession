@@ -69,8 +69,10 @@ def bar():
 def inputs(name, frames_per_half, version=0):
     """[(feature name, (T, 3) probabilities)] for feats.half_features, per half. version: the
     ball his model was run on (build.ball_version); 1.. come from tim_barlike.py."""
-    f = os.path.join(OUT, f"{name}.v{version}.npz")
-    z = np.load(f if version and os.path.exists(f) else os.path.join(OUT, name + ".npz"))
+    f = os.path.join(OUT, f"{name}.v{version}.npz" if version else name + ".npz")
+    if not os.path.exists(f):  # never pair his outputs on one ball with features on another
+        raise FileNotFoundError(f"{f}: run tim.py (version 0) or tim_barlike.py (versions 1..) first")
+    z = np.load(f)
     out = []
     for fr in frames_per_half:
         lab = z["labels"][fr]

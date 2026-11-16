@@ -139,9 +139,36 @@ turn of the ball's path, when is the nearest player closest to the ball?
 | Metrica samples, as recorded | 1,592, 1,778 | 0.00 s | -0.04 / +0.1 s | 11.9 / 23.1 m/s |
 
 BAR-ATH's ball is not late against its players (under 0.1 s), and its turns are as sharp as the
-simulated Metrica balls' and a little tighter in time, which points to the simulation being, if
-anything, slightly too smooth. Neither failure case of the first table is what BAR-ATH shows.
-This is the strongest label-free evidence available; it is still not a score on BAR-ATH.
+simulated Metrica balls' and a little tighter in time.
+
+The smoothing width, from the ball's acceleration alone (moving ball; 90th and 99th percentile,
+and for how many frames the acceleration stays correlated above 0.5):
+
+| | 90th pct | 99th pct | correlated for |
+|---|---|---|---|
+| BAR-ATH, half 1 / half 2 | 18.4 / 19.4 m/s2 | 31 / 48 m/s2 | 11 / 9 frames |
+| outside ball, half-width 12 (Metrica / IDSSE) | 20.3 / 19.5 | 38 / 33 | 8 / 9 |
+| half-width 14 | 18.1 / 17.5 | 33 / 28 | 10 / 10 |
+| half-width 16 | 16.4 / 15.8 | 29 / 25 | 11 / 11 |
+| half-width 18 | 15.1 / 14.4 | 26 / 22 | 12 / 12 |
+| half-width 24 | 11.9 / 11.3 | 19 / 17 | 14 / 15 |
+
+BAR-ATH sits at a half-width of 12 to 16: at or under the 14 to 18 the nets were trained on,
+which is the side where the score rises (half-width 8: 0.622), and far from 24, where it is
+lost. Neither failure case of the first table is what BAR-ATH shows. The shifted rows are one
+seed and only 0.01 above players-only, so "survives a third of a second" means level, not
+ahead. All of this is label-free evidence about the simulation; it is still not a score on
+BAR-ATH.
+
+**Is it slow to hand the ball over?** The first hand-over of the public window is 5 s late (see
+below), and the BAR-ATH file has fewer possessions in half 1 than the other files. Held out, on
+the folded labels, with the file's averaged heads (IDSSE / Metrica / SkillCorner): predicted
+over true possessions 0.90 / 0.98 / 1.23 (players-only 0.94 / 0.91 / 1.30); median onset of a
+matched possession -0.05 / +0.12 / 0.00 s (players-only -0.21 / +0.31 / -0.32 s); onsets more
+than 1 s late 10% / 9% / 21% (players-only 10% / 16% / 21%). So on outside matches it neither
+under-counts on the Metrica samples nor starts possessions late. Mixing its probabilities with
+the players-only net's (25% or 50%) changes nothing (0.597 / 0.687 and 0.594 / 0.686 against
+0.599 / 0.687).
 
 ## BAR-ATH
 
