@@ -98,11 +98,13 @@ remove that; PR 43's `lagcheck.py` puts BAR-ATH's ball within 0.1 s of its playe
 
 ```bash
 python alldata/robust/spectrum.py && python alldata/robust/fitfilter.py && python alldata/robust/featstats.py
-python alldata/learned/build.py --versions 10 --no-tim   # about 5 minutes
+rm -rf data/cache/alldata/feats   # build.py skips matches it finds, so a cache from the default build must go first
+ALLDATA_SM=1 python alldata/learned/build.py --versions 10 --no-tim   # about 5 minutes; ALLDATA_SM adds the smoothness column mxs0 uses
 sh alldata/robust/queue.sh alldata/robust/jobs1.txt      # 12 runs, about 65 minutes on 4 CPUs
 for k in s l m; do python alldata/learned/score.py --tags deep:bt a0 lp0 mx0 mxs0 --key $k; done
 python alldata/robust/stress.py --build --tags a0 mx0    # about 40 minutes
 ```
 
 `fit.py` without `--vers` trains on versions 1 to 3 as before, and `run.py` still writes the
-same BAR-ATH file (sha256 `0c1ce4a7...c58b935`, checked after these changes). Needs scipy.
+same BAR-ATH file as before these changes (checked by sha256). Needs scipy (`requirements-deep.txt`). The cache
+built here has no columns from Tim's model; rebuild it without `--no-tim` before `final_tim.sh`.
