@@ -12,6 +12,78 @@ python deep/run.py                     # BAR-ATH -> evaluation/results/deep.csv 
 python deep/explain.py --match all     # each stage's output, for viz/combined/make_combined.py --deep
 ```
 
+## Short possessions (2026-11-15/16): the net can be made to draw them; the control rule folds them away
+
+Thread "Retrain model for short possessions". Nothing here changes what labels BAR-ATH: `run.py`
+still defaults to `bt`. Scripts in `deep/short/`, runs in `deep/jobs_short.txt`, `jobs_sw.txt`,
+`jobs_sp.txt`, `jobs_sp1.txt`, `jobs_fine.txt`; fold nets and probabilities in
+`/mnt/project-files/deep/{tb,pp,sw25,sw25s1,sw0,sp,sps1}/`.
+
+`deep/models/sp.pt` (opt-in, not the default; dropped as a replacement for `bt`) is
+`python deep/train.py --fold none --steps 2000 --ptr 0.5 --provw skillcorner=0.25 --spell 0.5 --tag sp`,
+seed 0, 1 thread (`deep/jobs_all.txt`).
+
+**What the labels allow (a measuring stick, never a labeller).** `--teach` trains the same net
+with the real ball as an input (`tb`). spellF1 on labels as given, shipped decode:
+
+| | unseen matches of trained providers: IDSSE | Metrica | SkillCorner | held-out provider mean |
+|---|---|---|---|---|
+| `bt` (players only) | 0.69 | 0.62-0.66 | 0.46 | 0.545 |
+| `tb` (sees the ball) | 0.80 | 0.85 | 0.50 | 0.498 |
+
+- With the ball, possessions under 2 s are found 29-46% of the time (players only: 10-15%) and
+  2-5 s ones 82-86% (52-66%): what the players-only net lacks is who is on the ball.
+- SkillCorner's labels are not learnable even with the ball (0.50, 2-5 s possessions found 30%).
+  Its low score is its labels, not the model.
+- The ball-fed net is worse than `bt` on a held-out provider: how labels follow the ball is the
+  provider's own convention. Distilling it into the players-only net was therefore not tried.
+- `bt` scores the same on unseen matches of trained providers as on a held-out provider.
+- `bt`'s pointer on held-out providers (`short/pointer.py`): right player 0.66-0.71, right team
+  0.80-0.85, but 0.58-0.62 in the first second after the ball changes team.
+
+**Variants**, held out by provider, 1,500 steps, probabilities averaged over the seeds named
+(`short/ens.py`). "folded" is the control-rule view (`external/control.py`).
+
+| | seeds | as given, shipped decode: IDSSE / Metrica / SkillCorner / mean | folded, 2 s minimum: IDSSE / Metrica / SkillCorner / mean |
+|---|---|---|---|
+| `bt` | 2 | 0.584 / 0.649 / 0.404 / **0.546** | 0.698 / 0.738 / 0.501 / **0.646** |
+| `pp`: each player followed through time (`--ptime 2`, after PathCRF) | 1 | 0.591 / 0.645 / 0.398 / 0.545 | 0.704 / 0.734 / 0.489 / 0.642 |
+| `fine`: 12.5 fps, same compute (`DEEP_STEP=2`) | 1, IDSSE only | 0.550 (bt 0.582) | stopped |
+| `sw25`: SkillCorner's labels at a quarter weight, its ball at full (`--provw`) | 2 | 0.609 / 0.667 / 0.402 / 0.559 | 0.705 / 0.744 / 0.498 / 0.649 |
+| `sp`: `sw25` + short possessions weighted up (`--spell 0.5`) | 2 | 0.615 / 0.689 / 0.389 / 0.564 | 0.696 / 0.746 / 0.483 / 0.642 |
+| `bt` + `sp`, four nets | 4 | 0.614 / 0.685 / 0.398 / 0.566 | 0.705 / 0.755 / 0.493 / 0.651 |
+
+(The SkillCorner fold has no SkillCorner in training, so `sw25` is `bt` there. Folded labels at
+the shipped decode: bt 0.628, sw25 0.627, sp 0.601, four nets 0.625.)
+
+`sp` does what was asked: true possessions found at IoU 0.5, by length (`bylength.py`, two seeds):
+
+| | under 2 s | 2 to 5 s | 5 to 10 s | over 10 s |
+|---|---|---|---|---|
+| IDSSE `bt` -> `sp` | 10% -> 18-19% | 43% -> 54-56% | 65% -> 74-75% | 88% -> 90-91% |
+| Metrica `bt` -> `sp` | 8% -> 19-22% | 46% -> 58% | 72% -> 85% | 80% -> 83-84% |
+| SkillCorner `bt` -> `sp` | 4% -> 5% | 29% -> 30-31% | 50% | 69% -> 68% |
+
+and it is worth +0.03 to +0.04 on IDSSE and Metrica on the labels as given, the same on both
+seeds. But those short possessions are the ones the control rule gives back to the other team:
+on folded labels `sp` is behind at the shipped decode and level with a 2 s minimum, and
+SkillCorner is down in every view. So it does not meet the bar (+0.01, no provider down) as a
+replacement, and which of `bt` and `sp` is better on BAR-ATH depends on how finely the organisers
+cut possessions, which five public minutes cannot tell:
+
+| BAR-ATH (check only, 17 possessions) | public spellF1 | possessions per half | median |
+|---|---|---|---|
+| `bt`, shipped decode | 0.745 | 126 / 149 | 7.5 / 6.6 s |
+| `sp` (`deep/models/sp.pt`), shipped decode | 0.735 | 158 / 184 | 6.0 / 4.8 s |
+| `sp`, 2 s minimum | 0.747 | 127 / 139 | 7.8 / 7.4 s |
+
+The public window runs at 17 possessions in 5 minutes, about 150 a half.
+
+Reading: every change that makes the net cut finer gains on the first-touch labels (IDSSE,
+Metrica as given) and loses on the control-rule view by about as much; architecture (`pp`) and
+time resolution (`fine`) do not move either. The one change that is up or level everywhere is
+`sw25` (+0.013 as given, +0.003 folded), under the bar on the folded view.
+
 ## bt (2026-11-14): taught by the ball, still blind to it, 0.540
 
 The ball may teach the model on the training matches; it may never be read when a match is
