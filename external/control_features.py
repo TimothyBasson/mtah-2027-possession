@@ -1,6 +1,9 @@
-"""Build hmm/control.py features for every external match, both team orientations, cached.
+"""Build hmm/control.py joint features for every external match, both team orientations, cached.
 
-    python external/control_features.py      # -> data/cache/control_<match>.npz
+    python external/control_features.py      # -> data/cache/control_v8_<match>.npz
+
+Each file holds the features on every STRIDE-th frame (X, Xs with the teams swapped), the frames
+they sit on and the names of the columns.
 
 The ball is the one external/score_hmm.py scores with (--seen 0.59): IDSSE and SkillCorner topped
 up with ~2 s dropouts, Metrica as recorded. So the classifier trains on the same kind of missing
@@ -17,7 +20,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "external"))
-from hmm.control import features  # noqa: E402
+from hmm.control import joint_features  # noqa: E402
 from score import drop_ball  # noqa: E402
 
 SEEN = 0.59
@@ -33,7 +36,7 @@ def match_ball(name, d, seen=SEEN):
 
 
 def cache_path(name):
-    return os.path.join(CACHE, "control_{}.npz".format(name))
+    return os.path.join(CACHE, "control_v8_{}.npz".format(name))
 
 
 def build(path):
@@ -47,10 +50,11 @@ def build(path):
     halves = [(int(a), int(b) + 1) for a, b in d["halves"]]
     args = (players[:, :, 0], players[:, :, 1], d["team"], ball[:, 0].astype(float),
             ball[:, 1].astype(float), tuple(float(v) for v in d["pitch"]), int(d["fps"]), halves)
-    X, names = features(*args)
-    Xs, _ = features(*args, swap=True)
+    X, names, frames = joint_features(*args)
+    Xs = joint_features(*args, swap=True)[0]
     os.makedirs(CACHE, exist_ok=True)
-    np.savez_compressed(out, X=X, Xs=Xs, names=np.array(names), labels=d["labels"])
+    np.savez_compressed(out, X=X, Xs=Xs, names=np.array(names), frames=frames,
+                        labels=d["labels"])
     return name
 
 

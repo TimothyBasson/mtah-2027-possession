@@ -19,9 +19,11 @@ import torch.nn.functional as F
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data as D  # noqa: E402
+import trackers as TR  # noqa: E402
 from net import PTIME, PossessionNet  # noqa: E402
 
-VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3}  # last n matches of each training provider
+VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3, "soccertrack": 1}  # last n matches of each training provider
+PAD = 50  # frames of context either side of a raw window, for smoothing and velocities
 
 
 def split(matches, fold):
@@ -92,6 +94,27 @@ def ball_targets(X, M, ball, y):
     return dict(ptr=(ptr, ok_p), bvel=(torch.nan_to_num(bvel) / 10, ok_v), touch=(hit, ok_t), free=(free, ok_p))
 
 
+def restart_losses(extra, X, M, y, R):
+    """The stoppage and restart losses (deep/restarts.py): the pointer finds the restart taker
+    while the ball is dead, a head names the kind of restart, another counts the seconds to and
+    since a stop or start. Zero where a batch has no such frame."""
+    rb, rk, rt = R
+    z = extra["rkind"].sum() * 0
+    out = {}
+    ok = torch.isfinite(rb[..., 0]) & (y == 2) & M.any(-1)
+    if "ptr" in extra and ok.any():
+        scale = torch.tensor([52.5, 34.0])
+        d = ((X[..., :2] * scale - torch.nan_to_num(rb * scale).unsqueeze(2)) ** 2).sum(-1).sqrt().masked_fill(~M, 1e4)
+        out["taker"] = -(torch.softmax(-d[ok] / 2.0, -1) * F.log_softmax(extra["ptr"][ok], -1)).sum(-1).mean()
+    else:
+        out["taker"] = z
+    ok = (rk >= 0) & (y == 2)
+    out["kind"] = F.cross_entropy(extra["rkind"][ok], rk[ok]) if ok.any() else z
+    ok = torch.isfinite(rt) & (y >= 0).unsqueeze(-1)
+    out["time"] = F.smooth_l1_loss(extra["rtime"][ok], rt[ok], beta=0.1) if ok.any() else z
+    return out
+
+
 def ball_losses(extra, tg):
     """The four ball-taught losses; zero where a batch has no frame with the ball seen."""
     out = {}
@@ -131,9 +154,14 @@ NBALL = 6
 
 def batch(train, rng, B, T, a):
     provs = sorted({m["provider"] for m in train})
-    Xs, Ms, ys, bs, es, ws, qs = [], [], [], [], [], [], []
+    Xs, Ms, ys, bs, es, ws, rs, qs = [], [], [], [], [], [], [], []
     while len(Xs) < B:
-        prov = provs[rng.integers(len(provs))]
+        if a.share:  # e.g. soccertrack=0.15: that provider's share of windows, the rest split equally
+            w = np.array([a.share.get(q, np.nan) for q in provs])
+            w[np.isnan(w)] = (1 - np.nansum(w)) / max(1, np.isnan(w).sum())
+            prov = provs[rng.choice(len(provs), p=w / w.sum())]
+        else:
+            prov = provs[rng.integers(len(provs))]
         ms = [m for m in train if m["provider"] == prov]
         m = ms[rng.integers(len(ms))]
         hi = rng.integers(len(m["halves"]))
@@ -142,6 +170,12 @@ def batch(train, rng, B, T, a):
         n = len(h["y"])
         s = rng.integers(0, max(1, n - T))
         X, M, y, ball = h["X"][s:s + T], h["M"][s:s + T], h["y"][s:s + T], h["ball"][s:s + T]
+        f0, f1 = s * D.STEP - PAD, (s + T) * D.STEP + PAD
+        if "raw" in m and rng.random() < a.style and f0 >= 0 and f1 <= len(m["raw"][hi]["xy"]):
+            # the same window as another tracking system might have recorded it (deep/trackers.py)
+            r = m["raw"][hi]
+            X, M = D.window_tensors(TR.apply(r["xy"][f0:f1], TR.style(rng), rng, (0.0, 0.0), r["fps"]), r["team"], r["fps"])
+            X, M = X[PAD // D.STEP:PAD // D.STEP + T], M[PAD // D.STEP:PAD // D.STEP + T]
         if "w" not in h or h.get("wp") != a.spell:
             h["w"], h["wp"] = spell_weights(h["y"], a.spell), a.spell
         ws.append(h["w"][s:s + T] * a.provw.get(prov, 1.0))
@@ -149,11 +183,17 @@ def batch(train, rng, B, T, a):
             ws.pop()
             continue
         e = edges(y)
+        r = h.get("restart")  # deep/restarts.py targets; positions turn with the pitch, the rest does not
+        rb = r["rb"][s:s + T].copy() if r else np.zeros((T, 2), np.float32)
         swapped = rng.random() < 0.5
         if swapped:
             X, y, ball = D.swap_teams(X, y, ball)
+            rb = -rb
         if rng.random() < 0.5:
             X, ball = D.mirror(X, ball)
+            rb[:, 1] *= -1
+        if r:
+            rs.append((rb, r["rk"][s:s + T], r["rt"][s:s + T]))
         X, M = X.copy(), M.copy()
         if a.noise:
             X[..., :2] += rng.normal(0, a.noise / 40, X[..., :2].shape).astype(np.float32)
@@ -170,7 +210,8 @@ def batch(train, rng, B, T, a):
             qs.append(q)
         Xs.append(X); Ms.append(M); ys.append(y); bs.append(ball); es.append(e)
     t = lambda v: torch.from_numpy(np.stack(v))  # noqa: E731
-    return t(Xs), t(Ms), t(ys), t(bs), t(es), t(ws), (t(qs) if qs else None)
+    R = tuple(t([r[i] for r in rs]) for i in range(3)) if rs else None
+    return t(Xs), t(Ms), t(ys), t(bs), t(es), t(ws), R, (t(qs) if qs else None)
 
 
 @torch.no_grad()
@@ -219,6 +260,12 @@ def main():
     ap.add_argument("--spell", type=float, default=0.0, help="power of the short-possession loss weight")
     ap.add_argument("--knock", type=float, default=0.0,
                     help="share of training windows drawn with players lost in runs, as on BAR-ATH")
+    ap.add_argument("--style", type=float, default=0.0,
+                    help="share of training windows changed to look like another tracking system")
+    ap.add_argument("--with", dest="extra", nargs="*", default=[],
+                    help="providers beyond the three of v2 to train on as well, e.g. soccertrack "
+                         "(data/soccertrack/); without it the training set is v2's whatever is on disk")
+    ap.add_argument("--share", nargs="*", default=[], help="provider=share of training windows, e.g. soccertrack=0.15")
     ap.add_argument("--ptr", type=float, default=0.0,
                     help="v4: point at the player on the ball mid-network; weight of that loss")
     ap.add_argument("--stage", action="store_true",
@@ -235,6 +282,10 @@ def main():
                     help="per-player convolutions through time in the encoder: number of stages (net.PTIME)")
     ap.add_argument("--provw", default="", help="e.g. skillcorner=0.25: weight of a provider's LABELS in the label and "
                     "edge losses (its ball still teaches at full weight); for a provider whose labels are noisy")
+    ap.add_argument("--restart", type=float, default=0.0,
+                    help="teach stoppages and restarts (deep/restarts.py): weight of the taker pointer loss")
+    ap.add_argument("--rkind", type=float, default=0.2, help="with --restart: kind-of-restart loss")
+    ap.add_argument("--rtime", type=float, default=0.3, help="with --restart: seconds to/since a stop or start loss")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
@@ -242,6 +293,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
     a.provw = {k: float(v) for k, v in (kv.split("=") for kv in a.provw.split(",") if kv)}
+    a.share = {k: float(v) for k, v in (kv.split("=") for kv in a.share)}
     torch.set_num_threads(a.threads)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
@@ -250,13 +302,23 @@ def main():
         for m, k in zip(matches, D.load_all(knock=True)):
             assert m["name"] == k["name"]
             m["knocked"] = k["halves"]
+    matches = [m for m in matches if m["provider"] in ("idsse", "metrica", "skillcorner") or m["provider"] in a.extra]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
     if a.distill:
         for m in train:
             z = np.load(os.path.join(D.ROOT, "data", "cache", "deep", a.distill, a.fold, m["name"] + ".npz"))
             for i, h in enumerate(m["halves"]):
                 h["soft"] = z[f"p{i}"].astype(np.float32)
-    net = PossessionNet(nfeat=D.NFEAT + (NBALL if a.teach else 0), d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage,
+    if a.restart > 0:  # training matches only: a held-out match's ball is never read
+        import restarts
+        tg = restarts.load_all()
+        for m in train:
+            for h, r in zip(m["halves"], tg[m["name"]]):
+                h["restart"] = r
+    if a.style:
+        for m in train:
+            m["raw"] = D.load_raw(D.match_path(m["name"]))
+    net = PossessionNet(nfeat=D.NFEAT + (NBALL if a.teach else 0), d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage, restart=a.restart > 0,
                         ptime=PTIME[a.ptime] if a.ptime else None)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
@@ -274,7 +336,7 @@ def main():
         print(f"resumed at step {start}", flush=True)
     for step in range(start + 1, a.steps + 1):
         net.train()
-        X, M, y, ball, e, w, q = batch(train, rng, a.batch, a.window, a)
+        X, M, y, ball, e, w, R, q = batch(train, rng, a.batch, a.window, a)
         logits, bhat, ehat, extra = net(X, M)
         g = y >= 0
         loss_c = (F.cross_entropy(logits[g], y[g], reduction="none") * w[g]).sum() / w[g].sum()
@@ -293,13 +355,19 @@ def main():
             bl = ball_losses(extra, ball_targets(X, M, ball, y))
             loss = loss + a.ptr * bl["ptr"] + a.bvel * bl["bvel"] + a.touch * bl["touch"] + a.free * bl["free"]
             loss_x = bl["ptr"].item()
+        if a.restart > 0:
+            rl = restart_losses(extra, X, M, y, R)
+            loss = loss + a.restart * rl["taker"] + a.rkind * rl["kind"] + a.rtime * rl["time"]
+            loss_r = (rl["taker"].item(), rl["kind"].item(), rl["time"].item())
         opt.zero_grad(); loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
         opt.step(); sched.step()
-        run.append((loss_c.item(), loss_b.item(), loss_e.item(), loss_x))
+        run.append((loss_c.item(), loss_b.item(), loss_e.item(), loss_x) + (loss_r if a.restart > 0 else ()))
         if step % 100 == 0 or step == a.steps:
             r = np.mean(run, 0); run = []
             msg = f"{step:5d} ce {r[0]:.3f} ball {r[1]:.3f} edge {r[2]:.3f} ptr {r[3]:.3f}  {time.time() - t0:.0f}s"
+            if a.restart > 0:
+                msg += f"  taker {r[4]:.3f} kind {r[5]:.3f} time {r[6]:.3f}"
             if step % 500 == 0 or step == a.steps:
                 msg += f"  val acc {frame_scores(net, val, a.teach):.3f}  test acc {frame_scores(net, test[:3], a.teach):.3f}"
             print(msg, flush=True)

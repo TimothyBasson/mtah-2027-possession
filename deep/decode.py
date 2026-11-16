@@ -87,7 +87,7 @@ def score_file(args):
     path, combos = args
     z = np.load(path)
     name = os.path.basename(path)[:-4]
-    d = np.load(os.path.join(ROOT, "data", "external", name + ".npz"))
+    d = np.load(D.match_path(name))
     spans = [tuple(h) for h in d["halves"]]
     truth = pm.label_codes(d["labels"])
     probs = [z[f"p{i}"] for i in range(len(spans))]
