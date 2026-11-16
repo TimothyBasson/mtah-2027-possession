@@ -25,15 +25,23 @@ sys.path.append(os.path.join(C.ROOT, "possession"))
 
 
 def bar_probs(touch, fold):
-    """(n, 2) touch probabilities on BAR-ATH, cached per detector."""
-    dst = os.path.join(C.TOUCH, "runs", touch, fold, "BAR-ATH.npz")
+    """(n, 2) touch probabilities on BAR-ATH, cached per detector. The cache records the sha256 of
+    the checkpoint that wrote it and is rebuilt when that differs; probabilities are kept at
+    float16 on both paths, so a fresh run and a cached run feed the decode the same numbers."""
+    import hashlib
     import load
     players, ball, team, halves = load.load()
     n = len(ball)
-    if os.path.exists(dst):
-        return np.load(dst)["q"].astype(np.float32), ball, halves
     committed = os.path.join(HERE, "models", touch + ".pt")  # the all-match detector; else a fresh tfit.py run
-    ck = torch.load(committed if fold == "none" and os.path.exists(committed) else os.path.join(C.TOUCH, "runs", touch, fold, "net.pt"), map_location="cpu")
+    path = committed if fold == "none" and os.path.exists(committed) else os.path.join(C.TOUCH, "runs", touch, fold, "net.pt")
+    with open(path, "rb") as fh:
+        sha = hashlib.sha256(fh.read()).hexdigest()
+    dst = os.path.join(C.TOUCH, "runs", touch, fold, "BAR-ATH.npz")
+    if os.path.exists(dst):
+        z = np.load(dst)
+        if "sha" in z.files and str(z["sha"]) == sha:
+            return z["q"].astype(np.float32), ball, halves
+    ck = torch.load(path, map_location="cpu")
     net = tfit.Net(len(ck["names"]), ck["d"])
     net.load_state_dict(ck["sd"])
     q = np.zeros((n, 2), np.float32)
@@ -41,10 +49,10 @@ def bar_probs(touch, fold):
         F, names = tfeats.rows(players[a:b + 1], team, ball[a:b + 1, :2].astype(np.float32), load.FPS)
         assert names == ck["names"]
         q[a:b + 1] = tfit.predict(net, F, tfeats.symmetry(names))
+    q = q.astype(np.float16)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    np.savez_compressed(dst, q=q.astype(np.float16))
-    return q, ball, halves
-
+    np.savez_compressed(dst, q=q, sha=np.array(sha))
+    return q.astype(np.float32), ball, halves
 
 def main():
     ap = argparse.ArgumentParser()
