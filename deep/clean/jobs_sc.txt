@@ -1,0 +1,10 @@
+# TAG FOLD [train.py options]: how best to use the SkillCorner games (deep/README.md "SkillCorner"). bt recipe throughout.
+# lcs0: no SkillCorner at all
+lcs0 metrica --steps 1500 --ptr 0.5 --share skillcorner=0
+lcs0 idsse --steps 1500 --ptr 0.5 --share skillcorner=0
+# lcaux: SkillCorner at a quarter of the windows, teaching through the ball targets only (its labels count for nothing)
+lcaux metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --label-weight skillcorner=0
+lcaux idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --label-weight skillcorner=0
+# lchead: SkillCorner at a quarter, its labels on a head of their own
+lchead metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --own-head skillcorner
+lchead idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --own-head skillcorner
