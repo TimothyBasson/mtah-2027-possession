@@ -19,6 +19,10 @@ still defaults to `bt`. Scripts in `deep/short/`, runs in `deep/jobs_short.txt`,
 `jobs_sp.txt`, `jobs_sp1.txt`, `jobs_fine.txt`; fold nets and probabilities in
 `/mnt/project-files/deep/{tb,pp,sw25,sw25s1,sw0,sp,sps1}/`.
 
+`deep/models/sp.pt` (opt-in, not the default; dropped as a replacement for `bt`) is
+`python deep/train.py --fold none --steps 2000 --ptr 0.5 --provw skillcorner=0.25 --spell 0.5 --tag sp`,
+seed 0, 1 thread (`deep/jobs_all.txt`).
+
 **What the labels allow (a measuring stick, never a labeller).** `--teach` trains the same net
 with the real ball as an input (`tb`). spellF1 on labels as given, shipped decode:
 
