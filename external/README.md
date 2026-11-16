@@ -251,6 +251,35 @@ dead frames and 12% of live ones. So IDSSE under `--seen` punishes "missing mean
 our match would.
 Scores also get no help from set-piece tags, because these matches have no Smart Tagging.
 
+## Stoppage edges from the BAR-ATH notes: `hmm.decode --hold-restart`, `edge_diag.py`, `edge_post.py`
+
+Notes taken while watching BAR-ATH under hmm_v9 (2026-11-16) flag five restarts called live 3-6 s
+before the kick (free kicks at 144205 and 148692, a goal kick at 37281, 18257, 121243), short
+possessions invented inside a stoppage (129496, 129744, 189462) and one before it (173370). The
+first group has one cause: the ball is put down and stays still with a player standing over it,
+and the gap clue reads that as possession. `hold_restarts` (hmm/decode.py, off by default) keeps
+the stoppage until a seen ball that was still (under 1 m/s for 0.5 s) is kicked (over 5 m/s)
+within 10 s.
+
+| | IDSSE | Metrica | SkillCorner | mean | fair | BAR-ATH public |
+|---|---|---|---|---|---|---|
+| v9 | 0.725 | 0.807 | 0.496 | 0.676 | 0.663 | 0.774 |
+| v9 + `--hold-restart` | 0.726 | 0.807 | 0.496 | 0.6765 | 0.663 | 0.787 |
+
+Held out it is flat in every setting tried (still 0.5-2 m/s, kick 3-5 m/s, 0.5-2 s still:
+0.6761-0.6765), because the outside providers hide or freeze the ball in a stoppage and the
+rule rarely fires there. On BAR-ATH it moves seven restarts by 1-6 s; the one inside the public
+window goes from 5.4 s early (18253 against 18389) to 1.0 s early, which lifts spellF1 at
+IoU 0.7. It does not reach throw-ins (the ball moves with the thrower) or restarts with the ball
+unseen (182589).
+
+Also measured, not kept: turning an H or A spell between two decoded stoppages into D. Under
+1.5 s it is flat (0.6762), from 2 s on it costs (2 s 0.6754, 3 s 0.6715). Spell errors on the
+held-out decodes (edge_diag.py dumps them) are mostly 2-5 s possessions of the other team, missed
+(IDSSE 116, Metrica 32, SkillCorner 293) and invented (30, 4, 428) in similar numbers, which is
+team-naming quality, not a boundary bias a rule can move. Restart timing on the outside matches
+is already within 0.3 s at the median.
+
 ## hmm_v9: the players-only net as a clue, `score_fuse.py`
 
     python external/control_features.py && python external/train_control.py --loso
