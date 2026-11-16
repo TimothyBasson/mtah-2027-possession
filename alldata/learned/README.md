@@ -276,6 +276,47 @@ score them; `deep/run.py --tags` remains the tested way to use set-piece tags); 
 net over all players with ball-relative inputs; finer time steps than 0.2 s; SoccerTrack as a
 fourth provider (it has no held-out players-only probabilities).
 
+## Where it loses, and what blending adds (2026-11-16)
+
+`diag.py --tag pw1e` on the shipped recipe's held-out folds (BAR-ATH-like balls, two seeds
+averaged; IDSSE / Metrica / SkillCorner / mean):
+
+| what the prediction is given | labels as built | folded labels |
+|---|---|---|
+| nothing (the model) | 0.652 / 0.781 / 0.416 / 0.616 | 0.747 / 0.824 / 0.518 / 0.696 |
+| the true stoppages | 0.655 / 0.763 / 0.455 / 0.624 | 0.750 / 0.803 / 0.552 / 0.702 |
+| the true possessions, the model naming each | 0.718 / 0.854 / 0.647 / 0.740 | 0.821 / 0.906 / 0.744 / 0.824 |
+| the true team on the frames it calls live | 0.963 / 0.934 / 0.874 / 0.924 | 0.959 / 0.930 / 0.859 / 0.916 |
+
+Stoppages are no longer where the score is: perfect ones add under 0.01. The loss is turnovers.
+True possessions found at IoU 0.5 by length, labels as built (IDSSE / Metrica / SkillCorner):
+under 2 s 16% / 28% / 5%, 2 to 5 s 54% / 78% / 31%, 5 to 10 s 78% / 89% / 51%, 10 to 20 s
+91% / 92% / 64%. Of the missed ones 46 to 49% carry the wrong team for most of their length and
+27 to 40% sit inside a longer predicted possession of their own team; edges and fragmentation
+are under 7% outside SkillCorner. One Metrica oddity: 25 of its 30 missed possessions over 20 s
+are mostly called dead.
+
+**Late blends with the other families add nothing** (`blend.py`). Every family read the same
+simulated ball (version 1): Tim's v8 through `tim_barlike.py`, the physics model
+(`alldata/physics`, PR 41) rebuilt and retrained held out by provider on balls dumped from
+`build.ball_version` (versions 1 and 2). Weighted mean of probabilities, weights fixed in
+advance, same decodes:
+
+| | labels as built | folded labels |
+|---|---|---|
+| this model (`pw1e`) | 0.616 | 0.696 |
+| physics alone / Tim's v8 labels alone | 0.547 / 0.501 | 0.641 / 0.594 |
+| + physics at 0.15 / 0.3 / 0.5 | 0.615 / 0.612 / 0.604 | 0.697 / 0.696 / 0.692 |
+| + Tim's v8 labels at 0.15 / 0.3 / 0.5 | 0.613 / 0.607 / 0.564 | 0.697 / 0.693 / 0.667 |
+| + Tim's classifier posteriors at 0.15 / 0.3 / 0.5 | 0.615 / 0.610 / 0.595 | 0.696 / 0.695 / 0.691 |
+| + both at 0.15 / 0.3 / 0.5 | 0.613 / 0.610 / 0.599 | 0.696 / 0.695 / 0.690 |
+
+No row clears +0.01, and none is up on every provider under both labellings. Tim's model fed to
+the network as an input (above, +0.007 / +0.009) remains the only form of combination that
+gains. Why (`union.py`): of the true possessions this model misses, Tim's v8 finds 6 to 13%,
+the physics model 6 to 8%, the players-only net 7 to 12%, and any of the three 16 to 18%. The
+families miss the same turnovers, so there is little for a blend to recover.
+
 ## Reproduce
 
 ```bash
