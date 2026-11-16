@@ -1,3 +1,0 @@
-# lcsws1: lcsw (SkillCorner at a quarter), second seed
-lcsws1 metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --seed 1
-lcsws1 idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --seed 1

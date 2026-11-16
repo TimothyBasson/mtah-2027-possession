@@ -12,6 +12,83 @@ python deep/run.py                     # BAR-ATH -> evaluation/results/deep.csv 
 python deep/explain.py --match all     # each stage's output, for viz/combined/make_combined.py --deep
 ```
 
+## sw (2026-11-16): trust SkillCorner's labels less, 0.558
+
+Asked: are the outside labels noisy, and does the model learn better from cleaner ones? Checked
+against each provider's own ball (`python deep/clean/diag.py`; the ball judges labels here,
+nothing else):
+
+| | IDSSE | Metrica | SkillCorner |
+|---|---|---|---|
+| H<->A changes with a touch by the gaining team within 0.25 s | 75% | 62% | 19% |
+| the same within 1 s | 81% | 70% | 45% |
+| label change minus that touch, quartiles (s) | -0.04, +0.04 | -0.28, -0.04 | -0.88, +0.32 |
+| live frames whose last touch was by the other team | 4.0% | 1.7% | 10.2% |
+| label names the other team while one team is clearly on the ball for 1 s or more | 2.8% | 1.0% | 6.7% |
+
+SkillCorner's labels (broadcast tracking, possession held through passes and loose balls,
+`external/build.py`) disagree with its ball two to four times as often as the others', and moving
+its changes onto touches removes little of that (10.2% to 9.5%): it is not a timing offset. It is
+20 of the 30 matches and, with providers drawn equally, half the training windows of the IDSSE
+and Metrica folds.
+
+Two remedies, each on the bt recipe, scored by `deep/fixed.py` on labels nobody changed (as built
+at the shipped decode; folded to the controlled-possession rule at 2 s / 3 s):
+
+- **`--share skillcorner=0.25`** (`lcsw`): SkillCorner is drawn for a quarter of the training
+  windows instead of half. In the all-30 model a quarter instead of a third.
+- **`--clean retime+lastmask+mask`** (`lccl`, `deep/clean/labels.py`): on training matches only,
+  every H<->A change moves to the gaining team's nearest touch within 1.5 s, and live frames the
+  ball contradicts (the last touch within 2 s was the other team's, or the other team is clearly
+  on the ball for 0.6 s or more) are left out of the loss. Applied to every training provider:
+  it leaves out 4% / 2% / 12% of live frames.
+
+spellF1, mean of two seeds unless said (IDSSE / Metrica / SkillCorner / provider mean):
+
+| | labels as built | folded labels |
+|---|---|---|
+| bt, bts1 | 0.582 / 0.651 / 0.403 / **0.545** | 0.692 / 0.735 / 0.498 / **0.641** |
+| SkillCorner at a quarter (`lcsw`, `lcsws1`) | 0.608 / 0.666 / 0.403 / **0.558** | 0.704 / 0.745 / 0.498 / **0.649** |
+| SkillCorner at a tenth (`lcsw10`, one seed) | 0.598 / 0.671 / n.a. | 0.689 / 0.742 / n.a. |
+| cleaned labels (`lccl`; one seed, SkillCorner two) | 0.600 / 0.665 / 0.410 / **0.558** | 0.700 / 0.738 / 0.503 / **0.647** |
+| both (`lccs`, `lccss1`; SkillCorner fold is `lccl`'s) | 0.602 / 0.669 / 0.410 / **0.560** | 0.700 / 0.745 / 0.503 / **0.649** |
+
+- **Down-weighting SkillCorner is a real gain on the other two providers**: both seeds are up on
+  all 10 IDSSE and Metrica matches as built (+0.021 and +0.023, standard error 0.004), 8 of 10
+  folded. bt's two seeds differ by 0.001. The SkillCorner fold trains on no SkillCorner, so its
+  score is bt's by construction: no provider is down, one cannot move.
+- **Cleaning gains about as much, and the two do not add.** Together they score what either
+  scores alone (0.560 against 0.558), within seed noise. Cleaning is the only one that moves the
+  SkillCorner fold: +0.007 as built on both seeds (15 and 14 of 20 matches up), from cleaner
+  IDSSE and Metrica labels. Reading: both work by taking weight off frames where SkillCorner's
+  label and the play disagree; cleaning does it frame by frame, the share does it wholesale.
+- **A tenth is no better than a quarter**: the folded gain goes on IDSSE. SkillCorner's matches
+  still teach something.
+- **Bar.** +0.013 to +0.015 as built with no provider down clears the +0.01 bar; on the folded
+  labels the gain is +0.007, below it. Team accuracy and alive/dead do not move (0.898 to 0.899,
+  0.939 to 0.938): as with bt, the gain is in where possessions start and end.
+- **Shipped as an option, not the default**: `deep/models/sw.pt` is the all-30 model on the
+  simpler recipe (`--fold none --steps 2000 --ptr 0.5 --share skillcorner=0.25`, seed 0, one
+  thread). `python deep/run.py --tag sw --out deep_sw.csv`. Cleaning needs the ball only to build
+  training labels, which the ball rule allows, but it adds a touch detector (`hmm.ball.detect_touches`,
+  as `external/control.py` uses for the folded yardstick; no possession model is involved) for no
+  further gain, so it stays a flag.
+- **BAR-ATH public 5 minutes, check only:** sw 0.745 with 12 possessions, bt 0.745 with 12
+  (truth 17); macroF1 0.900 against 0.904. Over the match the two agree on 97.3% of graded frames
+  (272 against 275 possessions, median 7.1 s both, 11% against 13% under 2 s, 46% against 45% dead).
+  The window cannot tell them apart; the 30 outside matches are the evidence.
+
+Not tried: folding SkillCorner's labels only; a noise-robust loss; the share in the SkillCorner
+fold's sense (weighting IDSSE against Metrica). Folding every provider's training labels was v4
+(not kept, IDSSE and Metrica down).
+
+```bash
+python deep/clean/diag.py                    # the table above
+python deep/clean/labels.py                  # what each cleaning rule changes, per provider
+sh deep/queue.sh deep/clean/jobs.txt         # every run above, three at a time, resumable
+python deep/fixed.py --tags bt bts1 lcsw lcsws1
+```
+
 ## bt (2026-11-14): taught by the ball, still blind to it, 0.540
 
 The ball may teach the model on the training matches; it may never be read when a match is

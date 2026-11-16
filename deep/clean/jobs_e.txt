@@ -1,5 +1,0 @@
-# lcswall: the all-30 model on the lcsw recipe (as bt.pt was trained: --fold none --steps 2000 --ptr 0.5)
-lcswall none --steps 2000 --ptr 0.5 --share skillcorner=0.25
-# lchy: SkillCorner at a quarter, IDSSE's and Metrica's labels cleaned, SkillCorner's left as they are
-lchy metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean retime+lastmask+mask --clean-prov idsse metrica
-lchy idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean retime+lastmask+mask --clean-prov idsse metrica

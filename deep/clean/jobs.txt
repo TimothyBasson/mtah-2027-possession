@@ -1,8 +1,23 @@
-# TAG FOLD [train.py options]: label-cleaning runs, all on the bt recipe (--steps 1500 --ptr 0.5).
-# lcsw: SkillCorner drawn for a quarter of the training windows instead of half (it is not in its own fold's training)
+# TAG FOLD [train.py options]: the label-quality runs of deep/README.md "sw", all on the bt recipe.
+#   sh deep/queue.sh deep/clean/jobs.txt
+# lcsw, lcsws1: SkillCorner drawn for a quarter of the training windows instead of half. The SkillCorner
+# fold trains on no SkillCorner, so its run is bt's own.
 lcsw idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25
 lcsw metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25
-# lccl: every training provider's labels retimed to touches, frames the ball contradicts left out of the loss
+lcsws1 metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --seed 1
+lcsws1 idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --seed 1
+# lcsw10: a tenth
+lcsw10 metrica --steps 1500 --ptr 0.5 --share skillcorner=0.1
+lcsw10 idsse --steps 1500 --ptr 0.5 --share skillcorner=0.1
+# lccl, lccls1: every training provider's labels retimed to touches, frames the ball contradicts left out of the loss
 lccl metrica --steps 1500 --ptr 0.5 --clean retime+lastmask+mask
 lccl idsse --steps 1500 --ptr 0.5 --clean retime+lastmask+mask
 lccl skillcorner --steps 1500 --ptr 0.5 --clean retime+lastmask+mask
+lccls1 skillcorner --steps 1500 --ptr 0.5 --clean retime+lastmask+mask --seed 1
+# lccs, lccss1: both together
+lccs metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean retime+lastmask+mask
+lccs idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean retime+lastmask+mask
+lccss1 metrica --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean retime+lastmask+mask --seed 1
+lccss1 idsse --steps 1500 --ptr 0.5 --share skillcorner=0.25 --clean retime+lastmask+mask --seed 1
+# lcswall: the all-30 model -> deep/models/sw.pt
+lcswall none --steps 2000 --ptr 0.5 --share skillcorner=0.25
