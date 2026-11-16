@@ -314,6 +314,16 @@ Tried on the way and not kept (one net, mean of the three):
 | without the width clue, or the hand-built clues at 0.15 | 0.673, 0.671 | flat |
 | control weight 0.1 to 0.3 beside the net | 0.669 to 0.674 | flat |
 
+**What ships is a near neighbour of what was measured.** The fold nets behind the tables are
+trained for 1,500 steps with a provider held out (`deep/jobs_v9.txt`); `bt.pt` and `sw25.pt` are
+trained for 2,000 steps on all 30 matches. On the SkillCorner fold `b2` is a second seed of
+`bt`, not the `sw25` recipe, since `sw25` only differs where SkillCorner is in training. And
+`hmm.net_clue.NET_PRIOR` counts the three providers equally, while `sw25` trains with
+SkillCorner's labels at a quarter weight, so its implied class shares differ a little (D 0.38
+against 0.35). No provider mean here has a bootstrap interval: with 3, 7 and 20 matches, the
+paired standard errors in the first table are what there is, and by them Metrica's drop is noise
+and SkillCorner's gain is small but consistent.
+
 **Not checked on BAR-ATH.** The gated data was not on the machine that did this work.
 `python -m hmm.decode` now needs torch (`requirements-deep.txt`) and writes `hmm_v9.csv`;
 `--no-net` gives v8. Before submitting, compare it with `hmm_v8.csv` and `deep.csv` on the

@@ -72,8 +72,18 @@ frame, as a log ratio against the class shares it was trained on, at NET_WEIGHT.
 most. Held out by provider the mean goes from 0.647 to 0.677 (IDSSE 0.644 to 0.728, Metrica 0.816
 to 0.807, SkillCorner 0.480 to 0.497; external/README.md). It needs torch (requirements-deep.txt).
 
+The weight was read off the held-out matches: picked for each provider on the other two the mean
+is 0.664. The nets that ship (2,000 steps on all 30 matches) are near neighbours of the fold nets
+those numbers come from (1,500 steps, a provider held out), not the same nets.
+
+    pip install -r requirements.txt -r requirements-deep.txt    # v9 needs torch (pinned)
     python -m hmm.decode                    # writes evaluation/results/hmm_v9.csv
-    python -m hmm.decode --no-net           # v8 again
+    python -m hmm.decode --no-net           # v8 again, no torch needed
+
+The net runs on one thread with torch pinned, so a rerun on the same machine does the same
+arithmetic. Across CPUs with different instruction sets the last bits of a probability can
+differ, and a near-tie in the Viterbi path could then move a boundary: the file has not been
+checked byte for byte on a second machine.
     python -m hmm.decode --no-control       # v6 again (v7 is commit fe457a3: its classifier read
                                             # columns the v8 features leave out)
     python -m hmm.decode --no-control --no-width   # v5 again
@@ -306,7 +316,10 @@ MIN_POSSESSION_SECONDS = 0.0
 # to the control clue. Two nets trained on all 30 outside matches, their probabilities averaged:
 # bt, and sw25 (bt with SkillCorner's labels at a quarter weight; deep/README.md). Held out by
 # provider, 0.3 is the best single weight and the score is within 0.005 of it from 0.2 to 0.4
-# (external/README.md).
+# (external/README.md). The 0.3 was read off the same matches it is scored on: 0.677 with it,
+# 0.664 with the weight picked for each provider on the other two, against v8's 0.647. Nearly all
+# of the gain is on IDSSE, whose ball is knocked out at random, which is not how BAR-ATH's goes
+# missing.
 NET_MODELS = tuple(os.path.join(ROOT, "deep", "models", name) for name in ("bt.pt", "sw25.pt"))
 NET_WEIGHT = 0.3
 
@@ -547,7 +560,11 @@ def load_net(model_paths=NET_MODELS, threads=1):
                  os.path.join(ROOT, "external")):
         if path not in sys.path:
             sys.path.insert(0, path)
-    import torch
+    try:
+        import torch
+    except ImportError:
+        sys.exit("hmm_v9 reads the players-only net and needs torch: pip install -r "
+                 "requirements-deep.txt (or uv sync --group deep), or pass --no-net for v8")
     import data as D
     import load
     from net import load_net as load_weights
