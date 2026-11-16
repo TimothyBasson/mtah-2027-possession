@@ -31,6 +31,8 @@ def main():
     ap.add_argument("--fine", nargs="+", default=["kbN", "kbNs1"])
     ap.add_argument("--m", type=float, default=0.1)
     ap.add_argument("--out", default="alldata_briefsafe_touch.csv")
+    ap.add_argument("--strict", action="store_true",
+                    help="keep the submission everywhere except team swaps the kink backs (its dead calls stay)")
     a = ap.parse_args()
     torch.set_num_threads(1)
     C = mod("contest_run", os.path.join(ROOT, "alldata", "contest", "run.py"))
@@ -59,7 +61,13 @@ def main():
         diff = (tb != tf) & (tf < 2)
         ok = F[:, km] * np.where(tf == 0, 1.0, -1.0) >= a.m
         use_base = diff & ~ok
-        p = pf.copy(); p[use_base] = pb[use_base]
+        if a.strict:
+            take = diff & ok & (tb < 2)
+            use_base = ~take
+            p = pb.copy(); p[take] = pf[take]
+            sent += (diff & ~take).sum() - use_base.sum()   # report disagreeing rows only
+        else:
+            p = pf.copy(); p[use_base] = pb[use_base]
         probs.append(p); sent += use_base.sum(); dis += diff.sum()
     print(f"rows where base and fine disagree {dis} of {sum(len(p) for p in probs)}; fine kept on {dis - sent}")
     os.makedirs(os.path.join(T.CACHE, "bar_ath"), exist_ok=True)

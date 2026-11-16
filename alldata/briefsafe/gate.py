@@ -20,6 +20,8 @@ ap.add_argument("A"); ap.add_argument("B"); ap.add_argument("out")
 ap.add_argument("--m", type=float, default=0.1)
 ap.add_argument("--mode", default="last", choices=["last", "either", "run", "org", "lastorg"])
 ap.add_argument("--con", default=CON)
+ap.add_argument("--strict", action="store_true",
+                help="keep A everywhere except rows where both name a team, they differ and the kink backs B")
 a = ap.parse_args()
 
 
@@ -38,6 +40,11 @@ def gate(pa, pb, C, names):
     if a.mode == "run":
         ok |= C[:, names.index("k_last_run")] * sgn > 0
     use_a = diff & ~ok
+    if a.strict:
+        take_b = diff & ok & (ta < 2)
+        out = pa.copy()
+        out[take_b] = pb[take_b]
+        return out, (diff & ~take_b).mean(), diff.mean()
     out = pb.copy()
     out[use_a] = pa[use_a]
     return out, use_a.mean(), diff.mean()
@@ -61,10 +68,8 @@ for f in sorted(glob.glob(os.path.join(RUNS, a.A, "*", "*.npz"))):
         ver = [vv for vv, kk in EVAL.items() if key.startswith(kk)][0]
         i = int(key[1:])
         C = c[f"F{ver}_{i}"]
-        n = min(len(C), len(za[k]))
-        o[k], ua, df = gate(za[k][:n], zb[k][:n], C[:n], names)
-        if len(za[k]) > n:
-            o[k] = np.concatenate([o[k], zb[k][n:]])
+        assert len(C) == len(za[k]) == len(zb[k]), (fn, k, len(C), len(za[k]), len(zb[k]))
+        o[k], ua, df = gate(za[k], zb[k], C, names)
         if k == "s0":
             stats.append((ua, df))
     os.makedirs(os.path.join(RUNS, a.out, fold), exist_ok=True)
