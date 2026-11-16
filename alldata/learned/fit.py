@@ -146,7 +146,8 @@ def batch(train, rng, B, T, a, sym):
     pw = np.array([fixed.get(k, rest) for k in provs])
     Xs, ys, es, ws, y2s = [], [], [], [], []
     while len(Xs) < B:
-        prov = provs[rng.choice(len(provs), p=pw / pw.sum())]
+        # no --share: the same draw as before the option existed, so earlier runs reproduce
+        prov = provs[rng.choice(len(provs), p=pw / pw.sum()) if fixed else rng.integers(len(provs))]
         ms = [m for m in train if m["provider"] == prov]
         m = ms[rng.integers(len(ms))]
         h = m["halves"][rng.integers(len(m["halves"]))]
