@@ -136,16 +136,20 @@ folded view, a 2 s / 1 s decode instead of this table's 2 s / 3 s.)
 
 - **Nothing beats a quarter by the bar.** The best alternative is +0.003 as built and -0.004
   folded, one seed. No second seeds were run because nothing came within reach of +0.01.
-- **The dose has a peak near a quarter.** As built everything from none to 35% is within 0.006;
-  on the folded view a quarter is ahead of both a tenth (-0.009) and 35% (-0.006), and of none
-  (-0.018). Half is worst as built.
+- **Nothing measurably better than a quarter; not proof that a quarter is the optimum.** As
+  built everything from none to 35% is within 0.006, which is noise at one seed. On the folded
+  view a quarter is ahead of a tenth (-0.009), 35% (-0.006) and none (-0.018); only the last is
+  clearly outside noise. Half is worst as built.
 - **SkillCorner's labels are worth keeping at low weight.** Leaving the games out, or keeping the
   games and ignoring their H/A labels, costs 0.011 to 0.018 folded against a quarter. Its
   possessions are long (median 5.8 s) and that seems to teach the cutting the control rule
   wants, even though its turnovers are badly timed. (`lcaux` still reads SkillCorner's live/dead
   labels to decide where the ball targets apply, so it is not a pure ball-only control.)
-- **Share of windows and weight of labels are the same lever**: `sw` and `sw25` agree to 0.002.
-  So the gain is not from seeing less of SkillCorner's tracking.
+- **Share of windows and weight of labels look like the same lever**: as built, `sw` and
+  `sw25` agree to 0.002. The folded columns are not like for like (see the note under the
+  table), so that is the only comparison this rests on. If it holds, the gain is not from seeing
+  less of SkillCorner's tracking. (`--label-weight` and `--provw` are the same computation only
+  at `--spell 0`: with `--spell` above 0, `--provw` leaves the edge loss at full weight.)
 - **A separate label head does not help.** The idea was that SkillCorner's way of cutting would
   stay in its own head; the shared network learns it anyway. (With `--own-head` the provider's
   turnover edges train nothing either.)

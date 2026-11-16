@@ -277,7 +277,7 @@ def main():
     ap.add_argument("--label-weight", nargs="*", default=[],
                     help="provider=weight of its windows in the label losses, e.g. skillcorner=0: the provider "
                          "still teaches through the ball targets (gated by its live/dead labels), its H/A labels "
-                         "count less or not at all; --provw is the same lever from another thread")
+                         "count less or not at all; equivalent to --provw only at --spell 0")
     ap.add_argument("--own-head", nargs="*", default=[],
                     help="providers whose labels train a label head of their own on the shared network; "
                          "prediction uses the main head; their turnover edges train nothing either")
