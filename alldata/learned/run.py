@@ -1,7 +1,8 @@
 """Label BAR-ATH with the all-data model and write the submission.
 
-    python alldata/learned/run.py                     # the submission: evaluation/results/alldata_learned_tim.csv
-    python alldata/learned/run.py --tags pwN pwNs1 --out alldata_learned.csv   # fallback, independent of hmm/
+    python alldata/learned/run.py                     # the submission: evaluation/results/alldata_learned_tim_touch.csv
+    python alldata/learned/run.py --no-touch --out alldata_learned_tim.csv    # the earlier submission, without touches
+    python alldata/learned/run.py --tags pwN pwNs1 --out alldata_learned_touch.csv   # fallback, independent of hmm/
     python alldata/learned/run.py --features          # BAR-ATH's feature cache (before fit.py --fold none)
 
 The default nets (tpsN, tpsNs1) read Tim's hmm/ v8 as an input: its decoded labels and its control
@@ -9,7 +10,10 @@ classifier's posteriors on BAR-ATH. When those are not cached, this script first
 `python -m hmm.decode --no-net` (v8, unchanged) and tim.py --bar. The fallback nets do not read them.
 
 Averages the probabilities of the named runs' all-match nets (train.py --fold none), decodes
-them as deep/run.py does, and writes evaluation/results/<out>. Reads BAR-ATH's players and
+them as deep/run.py does, and writes evaluation/results/<out>. The decode also reads the touches
+that alldata/touch's detector (alldata/touch/models/t1.pt) sees on BAR-ATH's ball: after each
+touch that team's log-probability is raised until the next touch or 3 s (alldata/touch/README.md;
+held out 0.626 / 0.704 against 0.616 / 0.696). --no-touch leaves them out. Reads BAR-ATH's players and
 ball, and the players-only net's probabilities (deep/models/bt.pt). No ground truth is read.
 """
 
@@ -114,7 +118,8 @@ def probabilities(tags, Fs, names):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tags", nargs="+", default=["tpsN", "tpsNs1"])
-    ap.add_argument("--out", default="alldata_learned_tim.csv")
+    ap.add_argument("--out", default="alldata_learned_tim_touch.csv")
+    ap.add_argument("--no-touch", action="store_true", help="decode without the touch detector's evidence (the file before 2026-11-16 evening)")
     ap.add_argument("--head", default="both", choices=["both", "built", "folded"],
                     help="both (the file), or one head alone, to compare them on BAR-ATH")
     ap.add_argument("--features", action="store_true", help="only build BAR-ATH's feature cache")
@@ -135,7 +140,15 @@ def main():
     probs = probabilities(a.tags, Fs, names)
     os.makedirs(os.path.join(T.CACHE, "bar_ath"), exist_ok=True)
     np.savez_compressed(os.path.join(T.CACHE, "bar_ath", "+".join(a.tags) + ".npz"), **{f"p{i}": p for i, p in enumerate(probs)})
-    pred = decode.labels_from(probs, halves, n, **DECODE)
+    if a.no_touch:
+        pred = decode.labels_from(probs, halves, n, **DECODE)
+    else:
+        sys.path.insert(0, os.path.join(ROOT, "alldata", "touch"))
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("touch_run", os.path.join(ROOT, "alldata", "touch", "run.py"))
+        touch_run = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(touch_run)
+        pred = touch_run.labels_with_touches(probs, halves, n, DECODE)
     for (s, _), kick in zip(halves, KICKOFF_VIDEO_FRAMES.values()):
         pred[s:kick] = "D"
     print("wrote", write_submission(os.path.join(RESULTS_DIR, a.out), pred))
