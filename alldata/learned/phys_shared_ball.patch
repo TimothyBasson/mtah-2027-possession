@@ -1,0 +1,16 @@
+diff --git a/alldata/physics/common.py b/alldata/physics/common.py
+index c949efb..062cf5c 100644
+--- a/alldata/physics/common.py
++++ b/alldata/physics/common.py
+@@ -133,6 +133,11 @@ def shown_ball(d, mode="native", seed=0):
+     """The ball as the model is shown it: (n, 3) with NaN where hidden. mode: native | barath |
+     recorded (see the module docstring)."""
+     ball = d["ball"].astype(np.float64).copy()
++    if mode == "learned":  # alldata/learned's simulated ball, version seed + 1, so both models read the same ball
++        xy = np.load(os.path.join(CACHE, "learned_ball", f"{d['name']}.v{seed + 1}.npy")).astype(np.float64)
++        ball[:, :2] = xy
++        ball[~np.isfinite(xy[:, 0])] = np.nan
++        return ball
+     prov = provider(d["name"])
+     fps = d["fps"]
+     n = len(ball)
