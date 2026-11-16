@@ -7,11 +7,15 @@ is changed. The sibling folder `alldata/physics/` attacks the same goal with rul
 ```bash
 pip install -r requirements-deep.txt
 python alldata/learned/run.py            # BAR-ATH -> evaluation/results/alldata_learned.csv
+python alldata/learned/run.py --tags tpsN tpsNs1 --out alldata_learned_tim.csv   # the with-Tim file
 ```
 
-`run.py` uses the two committed nets in `models/` (`psN`, `psNs1`) and `deep/models/bt.pt`. Two
-runs give the same file (sha256 `0c1ce4a7...c58b935`), and it passes
-`evaluation/validate_submission.py`. It reads no ground truth.
+`run.py` uses the two committed nets in `models/` (`pwN`, `pwNs1`) and `deep/models/bt.pt`. Two
+runs give the same file (sha256 `8a3e1bc4...8438db63`), and it passes
+`evaluation/validate_submission.py`. It reads no ground truth. The with-Tim file (sha256
+`75139e82...d6ec5b762`) also needs `evaluation/results/hmm_v8.csv` and his control classifier
+(`tim.py --bar`). The first file of this folder (`--tags psN psNs1`, sha256 `0c1ce4a7...c58b935`)
+is still reproducible from its committed nets.
 
 ## The result in one table
 
@@ -25,19 +29,33 @@ below); that is the row to believe for BAR-ATH.
 | none | players-only `deep/` bt | 0.582 | 0.651 | 0.402 | 0.545 | 0.641 |
 | BAR-ATH-like | first model, trained on balls as recorded (`c1`) | 0.486 | 0.592 | 0.401 | 0.493 | 0.601 |
 | BAR-ATH-like | trained on BAR-ATH-like balls (`s1`, `s1s1`) | 0.627 | 0.758 | 0.409 | 0.598 | 0.688 |
-| BAR-ATH-like | **that, adapted to the unseen provider without labels (`ps1`, `ps1s1`)** | 0.631 | 0.759 | 0.416 | **0.602** | **0.692** |
+| BAR-ATH-like | that, adapted to the unseen provider without labels (`ps1`, `ps1s1`) | 0.631 | 0.759 | 0.416 | 0.602 | 0.692 |
+| BAR-ATH-like | SkillCorner drawn for a quarter of training windows (`w1`, `w1s1`) | 0.648 | 0.781 | 0.409 | 0.613 | 0.688 |
+| BAR-ATH-like | **that, adapted (`pw1`, `pw1s1`)** | 0.652 | 0.781 | 0.416 | **0.616** | **0.696** |
+| BAR-ATH-like | Tim's `hmm/` v8 (`bench.py 1`) | 0.475 | 0.612 | 0.425 | 0.504 | 0.590 |
+| BAR-ATH-like | with Tim's v8 as an input (`ts1`, `ts1s1`) | 0.680 | 0.761 | 0.405 | 0.615 | 0.700 |
+| BAR-ATH-like | with Tim's v8 as an input, adapted (`tps1`, `tps1s1`) | 0.687 | 0.767 | 0.416 | 0.623 | 0.705 |
 | as recorded | Tim's `hmm/` v8 (`bench.py`) | 0.666 | 0.760 | 0.420 | 0.615 | 0.673 |
 | as recorded | trained on balls as recorded (`c1`, `c1s1`) | 0.679 | 0.832 | 0.394 | 0.635 | 0.707 |
 | as recorded | that, adapted (`p1`, `p1s1`) | 0.698 | 0.860 | 0.401 | 0.653 | 0.718 |
 | as recorded | with Tim's v8 as an input (`t1`, `t1s1`) | 0.740 | 0.839 | 0.402 | 0.661 | 0.724 |
 | as recorded | with Tim's v8 as an input, adapted (`tp1`, `tp1s1`) | 0.752 | 0.859 | 0.412 | 0.674 | 0.732 |
 
-The model that labels BAR-ATH is the bold row: +0.057 over the players-only model on the labels
-as built and +0.051 on the folded labels, ahead on all three providers and on 26 to 27 of the 30
-matches (standard error of the paired difference 0.006). Seed to seed the mean moves by up to
-0.01.
+The model that labels BAR-ATH is the bold row: +0.071 over the players-only model on the labels
+as built and +0.055 on the folded labels, ahead on all three providers and on 26 to 27 of the 30
+matches (standard error of the paired difference 0.006 to 0.008). Seed to seed the mean moves by
+up to 0.01.
 
-The shipped file averages the model's two output heads (below), which scores 0.599 / 0.687.
+**SkillCorner's share.** The thread "Clean up noisy training labels" (PR 42) found SkillCorner's
+labels to be the noisy ones and gained by drawing its matches for only a quarter of the training
+windows. The same here (`fit.py --share skillcorner=0.25`, `final_share.sh`): against the row
+above it, IDSSE +0.021 / +0.009 and Metrica +0.022 / +0.002, 9 of those 10 matches up. The
+SkillCorner fold has no SkillCorner in training, so it cannot move and its 20 matches are ties;
+the mean gain is +0.014 / +0.004. For the BAR-ATH nets, trained on all three providers, the share
+goes from a third to a quarter.
+
+The shipped file averages the model's two output heads (below), which scores 0.609 / 0.692
+(0.599 / 0.687 before the share change).
 
 ## What it is
 
@@ -177,19 +195,24 @@ the players-only net's (25% or 50%) changes nothing (0.597 / 0.687 and 0.594 / 0
 
   | file | possessions | median length | under 2 s | per live minute | dead | stoppages |
   |---|---|---|---|---|---|---|
-  | this model | 104 / 140 | 10.2 / 6.8 s | 6% / 11% | 3.7 / 5.2 | 47% / 49% | 49 / 62 |
+  | this model | 108 / 141 | 9.4 / 7.1 s | 6% / 10% | 3.8 / 5.2 | 47% / 49% | 52 / 64 |
+  | this model before the share change (`psN`) | 104 / 140 | 10.2 / 6.8 s | 6% / 11% | 3.7 / 5.2 | 47% / 49% | 49 / 62 |
+  | with Tim's v8 as an input | 131 / 150 | 7.6 / 7.4 s | 13% / 10% | 4.5 / 5.3 | 45% / 46% | 53 / 65 |
   | players-only `deep` bt | 126 / 149 | 7.5 / 6.6 s | 13% / 13% | 4.3 / 5.3 | 44% / 47% | 46 / 55 |
   | `hmm_v8` | 127 / 137 | 8.0 / 7.8 s | 10% / 10% | 4.4 / 5.0 | 46% / 48% | 50 / 60 |
 
-  The public window has 4.2 possessions per live minute. This model agrees with the players-only
+  The public window has 4.2 possessions per live minute. The file agrees with the one before
+  the share change on 98% of graded frames. The rest of this section was measured on that
+  earlier file (`psN`); the public-window line is given for both. That earlier model agrees with the players-only
   file on 91.7% of graded frames where the ball is seen and 91.4% where it is not, and with
   `hmm_v8` on 88.7% and 93.6%. All three call 85 to 89% of ball-unseen frames dead and 17 to 19%
   of ball-seen frames dead.
 - The two heads on BAR-ATH (`run.py --head built|folded`): 110 / 153 possessions from the head
   taught on labels as built, 102 / 136 from the folded head, 104 / 140 from their average; each
   agrees with the average on over 99% of frames, so the choice of head moves little here.
-- Public 5 minutes, a check and not a yardstick (17 possessions): spellF1 0.648 (bootstrap
-  interval 0.46 to 0.82), macroF1 0.913; the players-only file 0.745 (0.52 to 0.90) and 0.904;
+- Public 5 minutes, a check and not a yardstick (17 possessions): spellF1 0.653 (bootstrap
+  interval 0.45 to 0.83), macroF1 0.905; before the share change 0.648 (0.46 to 0.82) and 0.913;
+  the with-Tim file 0.613 (0.44 to 0.79) and 0.846; the players-only file 0.745 (0.52 to 0.90) and 0.904;
   `hmm_v8` 0.679 (0.50 to 0.85) and 0.861. Possession by possession the whole gap to the
   players-only file is the first hand-over of the match: the truth gives the ball to Barcelona
   at frame 11,351, this model 5.4 s later and `hmm_v8` 4.9 s later, the players-only net 0.2 s
@@ -204,13 +227,28 @@ the players-only net's (25% or 50%) changes nothing (0.597 / 0.687 and 0.594 / 0
 
 `tim.py` runs `hmm/` v8 unchanged and hands its decoded labels and its control classifier's
 posteriors to the network as six extra columns; held out, his classifier is the one trained
-without the match's provider (his own protocol). On balls as recorded this is the best row of
-the table (0.674 / 0.732 adapted), almost all of it from IDSSE (+0.05 to +0.06); Metrica, the
-provider closest to BAR-ATH, does not move. It has **not** been re-measured on BAR-ATH-like
-balls: his classifier's held-out models are not saved, and re-fitting them on smoothed balls
-takes about an hour. The physics thread measured v8 itself on its BAR-ATH-like matches at 0.499
-/ 0.592 and found no gain from it as an input. So no with-Tim file is offered for BAR-ATH yet;
-the independent model is the one shipped. `fit.py` without `--drop-cols tim` trains the variant.
+without the match's provider (his own protocol). Nothing of his is modified.
+
+On balls as recorded this is the best row of the table (0.674 / 0.732 adapted). On BAR-ATH-like
+balls it had to be measured again, because his model reads the ball too: `tim_barlike.py` builds
+his features on the same smoothed, hidden balls (versions 1 to 3), refits his held-out
+classifiers and decodes, and `final_tim.sh` trains on those inputs.
+
+- His v8 alone drops from 0.615 / 0.673 to 0.504 / 0.590 on BAR-ATH-like balls, under the
+  players-only model (the physics thread measured 0.499 / 0.592).
+- As an input it still helps: 0.623 / 0.705 adapted, against 0.602 / 0.692 without it and the
+  same sampling, and 0.616 / 0.696 for the shipped model. All of that is IDSSE (0.687 against
+  0.631 and 0.652). Metrica, the provider whose tracking BAR-ATH's is, goes 0.767 against 0.759
+  and 0.781, and SkillCorner is level. With the file's averaged heads: 0.617 / 0.696 against
+  0.609 / 0.692.
+- On BAR-ATH his inputs come from his own file on the real ball (`hmm_v8.csv`), not from a
+  simulation. The with-Tim file has more and shorter possessions (131 / 150 a half) and agrees
+  with the shipped file on 95% of graded frames.
+
+So the with-Tim file (`alldata_learned_tim.csv`, nets `tpsN`, `tpsNs1`) is offered as a second
+file, not the main one: its mean gain is under 0.01 and comes from one provider, and it makes
+the result depend on his pipeline. `final_both.sh` trains the two changes together (SkillCorner's
+share and his inputs).
 
 ## Tried and not kept
 
@@ -235,12 +273,18 @@ python alldata/learned/tim.py && python -m hmm.decode && python alldata/learned/
 python alldata/learned/build.py          # feature cache, 30 matches, about 3 minutes
 python alldata/learned/run.py --features # BAR-ATH's rows
 sh alldata/learned/final.sh              # held-out folds and the BAR-ATH nets, about 1.5 h on 4 CPUs
-python alldata/learned/score.py --tags deep:bt s1e ps1e --key s
+sh alldata/learned/final_share.sh        # the same with SkillCorner's share at a quarter: the shipped nets
+python alldata/learned/tim_barlike.py features && python alldata/learned/tim_barlike.py decode
+python alldata/learned/build.py && sh alldata/learned/final_tim.sh   # the with-Tim nets
+python alldata/learned/score.py --tags deep:bt ps1e pw1e tps1e --key s
 python alldata/learned/run.py
 ```
+
+Training has not been repeated from a clean clone; the files come from the committed nets, and
+two runs of `run.py` agree byte for byte.
 
 `build.py` needs the players-only probabilities of `deep/` (tags `bt`, per fold) under
 `data/cache/deep/bt/`; they are in `/mnt/project-files/deep/bt/`. Tags: `a*`, `b*`, `c*`, `p*`,
 `t*`, `tp*` were trained on balls as recorded (the feature cache of that time; rebuild with
-`feats.bar_like` bypassed to repeat them), `s*` and `ps*` on BAR-ATH-like balls; a trailing `N`
+`feats.bar_like` bypassed to repeat them), `s*`, `ps*`, `w*`, `pw*`, `ts*`, `tps*` on BAR-ATH-like balls; a trailing `N`
 is the net trained on all 30 matches, `s1` a second seed, `e` an average of seeds (`ens.py`).
