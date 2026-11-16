@@ -5,6 +5,8 @@ merges the possessions either side, so one miss costs up to three. This folder a
 the ball: detect the touches themselves from the smoothed ball's change of velocity beside a
 player, then use them in the decode and as an input.
 
+**Status.** The submission since 2026-11-16 18:34Z (Gambtt: "yes make it the sub"): `python alldata/learned/run.py` writes `alldata_learned_tim_touch.csv`.
+
 **Result.** A learned touch detector works on the smoothed ball and on an unseen provider, and
 as decode evidence it adds **+0.010 / +0.008** (as built / folded) without retraining anything;
 read by the net as well, +0.015 / +0.012. No provider goes down. Most merges stay: which
@@ -82,8 +84,8 @@ Home touches it sees the 0.8 s one (score 0.97) and not the 1.3 s one.
     python alldata/touch/tuse.py --tag pw1e [--kind val] [--v 4]
     python alldata/touch/tinsert.py; python alldata/touch/tgate.py
     python alldata/touch/textra.py --touch t1 && sh alldata/learned/folds.sh xpw1 --drop-cols tim --share skillcorner=0.25 --extra data/cache/alldata/touch/extra/t1 --pseudo w1e
-    python alldata/touch/run.py               # BAR-ATH: submission nets (tpsN, tpsNs1) + touch evidence
-    python alldata/touch/run.py --weight 0    # reproduces alldata_learned_tim.csv byte for byte (75139e82...)
+    python alldata/learned/run.py             # BAR-ATH: submission nets (tpsN, tpsNs1) + touch evidence (run.py here)
+    python alldata/learned/run.py --no-touch --out alldata_learned_tim.csv   # the earlier file byte for byte (75139e82...)
 
 BAR-ATH files (copies in `/mnt/project-files/alldata/touch/`): `alldata_learned_tim_touch.csv`
 (sha256 e9f09d6a...), `alldata_learned_touch.csv` (plain all-data nets + evidence, 7ca261ee...).
