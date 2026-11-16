@@ -48,7 +48,8 @@ def main():
     from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES
     probs, halves, n = probabilities(a.tag)
     os.makedirs(os.path.join(ROOT, "data", "cache", "deep", a.tag), exist_ok=True)
-    np.savez_compressed(os.path.join(ROOT, "data", "cache", "deep", a.tag, "bar_ath_probs.npz"),
+    import load
+    np.savez_compressed(os.path.join(ROOT, "data", "cache", "deep", a.tag, f"bar_ath_probs{load.cache_suffix()}.npz"),
                         **{f"p{i}": p for i, p in enumerate(probs)})
     pred = decode.labels_from(probs, halves, n, **DECODE)
     if a.tags:  # not players-only: Metrica's automatic set-piece tags, where the model shows no stoppage

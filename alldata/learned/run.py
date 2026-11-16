@@ -13,7 +13,8 @@ Averages the probabilities of the named runs' all-match nets (train.py --fold no
 them as deep/run.py does, and writes evaluation/results/<out>. The decode also reads the touches
 that alldata/touch's detector (alldata/touch/models/t1.pt) sees on BAR-ATH's ball: after each
 touch that team's log-probability is raised until the next touch or 3 s (alldata/touch/README.md;
-held out 0.626 / 0.704 against 0.616 / 0.696). --no-touch leaves them out. Reads BAR-ATH's players and
+held out 0.626 / 0.704 against 0.616 / 0.696). --no-touch leaves them out. BAR-ATH's keeper slots are
+corrected on load (possession/keepers.py); --raw-keepers reads them as delivered. Reads BAR-ATH's players and
 ball, and the players-only net's probabilities (deep/models/bt.pt). No ground truth is read.
 """
 
@@ -47,7 +48,8 @@ def head(q):
 
 def bt_probabilities():
     """The players-only net on BAR-ATH (deep/run.py's probabilities), cached."""
-    f = os.path.join(ROOT, "data", "cache", "deep", "bt", "bar_ath_probs.npz")
+    import load
+    f = os.path.join(ROOT, "data", "cache", "deep", "bt", f"bar_ath_probs{load.cache_suffix()}.npz")
     if not os.path.exists(f):
         import importlib.util
         spec = importlib.util.spec_from_file_location("deep_run", os.path.join(ROOT, "deep", "run.py"))
@@ -123,7 +125,12 @@ def main():
     ap.add_argument("--head", default="both", choices=["both", "built", "folded"],
                     help="both (the file), or one head alone, to compare them on BAR-ATH")
     ap.add_argument("--features", action="store_true", help="only build BAR-ATH's feature cache")
+    ap.add_argument("--raw-keepers", action="store_true",
+                    help="BAR-ATH's keeper slots as delivered, not corrected (possession/keepers.py): the file before 2026-11-16 19:30Z")
     a = ap.parse_args()
+    if a.raw_keepers:
+        import load
+        load.KEEPERS = False
     if a.features:
         tim_ready()
         features(with_tim=True)
