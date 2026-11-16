@@ -297,7 +297,13 @@ under 2 s 16% / 28% / 5%, 2 to 5 s 54% / 78% / 31%, 5 to 10 s 78% / 89% / 51%, 1
 91% / 92% / 64%. Of the missed ones 46 to 49% carry the wrong team for most of their length and
 27 to 40% sit inside a longer predicted possession of their own team; edges and fragmentation
 are under 7% outside SkillCorner. One Metrica oddity: 25 of its 30 missed possessions over 20 s
-are mostly called dead.
+are mostly called dead. Those are stretches labelled live in which the ball as recorded is
+missing (60 to 100% of each, up to 130 s on end). The Metrica samples' labels come from events,
+live until the next ball-out, foul or shot-out, so a stoppage without such an event stays live.
+The players-only net, which never sees the ball, calls 59% of Metrica's live frames with a
+hidden ball dead as well (this model 67%; IDSSE 11% and 16%), and handing hidden-ball frames to
+the players-only net changes nothing at half weight (0.617 / 0.696) and loses at full weight
+(0.608 / 0.689). So this is mostly Metrica's labelling, not a decode fault.
 
 **Late blends with the other families add nothing** (`blend.py`). Every family read the same
 simulated ball (version 1): Tim's v8 through `tim_barlike.py`, the physics model
