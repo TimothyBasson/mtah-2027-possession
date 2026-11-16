@@ -327,7 +327,7 @@ NET_WEIGHT = 0.3
 # while the ball, seen, stays still (under RESTART_STILL m/s for RESTART_MIN_STILL s) and is then
 # kicked (over RESTART_KICK m/s) within RESTART_WAIT s, the stoppage is held until the kick
 # (hold_restarts). The gap clue reads a player standing over a placed free kick or goal kick as
-# possession; the BAR-ATH notes (2026-11-16) flag five restarts called 3-6 s early that way.
+# possession; video notes on BAR-ATH (2026-11-16) flag restarts called 3-6 s early that way.
 # Optional (--hold-restart). Held out by provider it is flat: 0.726 / 0.807 / 0.496 against
 # v9's 0.725 / 0.807 / 0.496, since the outside providers hide or freeze the ball in a stoppage
 # and the rule rarely fires there; spellF1 averages IoU 0.3-0.7, so a few seconds at the start of
@@ -509,14 +509,19 @@ def ball_speed(ball_x, ball_y, fps, smooth=0.4):
 def hold_restarts(labels, ball_x, ball_y, fps, still=RESTART_STILL, kick=RESTART_KICK,
                   min_still=RESTART_MIN_STILL, wait=RESTART_WAIT, max_missing=RESTART_MAX_MISSING):
     """Copy of a label path with each D -> H/A change moved to the kick, where the ball is seen
-    still after the change and then kicked within `wait` s (see RESTART_STILL). Only the frames
-    of the spell that follows the stoppage are turned to D, never past its end."""
+    still after the change and then kicked within `wait` s and before that spell ends (see
+    RESTART_STILL). The spell's start moves to the kick; a spell is never removed."""
     out = np.array(labels, copy=True)
     speed = ball_speed(ball_x, ball_y, fps)
     n = len(out)
     for i in np.flatnonzero((out[:-1] == "D") & np.isin(out[1:], ["H", "A"])) + 1:
         j, missing, n_still = i, 0, 0
-        end = min(n, i + int(wait * fps))
+        spell_end = i
+        while spell_end < n and out[spell_end] == out[i]:
+            spell_end += 1
+        # the kick must fall inside the spell that follows the stoppage: a spell is moved, never
+        # removed
+        end = min(spell_end, i + int(wait * fps))
         while j < end:
             if np.isnan(speed[j]):
                 missing += 1
@@ -529,11 +534,7 @@ def hold_restarts(labels, ball_x, ball_y, fps, still=RESTART_STILL, kick=RESTART
                 break
             j += 1
         if j < end and speed[j] >= kick and n_still >= min_still * fps:
-            team = out[i]
-            k = i
-            while k < j and out[k] == team:
-                out[k] = "D"
-                k += 1
+            out[i:j] = "D"
     return out
 
 
@@ -881,6 +882,16 @@ def main():
                                         halves=graded_segments())[:2]
         held = hold_restarts(labels, ball_x, ball_y, FPS)
         print("hold_restarts: {} frames turned to D".format(int(np.sum(held != labels))))
+        # every firing, label-free check: the nearest Smart Tagging set piece to the new restart
+        pieces = [t["start_frame"] for t in load_smart_tagging() if t["code"].lower() == "set pieces"]
+        moved = np.flatnonzero((held != labels)[1:] & ~(held != labels)[:-1]) + 1
+        for a in moved:
+            b = a
+            while b < len(held) and held[b] != labels[b]:
+                b += 1
+            near = min(pieces, key=lambda f: abs(f - b)) if pieces else None
+            print("  restart {} -> {} (+{:.1f} s); nearest tagged set piece {}".format(
+                a, b, (b - a) / FPS, "none" if near is None else "{:+.1f} s".format((near - b) / FPS)))
         labels = held
     ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),
                                            ("_cw{:g}".format(args.control_weight),
