@@ -54,6 +54,12 @@ SkillCorner fold has no SkillCorner in training, so it cannot move and its 20 ma
 the mean gain is +0.014 / +0.004. For the BAR-ATH nets, trained on all three providers, the share
 goes from a third to a quarter.
 
+How much to read into it: 0.25 is the only share tried here. It was taken from PR 42, which
+tried 0.25 and 0.10 on the players-only net on these same folds, so the choice is not fully
+independent of the matches it is scored on. The gain on labels as built is about two standard
+errors and on the folded labels it is inside seed noise. Read it as no worse and probably a
+little better; the reason to ship it is PR 42's finding about SkillCorner's labels.
+
 The shipped file averages the model's two output heads (below), which scores 0.609 / 0.692
 (0.599 / 0.687 before the share change).
 
@@ -244,11 +250,16 @@ classifiers and decodes, and `final_tim.sh` trains on those inputs.
 - On BAR-ATH his inputs come from his own file on the real ball (`hmm_v8.csv`), not from a
   simulation. The with-Tim file has more and shorter possessions (131 / 150 a half) and agrees
   with the shipped file on 95% of graded frames.
+- A mismatch the held-out rows do not measure: in training and held out his outputs come from
+  simulated balls, where his model is weak (0.504 / 0.590), and on BAR-ATH they come from the
+  real ball, where it may be stronger. The net's trust in those columns is set for the weaker
+  case, so 0.623 / 0.705 does not carry over to BAR-ATH the way the shipped model's number is
+  meant to.
 
 So the with-Tim file (`alldata_learned_tim.csv`, nets `tpsN`, `tpsNs1`) is offered as a second
 file, not the main one: its mean gain is under 0.01 and comes from one provider, and it makes
 the result depend on his pipeline. `final_both.sh` trains the two changes together (SkillCorner's
-share and his inputs).
+share and his inputs); it has not finished, no result or net of it is in this folder.
 
 ## Tried and not kept
 
