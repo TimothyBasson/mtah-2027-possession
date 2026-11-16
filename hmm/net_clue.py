@@ -5,7 +5,7 @@ p(H, A, D) for every 5th frame. log_ratio() turns that into a scaled likelihood,
 hmm/control.py does for the control classifier, and the decoder adds it to its log emissions at
 NET_WEIGHT (hmm/decode.py). The two models err in different places: the classifier follows the
 ball and is lost where the ball is missing, the net reads all 22 players and is blind to short
-possessions. Held out by provider the sum scores 0.674 against 0.647 for v8 (external/README.md).
+possessions. Held out by provider the sum scores 0.677 against 0.647 for v8 (external/README.md).
 
 Tried and not kept: the net's outputs as columns of the control classifier instead
 (net_outputs(), half_columns(), external/net_features.py, train_control.py --net): its p(H, A, D),

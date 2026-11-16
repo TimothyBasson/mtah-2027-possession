@@ -9,6 +9,7 @@ uv run python external/build.py            # -> data/external/*.npz (gitignored,
 uv run python external/score.py --seen 0.59 [param=value ...]
 uv run python external/score_hmm.py --seen 0.59   # the HMM decoder in hmm/, and smooth50 (all three sets)
 uv run python external/score_control.py           # hmm_v8 against hmm_v6, raw and folded labels (below)
+uv run python external/score_fuse.py --tag bt,b2  # hmm_v9: v8 plus the players-only net (below)
 ```
 
 | set | matches | tracking | label source |
@@ -249,6 +250,75 @@ which is the dead-ball pattern. Metrica shows the same pattern: there the ball i
 dead frames and 12% of live ones. So IDSSE under `--seen` punishes "missing means dead" more than
 our match would.
 Scores also get no help from set-piece tags, because these matches have no Smart Tagging.
+
+## hmm_v9: the players-only net as a clue, `score_fuse.py`
+
+    python external/control_features.py && python external/train_control.py --loso
+    sh deep/queue.sh deep/jobs_v9.txt          # six held-out fold nets, about 3 hours on 3 cores
+    python external/score_fuse.py --tag bt,b2  # variants are "control weight:net weight"
+
+v9 is v8 with one more term in the decoder's log emissions: the per-frame p(H, A, D) of the
+players-only net of `deep/`, as a log ratio against the class shares it was trained on, at a
+weight of 0.3 (`hmm/net_clue.py`, `hmm.decode.NET_WEIGHT`). Nothing else changes: same control
+classifier, same tables, same chain. Each match is read by nets that never saw its provider.
+Folded spellF1, measured 2026-11-16 (v8 rerun the same day reproduces 0.644 / 0.816 / 0.480):
+
+| folded spellF1 | v8 | net alone in the decoder (no control clue) | v9, one net (`bt`) | **v9, two nets averaged** | v9 - v8, paired (se, matches up) |
+|---|---|---|---|---|---|
+| IDSSE (7) | 0.644 | 0.692 | 0.716 | **0.728** | +0.084 (0.010, 7 of 7) |
+| Metrica (3) | 0.816 | 0.799 | 0.808 | **0.807** | -0.009 (0.007, 1 of 3) |
+| SkillCorner (20) | 0.480 | 0.489 | 0.496 | **0.497** | +0.016 (0.004, 16 of 20) |
+| mean of the three | 0.647 | 0.660 | 0.674 | **0.677** | |
+
+Against the labels as they are: 0.576 to 0.592. Alive/dead F1 0.946 to 0.951, team accuracy on
+frames both call live 0.904 to 0.910 (IDSSE 0.900 to 0.921, Metrica 0.966 to 0.964, SkillCorner
+0.845 to 0.845). With `--min-possession 1.5` (still off): 0.652 to 0.681.
+
+**The weight was read off these matches.** Two nets, control weight 0.2:
+
+| net weight | 0 (v8) | 0.05 | 0.1 | 0.15 | 0.2 | 0.25 | 0.3 | 0.4 | 0.5 |
+|---|---|---|---|---|---|---|---|---|---|
+| IDSSE | 0.644 | 0.670 | 0.689 | 0.705 | 0.715 | 0.721 | 0.728 | 0.727 | 0.726 |
+| Metrica | 0.816 | 0.819 | 0.816 | 0.810 | 0.807 | 0.810 | 0.807 | 0.800 | 0.794 |
+| SkillCorner | 0.480 | 0.489 | 0.495 | 0.495 | 0.496 | 0.497 | 0.497 | 0.490 | 0.487 |
+| mean | 0.647 | 0.659 | 0.667 | 0.670 | 0.673 | 0.676 | 0.677 | 0.673 | 0.669 |
+
+Picked for each provider on the other two, the folds choose 0.1, 0.3 and 0.3 and the provider
+left out scores 0.689 / 0.807 / 0.497: a mean of **0.664**, which is the fair size. The gap to
+0.677 is all IDSSE: Metrica and SkillCorner together are flat from 0.05 to 0.3, so they cannot
+see that IDSSE wants more of the net.
+
+**Where the gain is.** IDSSE's ball is knocked out to 59% seen in short random gaps, and that is
+where v8 loses most there (with the true ball back v8 scores 0.752 on IDSSE; measured in another
+thread the same day). The net reads all 22 players and fills those gaps. Metrica's labels and
+ball come from the same events and its ball is only missing in stoppages, so there the net has
+nothing to add and smooths a few short possessions away. SkillCorner gains in alive/dead (0.942
+to 0.954), not in team naming.
+
+**The two nets.** `bt` is `deep/`'s shipped net. `b2` is, for the IDSSE and Metrica folds,
+`sw25` (the same net with SkillCorner's labels at a quarter weight, `--provw skillcorner=0.25`,
+the one variant `deep/README.md` found level or up everywhere), and for the SkillCorner fold,
+where `sw25` is `bt`, a second seed of `bt`. `b2` alone in v9 scores 0.735 / 0.804 / 0.496
+(0.679); the average is kept because two nets are steadier than one (`deep/`'s seed spread is
+0.013). For BAR-ATH the decoder averages `deep/models/bt.pt` and `deep/models/sw25.pt`, both
+trained on all 30 matches.
+
+Tried on the way and not kept (one net, mean of the three):
+
+| | mean | note |
+|---|---|---|
+| the net's outputs as 45 columns of the control classifier (`net_features.py`, `train_control.py --net bt`): p(H, A, D), the pointer's lean, pointer and ball guess against the visible ball, windows | 0.658 (0.659 / 0.827 / 0.487) | up on v8 everywhere, but well under the sum in the decoder; held-out log loss on SkillCorner worsens 0.76 to 0.87 |
+| that classifier and the net in the decoder together | 0.662 to 0.668 | no better than v8's classifier with the net |
+| a different net weight where the ball is not seen (0.5 to 0.8 against 0.1 to 0.3) | 0.667 to 0.672 | flat |
+| the net's alive/dead part at half or 1.5 times its team part | 0.672 | flat |
+| without the width clue, or the hand-built clues at 0.15 | 0.673, 0.671 | flat |
+| control weight 0.1 to 0.3 beside the net | 0.669 to 0.674 | flat |
+
+**Not checked on BAR-ATH.** The gated data was not on the machine that did this work.
+`python -m hmm.decode` now needs torch (`requirements-deep.txt`) and writes `hmm_v9.csv`;
+`--no-net` gives v8. Before submitting, compare it with `hmm_v8.csv` and `deep.csv` on the
+public window and by eye. The outside sets lose the ball at random and BAR-ATH loses it around
+restarts in long gaps (above), so how much of IDSSE's gain carries over is the open question.
 
 ## hmm_v8: the control classifier retrained, `score_control.py`
 

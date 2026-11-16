@@ -69,8 +69,8 @@ slot (hmm/clues.py).
 v9 adds the players-only net of deep/ (hmm/net_clue.py) as one more clue: its p(H, A, D) per
 frame, as a log ratio against the class shares it was trained on, at NET_WEIGHT. The net reads all
 22 players and never the ball, so it speaks where the ball is missing, which is where v8 loses
-most. Held out by provider the mean goes from 0.647 to 0.674 (IDSSE 0.644 to 0.716, Metrica 0.816
-to 0.808, SkillCorner 0.480 to 0.496; external/README.md). It needs torch (requirements-deep.txt).
+most. Held out by provider the mean goes from 0.647 to 0.677 (IDSSE 0.644 to 0.728, Metrica 0.816
+to 0.807, SkillCorner 0.480 to 0.497; external/README.md). It needs torch (requirements-deep.txt).
 
     python -m hmm.decode                    # writes evaluation/results/hmm_v9.csv
     python -m hmm.decode --no-net           # v8 again
@@ -303,10 +303,11 @@ CONTROL_FEATURES = "joint1"
 # of the other team. That was looked at once, to check the assumption, not to choose the number.
 MIN_POSSESSION_SECONDS = 0.0
 # v9: the players-only net of deep/ (hmm/net_clue.py), its log ratio added to the emissions next
-# to the control clue. The net file is the one trained on all 30 outside matches. Held out by
-# provider, 0.3 is the best single weight and the score is flat from 0.2 to 0.5
+# to the control clue. Two nets trained on all 30 outside matches, their probabilities averaged:
+# bt, and sw25 (bt with SkillCorner's labels at a quarter weight; deep/README.md). Held out by
+# provider, 0.3 is the best single weight and the score is within 0.005 of it from 0.2 to 0.4
 # (external/README.md).
-NET_MODEL = os.path.join(ROOT, "deep", "models", "bt.pt")
+NET_MODELS = tuple(os.path.join(ROOT, "deep", "models", name) for name in ("bt.pt", "sw25.pt"))
 NET_WEIGHT = 0.3
 
 
@@ -537,7 +538,7 @@ def load_control(game=GAME, data_dir=None, model_path=CONTROL_MODEL):
     return out
 
 
-def load_net(model_paths=(NET_MODEL,), threads=1):
+def load_net(model_paths=NET_MODELS, threads=1):
     """(frames, 3) net clue for every video frame: log p(state | players) - log p(state) from the
     players-only net(s) of deep/ on the graded halves, 0 elsewhere (hmm/net_clue.py). Needs torch
     (requirements-deep.txt). The same tensors and prediction as deep/run.py; one thread, so a
@@ -739,8 +740,9 @@ def main():
                         help="weight on the control clue (default {})".format(CONTROL_WEIGHT))
     parser.add_argument("--no-net", action="store_true",
                         help="ablation: without the players-only net, which is v8")
-    parser.add_argument("--net-model", default=NET_MODEL,
-                        help="comma-separated deep/ nets to average (default deep/models/bt.pt)")
+    parser.add_argument("--net-model", default=",".join(NET_MODELS),
+                        help="comma-separated deep/ nets to average (default bt.pt and sw25.pt "
+                             "in deep/models)")
     parser.add_argument("--net-weight", type=float, default=NET_WEIGHT,
                         help="weight on the net clue (default {})".format(NET_WEIGHT))
     parser.add_argument("--min-possession", type=float, default=MIN_POSSESSION_SECONDS,
