@@ -92,6 +92,27 @@ def ball_targets(X, M, ball, y):
     return dict(ptr=(ptr, ok_p), bvel=(torch.nan_to_num(bvel) / 10, ok_v), touch=(hit, ok_t), free=(free, ok_p))
 
 
+def restart_losses(extra, X, M, y, R):
+    """The stoppage and restart losses (deep/restarts.py): the pointer finds the restart taker
+    while the ball is dead, a head names the kind of restart, another counts the seconds to and
+    since a stop or start. Zero where a batch has no such frame."""
+    rb, rk, rt = R
+    z = extra["rkind"].sum() * 0
+    out = {}
+    ok = torch.isfinite(rb[..., 0]) & (y == 2) & M.any(-1)
+    if "ptr" in extra and ok.any():
+        scale = torch.tensor([52.5, 34.0])
+        d = ((X[..., :2] * scale - torch.nan_to_num(rb * scale).unsqueeze(2)) ** 2).sum(-1).sqrt().masked_fill(~M, 1e4)
+        out["taker"] = -(torch.softmax(-d[ok] / 2.0, -1) * F.log_softmax(extra["ptr"][ok], -1)).sum(-1).mean()
+    else:
+        out["taker"] = z
+    ok = (rk >= 0) & (y == 2)
+    out["kind"] = F.cross_entropy(extra["rkind"][ok], rk[ok]) if ok.any() else z
+    ok = torch.isfinite(rt) & (y >= 0).unsqueeze(-1)
+    out["time"] = F.smooth_l1_loss(extra["rtime"][ok], rt[ok], beta=0.1) if ok.any() else z
+    return out
+
+
 def ball_losses(extra, tg):
     """The four ball-taught losses; zero where a batch has no frame with the ball seen."""
     out = {}
@@ -109,7 +130,7 @@ def ball_losses(extra, tg):
 
 def batch(train, rng, B, T, a):
     provs = sorted({m["provider"] for m in train})
-    Xs, Ms, ys, bs, es, ws = [], [], [], [], [], []
+    Xs, Ms, ys, bs, es, ws, rs = [], [], [], [], [], [], []
     while len(Xs) < B:
         if a.share:  # e.g. soccertrack=0.15: that provider's share of windows, the rest split equally
             w = np.array([a.share.get(q, np.nan) for q in provs])
@@ -138,10 +159,16 @@ def batch(train, rng, B, T, a):
             ws.pop()
             continue
         e = edges(y)
+        r = h.get("restart")  # deep/restarts.py targets; positions turn with the pitch, the rest does not
+        rb = r["rb"][s:s + T].copy() if r else np.zeros((T, 2), np.float32)
         if rng.random() < 0.5:
             X, y, ball = D.swap_teams(X, y, ball)
+            rb = -rb
         if rng.random() < 0.5:
             X, ball = D.mirror(X, ball)
+            rb[:, 1] *= -1
+        if r:
+            rs.append((rb, r["rk"][s:s + T], r["rt"][s:s + T]))
         X, M = X.copy(), M.copy()
         if a.noise:
             X[..., :2] += rng.normal(0, a.noise / 40, X[..., :2].shape).astype(np.float32)
@@ -151,7 +178,8 @@ def batch(train, rng, B, T, a):
         X[~M] = 0
         Xs.append(X); Ms.append(M); ys.append(y); bs.append(ball); es.append(e)
     t = lambda v: torch.from_numpy(np.stack(v))  # noqa: E731
-    return t(Xs), t(Ms), t(ys), t(bs), t(es), t(ws)
+    R = tuple(t([r[i] for r in rs]) for i in range(3)) if rs else None
+    return t(Xs), t(Ms), t(ys), t(bs), t(es), t(ws), R
 
 
 @torch.no_grad()
@@ -214,6 +242,10 @@ def main():
                     help="train on labels cleaned with each training match's ball (deep/clean/labels.py), "
                          "e.g. retime+lastmask+mask; scoring labels are untouched")
     ap.add_argument("--clean-prov", nargs="*", default=[], help="providers to clean; default all in training")
+    ap.add_argument("--restart", type=float, default=0.0,
+                    help="teach stoppages and restarts (deep/restarts.py): weight of the taker pointer loss")
+    ap.add_argument("--rkind", type=float, default=0.2, help="with --restart: kind-of-restart loss")
+    ap.add_argument("--rtime", type=float, default=0.3, help="with --restart: seconds to/since a stop or start loss")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
@@ -243,10 +275,16 @@ def main():
                 code[lab == c] = i
             for h in m["halves"]:
                 h["y"] = code[h["frames"]]
+    if a.restart > 0:  # training matches only: a held-out match's ball is never read
+        import restarts
+        tg = restarts.load_all()
+        for m in train:
+            for h, r in zip(m["halves"], tg[m["name"]]):
+                h["restart"] = r
     if a.style:
         for m in train:
             m["raw"] = D.load_raw(D.match_path(m["name"]))
-    net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage)
+    net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage, restart=a.restart > 0)
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
     out = os.path.join(D.ROOT, "data", "cache", "deep", a.tag, a.fold)
@@ -263,7 +301,7 @@ def main():
         print(f"resumed at step {start}", flush=True)
     for step in range(start + 1, a.steps + 1):
         net.train()
-        X, M, y, ball, e, w = batch(train, rng, a.batch, a.window, a)
+        X, M, y, ball, e, w, R = batch(train, rng, a.batch, a.window, a)
         logits, bhat, ehat, extra = net(X, M)
         g = y >= 0
         loss_c = (F.cross_entropy(logits[g], y[g], reduction="none") * w[g]).sum() / w[g].sum()
@@ -276,13 +314,19 @@ def main():
             bl = ball_losses(extra, ball_targets(X, M, ball, y))
             loss = loss + a.ptr * bl["ptr"] + a.bvel * bl["bvel"] + a.touch * bl["touch"] + a.free * bl["free"]
             loss_x = bl["ptr"].item()
+        if a.restart > 0:
+            rl = restart_losses(extra, X, M, y, R)
+            loss = loss + a.restart * rl["taker"] + a.rkind * rl["kind"] + a.rtime * rl["time"]
+            loss_r = (rl["taker"].item(), rl["kind"].item(), rl["time"].item())
         opt.zero_grad(); loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
         opt.step(); sched.step()
-        run.append((loss_c.item(), loss_b.item(), loss_e.item(), loss_x))
+        run.append((loss_c.item(), loss_b.item(), loss_e.item(), loss_x) + (loss_r if a.restart > 0 else ()))
         if step % 100 == 0 or step == a.steps:
             r = np.mean(run, 0); run = []
             msg = f"{step:5d} ce {r[0]:.3f} ball {r[1]:.3f} edge {r[2]:.3f} ptr {r[3]:.3f}  {time.time() - t0:.0f}s"
+            if a.restart > 0:
+                msg += f"  taker {r[4]:.3f} kind {r[5]:.3f} time {r[6]:.3f}"
             if step % 500 == 0 or step == a.steps:
                 msg += f"  val acc {frame_scores(net, val):.3f}  test acc {frame_scores(net, test[:3]):.3f}"
             print(msg, flush=True)

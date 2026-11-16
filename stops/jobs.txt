@@ -1,0 +1,7 @@
+# TAG FOLD [train.py options]. bt with the stoppage and restart targets (deep/restarts.py), two seeds.
+btr idsse --steps 1500 --ptr 0.5 --restart 0.5
+btr metrica --steps 1500 --ptr 0.5 --restart 0.5
+btr skillcorner --steps 1500 --ptr 0.5 --restart 0.5
+btrs1 idsse --steps 1500 --ptr 0.5 --restart 0.5 --seed 1
+btrs1 metrica --steps 1500 --ptr 0.5 --restart 0.5 --seed 1
+btrs1 skillcorner --steps 1500 --ptr 0.5 --restart 0.5 --seed 1
