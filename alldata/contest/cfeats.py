@@ -244,16 +244,15 @@ def check(path):
     tr, true = tr[ok], dr[ok].argmin(1)
     tf, fr, xs, dk, dv, res, plain = kinks(sim, pxy, team, fps)
     if not len(tf) or not len(tr):
-        return name, np.zeros(6)
+        return name, np.zeros(7)
     j = np.clip(np.searchsorted(tf, tr), 1, len(tf) - 1)
     j = np.where(np.abs(tf[j - 1] - tr) < np.abs(tf[j] - tr), j - 1, j)
     hit = np.abs(tf[j] - tr) <= 0.5 * fps
-    contested = dr.max(1)[ok.nonzero()[0] * 0 + np.arange(len(tr))] if False else None
     both = np.sort(dr[ok], 1)[:, 1] < 4.0                      # an opponent within 4 m of the touch
     r = []
     for m in (hit, hit & both):
         r += [m.sum(), (dk[j[m]].argmin(1) == true[m]).sum(), (plain[j[m]].argmin(1) == true[m]).sum()]
-    return name, np.array(r, float)
+    return name, np.array(r + [len(tr)], float)
 
 
 def main():
@@ -268,10 +267,10 @@ def main():
             R = {}
             for name, r in ex.map(check, paths):
                 R.setdefault(name.split("_")[0], []).append(r)
-            print("real touches with a kink within 0.5 s: team named right by the kink / by the nearest player to the shown ball")
+            print("real touches with a kink within 0.5 s (share of all real touches): team named right by the kink / by the nearest player to the shown ball")
             for pv, rs in R.items():
                 s = np.sum(rs, 0)
-                print(f"  {pv:12s} all {int(s[0]):6d}  {s[1] / s[0]:.3f} / {s[2] / s[0]:.3f}   opponent within 4 m {int(s[3]):6d}  {s[4] / s[3]:.3f} / {s[5] / s[3]:.3f}")
+                print(f"  {pv:12s} all {int(s[0]):6d} ({s[0] / s[6]:.2f})  {s[1] / s[0]:.3f} / {s[2] / s[0]:.3f}   opponent within 4 m {int(s[3]):6d}  {s[4] / s[3]:.3f} / {s[5] / s[3]:.3f}")
             return
         for r in ex.map(one, [(p, a.versions) for p in paths]):
             print(r, flush=True)
