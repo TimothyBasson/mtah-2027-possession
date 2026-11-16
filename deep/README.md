@@ -76,7 +76,8 @@ spellF1, mean of two seeds unless said (IDSSE / Metrica / SkillCorner / provider
   folded) at no measured cost on BAR-ATH, whose tracking is Metrica's. BAR-ATH itself cannot
   separate the two, so the expected effect on the private score is small. Two runs of
   `python deep/run.py` write byte-identical files (sha256 `ac2f270e...150a214d`) that pass
-  `evaluation/validate_submission.py`; same machine and torch 2.15.0 only. Cleaning needs the ball only to build training labels, which the ball rule
+  `evaluation/validate_submission.py`; same machine and torch 2.15.0 only.
+- **Cleaning stays a flag.** Cleaning needs the ball only to build training labels, which the ball rule
   allows, but it adds a touch detector (`hmm.ball.detect_touches`, as `external/control.py` uses
   for the folded yardstick; no possession model is involved) for no further gain, so it stays a
   flag and is not in the shipped model.
@@ -107,6 +108,67 @@ python deep/clean/labels.py                  # what each cleaning rule changes, 
 sh deep/queue.sh deep/clean/jobs.txt         # every run above, three at a time, resumable
 python deep/fixed.py --tags bt bts1 lcsw lcsws1
 ```
+
+## How to use the SkillCorner games (2026-11-16): a quarter of the training, nothing cleverer
+
+Asked after sw: is a quarter of the windows the best use of SkillCorner's 20 matches, or is there
+a better one? Every row is the bt recipe with one thing changed, IDSSE and Metrica held out (the
+SkillCorner fold trains on no SkillCorner, so nothing here can move it), `deep/fixed.py`, as built /
+folded. Runs in `deep/clean/jobs_sc.txt`. One seed unless said; bt's two seeds differ by 0.001
+as built and 0.003 folded, sw's by 0.000.
+
+| how SkillCorner is used | IDSSE | Metrica | mean of the two |
+|---|---|---|---|
+| half the windows (bt, two seeds) | 0.582 / 0.692 | 0.651 / 0.735 | 0.616 / 0.713 |
+| 35% (`lcsw35`) | 0.608 / 0.700 | 0.658 / 0.736 | 0.633 / 0.718 |
+| **a quarter (sw: `lcsw`, `lcsws1`, two seeds)** | 0.608 / 0.704 | 0.666 / 0.745 | **0.636 / 0.724** |
+| a tenth (`lcsw10`) | 0.598 / 0.689 | 0.671 / 0.742 | 0.634 / 0.715 |
+| not at all (`lcs0`) | 0.594 / 0.679 | 0.666 / 0.733 | 0.630 / 0.706 |
+| a quarter, its H/A labels unused (`lcaux`, `--label-weight skillcorner=0`) | 0.595 / 0.687 | 0.668 / 0.738 | 0.632 / 0.713 |
+| a quarter, its labels on a head of their own (`lchead`, `--own-head`) | 0.602 / 0.695 | 0.675 / 0.745 | 0.639 / 0.720 |
+| half, its labels on a head of their own (`lchead50`) | 0.604 / 0.697 | 0.668 / 0.739 | 0.636 / 0.718 |
+| a quarter, its labels folded to the control rule (`lcfold`, `--clean fold`) | 0.604 / 0.701 | 0.665 / 0.742 | 0.634 / 0.721 |
+| a quarter, every provider's labels cleaned (`lccs`, `lccss1`, two seeds) | 0.602 / 0.700 | 0.669 / 0.745 | 0.635 / 0.722 |
+| half, label weight a quarter (`sw25`, `--provw`, two seeds, the short-possession thread) | 0.609 / 0.705 | 0.667 / 0.744 | 0.638 / 0.725 |
+
+(The `sw25` row is quoted from the section below: seed-averaged probabilities and, for the
+folded view, a 2 s / 1 s decode instead of this table's 2 s / 3 s.)
+
+- **Nothing beats a quarter by the bar.** The best alternative is +0.003 as built and -0.004
+  folded, one seed. No second seeds were run because nothing came within reach of +0.01.
+- **The dose has a peak near a quarter.** As built everything from none to 35% is within 0.006;
+  on the folded view a quarter is ahead of both a tenth (-0.009) and 35% (-0.006), and of none
+  (-0.018). Half is worst as built.
+- **SkillCorner's labels are worth keeping at low weight.** Leaving the games out, or keeping the
+  games and ignoring their H/A labels, costs 0.011 to 0.018 folded against a quarter. Its
+  possessions are long (median 5.8 s) and that seems to teach the cutting the control rule
+  wants, even though its turnovers are badly timed. (`lcaux` still reads SkillCorner's live/dead
+  labels to decide where the ball targets apply, so it is not a pure ball-only control.)
+- **Share of windows and weight of labels are the same lever**: `sw` and `sw25` agree to 0.002.
+  So the gain is not from seeing less of SkillCorner's tracking.
+- **A separate label head does not help.** The idea was that SkillCorner's way of cutting would
+  stay in its own head; the shared network learns it anyway. (With `--own-head` the provider's
+  turnover edges train nothing either.)
+- **Re-cutting or cleaning SkillCorner's labels adds nothing on top of the dose.** Folding
+  changes 0.7% of its frames; cleaning leaves out 12% of its live frames.
+- **No bad matches to drop.** By the measures of `clean/diag.py` all 20 SkillCorner matches are
+  alike (last touch against the label on 6.8% to 13.3% of live frames, against 4.0% for IDSSE's
+  average; turnovers on a touch 12% to 25%, against 75%). The noise is the provider's method,
+  not a few bad recordings, so `--drop` was not run. Its tracking is also extrapolated: all 22
+  players are present on every live frame of a broadcast feed.
+- **SkillCorner's own score pays for it.** On three unseen SkillCorner matches of a net that
+  trained on SkillCorner: 0.462 at half, 0.456 at 35%, 0.454 / 0.439 at a quarter (two seeds),
+  0.436 at a tenth, 0.375 with none, 0.390 to 0.407 with its labels unused or on their own head.
+  BAR-ATH is not SkillCorner's tracking or labelling, so this is a cost we accept, but a model
+  meant for SkillCorner-like data should keep the half.
+
+**The recipe for any training run on the 30 outside matches: `--share skillcorner=0.25`**
+(or `--provw skillcorner=0.25`; not both). It is not made `train.py`'s default, because the
+commands that regenerate `v2.pt` and `bt.pt` would then silently change; every job list from
+`deep/clean/jobs.txt` on carries the flag. In the all-30 model it gives SkillCorner 25%, IDSSE
+and Metrica 37.5% each. The all-data model took the same weight and gained the same way
+(`alldata/learned`). `--label-weight`, `--own-head`, `--drop` and `--clean` stay as flags for
+whoever adds a provider with labels of unknown quality: measure it with `clean/diag.py` first.
 
 ## Short possessions (2026-11-15/16): the net can be made to draw them; the control rule folds them away
 
