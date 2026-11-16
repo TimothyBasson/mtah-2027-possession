@@ -276,10 +276,11 @@ def main():
     ap.add_argument("--free", type=float, default=0.2, help="v4: ball-to-nearest-player distance loss")
     ap.add_argument("--label-weight", nargs="*", default=[],
                     help="provider=weight of its windows in the label losses, e.g. skillcorner=0: the provider "
-                         "still teaches through the ball targets, its labels count less or not at all")
+                         "still teaches through the ball targets (gated by its live/dead labels), its H/A labels "
+                         "count less or not at all; equivalent to --provw only at --spell 0")
     ap.add_argument("--own-head", nargs="*", default=[],
                     help="providers whose labels train a label head of their own on the shared network; "
-                         "prediction uses the main head, so their way of cutting possessions stays out of it")
+                         "prediction uses the main head; their turnover edges train nothing either")
     ap.add_argument("--drop", nargs="*", default=[], help="training matches to leave out, by name")
     ap.add_argument("--clean", default="",
                     help="train on labels cleaned with each training match's ball (deep/clean/labels.py), "
