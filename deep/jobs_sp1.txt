@@ -1,0 +1,4 @@
+# second seed of sp
+sps1 idsse --steps 1500 --ptr 0.5 --provw skillcorner=0.25 --spell 0.5 --seed 1
+sps1 metrica --steps 1500 --ptr 0.5 --provw skillcorner=0.25 --spell 0.5 --seed 1
+sps1 skillcorner --steps 1500 --ptr 0.5 --spell 0.5 --seed 1

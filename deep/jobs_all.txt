@@ -1,0 +1,2 @@
+# the net that would label BAR-ATH: all 30 matches
+sp none --steps 2000 --ptr 0.5 --provw skillcorner=0.25 --spell 0.5

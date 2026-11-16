@@ -1,0 +1,4 @@
+# sp: sw25 with short possessions weighted up in the label loss (--spell 0.5)
+sp idsse --steps 1500 --ptr 0.5 --provw skillcorner=0.25 --spell 0.5
+sp metrica --steps 1500 --ptr 0.5 --provw skillcorner=0.25 --spell 0.5
+sp skillcorner --steps 1500 --ptr 0.5 --spell 0.5
