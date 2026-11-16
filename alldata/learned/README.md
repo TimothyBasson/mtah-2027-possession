@@ -6,11 +6,20 @@ is changed. The sibling folder `alldata/physics/` attacks the same goal with rul
 
 ```bash
 pip install -r requirements-deep.txt     # or: uv sync --group deep
-python alldata/learned/run.py            # BAR-ATH -> evaluation/results/alldata_learned_tim.csv, the submission
-python alldata/learned/run.py --tags pwN pwNs1 --out alldata_learned.csv   # the fallback, independent of hmm/
+python alldata/learned/run.py            # BAR-ATH -> evaluation/results/alldata_learned_tim_touch.csv, the submission
+python alldata/learned/run.py --no-touch --out alldata_learned_tim.csv     # the previous submission
+python alldata/learned/run.py --tags pwN pwNs1 --out alldata_learned_touch.csv   # the fallback, independent of hmm/
+python alldata/learned/run.py --tags pwN pwNs1 --no-touch --out alldata_learned.csv
 ```
 
-**The submission file is `alldata_learned_tim.csv`** (Gambtt's choice, 2026-11-16): this model
+**The submission file is `alldata_learned_tim_touch.csv`** (Gambtt, 2026-11-16 18:34Z: "yes
+make it the sub"): the with-Tim model below, decoded with the touches that `alldata/touch/`'s
+detector reads off BAR-ATH's ball (`alldata/touch/README.md`). Held out, on the plain all-data
+model, the touch evidence takes 0.616 / 0.696 to 0.626 / 0.704 with no provider down; on the
+public window it is level (0.613). sha256 `e9f09d6a...776623aba`; the plain fallback with touches
+is `7ca261ee...1a0db77cd492`. `--no-touch` gives back the earlier files byte for byte.
+
+Until then the submission file was `alldata_learned_tim.csv` (Gambtt's choice, 2026-11-16): this model
 with Tim's `hmm/` v8 as an input, nets `tpsN` and `tpsNs1`. Held out it is the best row measured
 on BAR-ATH-like balls (0.623 / 0.705 against 0.616 / 0.696 without his model), with the caveats
 in "With Tim's model as an input" below: the gain is on IDSSE only, it is within seed noise, and

@@ -65,7 +65,9 @@ class Net(nn.Module):
         return self.cls(h), self.edge(h).squeeze(-1)
 
 
-def load_matches(drop_cols=(), folder=FEATS):
+def load_matches(drop_cols=(), folder=FEATS, extra=""):
+    """extra: a folder of <match>.npz with columns E<version>_<half> to append (names in it), e.g.
+    the detected touches of alldata/touch/textra.py; versions it lacks get zeros."""
     ms = []
     for f in sorted(glob.glob(os.path.join(folder, "*.npz"))):
         z = np.load(f)
@@ -77,7 +79,16 @@ def load_matches(drop_cols=(), folder=FEATS):
         for i in range(int(z["nhalves"])):
             halves.append(dict(F=[z[f"F{v}_{i}"][:, keep] for v in range(nv)], y=z[f"y_{i}"].astype(np.int64),
                                yf=z[f"yf_{i}"].astype(np.int64), fr=z[f"fr_{i}"]))
-        ms.append(dict(name=name, provider=name.split("_")[0], halves=halves, names=[names[i] for i in keep]))
+        keep_names = [names[i] for i in keep]
+        if extra:
+            e = np.load(os.path.join(extra, name + ".npz"))
+            en = [str(n) for n in e["names"]]
+            for i, h in enumerate(halves):
+                T = len(h["y"])
+                h["F"] = [np.concatenate([F_, (e[f"E{v}_{i}"][:T] if f"E{v}_{i}" in e.files else np.zeros((T, len(en)), np.float32))], 1)
+                          for v, F_ in enumerate(h["F"])]
+            keep_names = keep_names + en
+        ms.append(dict(name=name, provider=name.split("_")[0], halves=halves, names=keep_names))
     return ms
 
 
@@ -216,6 +227,7 @@ def main():
     ap.add_argument("--share", nargs="*", default=[], help="provider=share of training windows, e.g. skillcorner=0.25")
     ap.add_argument("--vers", nargs="*", type=int, default=[], help="simulated ball versions to train on (build.py: 1-3 parabolic, 4-6 low-pass, 7+ mix)")
     ap.add_argument("--pv", type=int, default=1, help="ball version the pseudo-labelled matches are shown in (1, 4 or 7)")
+    ap.add_argument("--extra", default="", help="folder of extra input columns per match (alldata/touch/textra.py)")
     ap.add_argument("--pseudo", default="")
     ap.add_argument("--conf", type=float, default=0.7)
     ap.add_argument("--seed", type=int, default=0)
@@ -225,11 +237,11 @@ def main():
     torch.set_num_threads(a.threads)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
-    ms = load_matches(drop_cols=a.drop_cols)
+    ms = load_matches(drop_cols=a.drop_cols, extra=a.extra)
     train, val, test = split(ms, a.fold)
     if a.fold == "none":  # every outside match trains; the unseen match is BAR-ATH (run.py --features)
         train, val = train + val, []
-        test = load_matches(drop_cols=a.drop_cols, folder=os.path.join(CACHE, "bar"))
+        test = load_matches(drop_cols=a.drop_cols, folder=os.path.join(CACHE, "bar"), extra=a.extra)
     names = ms[0]["names"]
     if a.pseudo:
         train = train + [pseudo_labels(m, a.pseudo, a.fold, a.conf, a.pv) for m in test]
