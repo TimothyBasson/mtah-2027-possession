@@ -2,8 +2,9 @@
 
     python alldata/learned/build.py [--versions 3] [--jobs 4]
 
-Per match and half: the feature rows with the ball as recorded (v0) and with BAR-ATH-like
-visibility simulated under `versions` seeds (v1..), the labels as built and folded to the
+Per match and half: the feature rows with the ball as recorded (v0) and with the ball made to
+look like BAR-ATH's (feats.bar_like: seen as BAR-ATH's is, and smoothed) under `versions`
+seeds (v1..), the labels as built and folded to the
 controlled-possession rule (external/control.py), and the frame of each row.
 
 The players-only net's probabilities (bt, bts1) enter as inputs. Each match takes them from the
@@ -65,7 +66,7 @@ def one(args):
         bxy = d["ball"][:, :2].astype(np.float32).copy()
         if v:
             for a, b in halves:
-                bxy[a:b + 1] = feats.simulate_visibility(bxy[a:b + 1], lab[a:b + 1], rng, int(d["fps"]))
+                bxy[a:b + 1] = feats.bar_like(bxy[a:b + 1], lab[a:b + 1], rng, int(d["fps"]))
         for i, (a, b) in enumerate(halves):
             F, fr = feats.half_features(d["players"], bxy, d["team"], a, b, d["pitch"], int(d["fps"]),
                                         extra=[("bt", bt[i])] + tim_in[i])

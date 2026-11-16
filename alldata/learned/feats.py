@@ -22,14 +22,51 @@ import data as D  # noqa: E402
 
 STEP = D.STEP
 CLIP_T = 10.0  # s
-TOUCH_DV = 4.0      # m/s change of the ball's velocity over 0.16 s
-TOUCH_RADIUS = 3.0  # m, nearest player within 0.12 s
+TOUCH_DV = 2.0      # m/s change of the (smoothed) ball's velocity over 0.16 s, at its local peak
+TOUCH_RADIUS = 3.0  # m, nearest player within 0.3 s of the peak
 
 
 def _runs(mask):
     e = np.flatnonzero(np.diff(mask.astype(np.int8)) != 0) + 1
     s, t = np.r_[0, e], np.r_[e, len(mask)]
     return s, t, mask[s]
+
+
+def smooth(xy, half_width):
+    """BAR-ATH's ball is a smoothed path: a kick takes about a second to reach full speed (its
+    acceleration tops out near 30 m/s2, a raw outside ball's at 250). A parabolic window of
+    14 to 18 frames' half-width over a raw ball reproduces its statistics (found by the
+    alldata/physics thread, checked here), so outside balls are smoothed like this before the
+    features are computed. NaN stays NaN; the window is renormalised beside a gap."""
+    h = int(np.ceil(half_width))
+    t = np.arange(-h, h + 1)
+    k = np.clip(1 - (t / half_width) ** 2, 0, None)
+    ok = np.isfinite(xy[:, 0])
+    w = np.convolve(ok.astype(float), k, "same")
+    out = xy.copy()
+    for c in (0, 1):
+        out[:, c] = np.convolve(np.where(ok, xy[:, c], 0.0), k, "same") / np.maximum(w, 1e-9)
+    out[~ok] = np.nan
+    return out
+
+
+def hide_frozen(xy, fps=25, seconds=1.0):
+    """IDSSE parks a dead ball: the recorded position does not change at all until play restarts.
+    Such runs are treated as unseen, like the Metrica samples' stoppages."""
+    xy = xy.copy()
+    same = np.r_[False, (xy[1:] == xy[:-1]).all(1)]
+    s, t, v = _runs(same)
+    for a, b in zip(s[v], t[v]):
+        if b - a >= seconds * fps:
+            xy[a:b] = np.nan
+    return xy
+
+
+def bar_like(xy, labels, rng, fps=25):
+    """An outside match's ball made to look like BAR-ATH's: parked balls hidden, visibility as
+    simulate_visibility, then smoothed."""
+    xy = simulate_visibility(hide_frozen(xy, fps), labels, rng, fps)
+    return smooth(xy, rng.uniform(14.0, 18.0) * fps / 25).astype(np.float32)
 
 
 def simulate_visibility(xy, labels, rng, fps=25):
@@ -42,8 +79,8 @@ def simulate_visibility(xy, labels, rng, fps=25):
     xy = xy.copy()
     n = len(xy)
     seen = np.isfinite(xy[:, 0])
-    q = rng.uniform(0.3, 1.0)
-    m1, m2 = rng.uniform(0.3, 8.0, 2)
+    q = rng.uniform(0.6, 1.0)   # BAR-ATH: 59% of frames seen with about 45% dead, so most stoppages are mostly hidden
+    m1, m2 = rng.uniform(0.3, 4.0, 2)
     dead = labels == "D"
     s, t, v = _runs(dead)
     reach = 3 * fps  # the source may lose the ball a little before the label says dead
@@ -183,11 +220,10 @@ def half_features(players, ball_xy, team, a, b, pitch, fps=25, extra=None):
     # touches next (the whole match is on the table, so the future is fair game), how long ago,
     # how many in a row by one team.
     dall = np.minimum(np.where((team == 0)[None], dist, 1e4).min(1), 1e4), np.where((team == 1)[None], dist, 1e4).min(1)
-    near = -maxpool(-np.minimum(dall[0], dall[1]), 3)
-    cand = seen & (acc > TOUCH_DV) & (near < TOUCH_RADIUS)
-    cand[1:-1] &= (acc[1:-1] >= acc[:-2]) & (acc[1:-1] > acc[2:])
+    near = -maxpool(-np.minimum(dall[0], dall[1]), 8)
+    cand = seen & (acc > TOUCH_DV) & (near < TOUCH_RADIUS) & (acc >= maxpool(acc, 6))
     tf = np.flatnonzero(cand)
-    tt = np.where(-maxpool(-dall[0], 3)[tf] <= -maxpool(-dall[1], 3)[tf], 0, 1)
+    tt = np.where(-maxpool(-dall[0], 8)[tf] <= -maxpool(-dall[1], 8)[tf], 0, 1)
     sgn = np.where(tt == 0, 1.0, -1.0)
     run = np.ones(len(tf))
     for j in range(1, len(tf)):

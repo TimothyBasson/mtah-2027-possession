@@ -4,7 +4,7 @@
 
 Inputs are the rows of feats.py (ball, players against the ball, the players-only net's
 probabilities). Training draws each provider equally often, and each window with the ball either
-as recorded or under simulated BAR-ATH-like visibility (--sim: share of windows simulated).
+as recorded or made to look like BAR-ATH's (--sim: share of windows; default all of them).
 Writes data/cache/alldata/runs/<tag>/<fold>/<match>.npz: probabilities at 5 fps for the held-out
 provider (kind test) and the validation matches (kind val), with the ball as recorded (p*) and
 under the simulation's first seed (s*); f* are the head taught on the folded labels.
@@ -87,9 +87,10 @@ def pseudo_labels(m, tag, fold, conf):
     import decode
     z = np.load(os.path.join(CACHE, "runs", tag, fold, m["name"] + ".npz"))
     halves = []
+    v = 1 if len(m["halves"][0]["F"]) > 1 else 0   # an outside match in its BAR-ATH-like version
     for i, h in enumerate(m["halves"]):
-        new = dict(F=h["F"][:1], fr=h["fr"])
-        for key, pk in (("y", "p"), ("yf", "fp")):
+        new = dict(F=h["F"][v:v + 1], fr=h["fr"])
+        for key, pk in (("y", "s" if v else "p"), ("yf", "fs" if v else "fp")):
             p = z[f"{pk}{i}"]
             lp = np.log(np.clip(p, 1e-6, 1))
             path = decode.absorb(decode.viterbi(lp, 4 / 5), {0: 5, 1: 5, 2: 5}).astype(np.int64)
@@ -194,7 +195,7 @@ def main():
     ap.add_argument("--T", type=int, default=300)
     ap.add_argument("--d", type=int, default=96)
     ap.add_argument("--lr", type=float, default=2e-3)
-    ap.add_argument("--sim", type=float, default=0.75)
+    ap.add_argument("--sim", type=float, default=1.0)
     ap.add_argument("--spell", type=float, default=0.0)
     ap.add_argument("--noise", type=float, default=0.0)
     ap.add_argument("--edge", type=float, default=0.3)
