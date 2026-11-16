@@ -1,0 +1,17 @@
+# TAG FOLD [v9/train.py options]
+# sq: the ball as an input, folded labels
+sq idsse --ballin --labels folded
+sq metrica --ballin --labels folded
+sq skillcorner --ballin --labels folded
+# pf: players only, folded labels (bt with the control-rule target)
+pf idsse --labels folded
+pf metrica --labels folded
+pf skillcorner --labels folded
+# sqs1: a second seed of sq
+sqs1 idsse --ballin --labels folded --seed 1
+sqs1 metrica --ballin --labels folded --seed 1
+sqs1 skillcorner --ballin --labels folded --seed 1
+# sqa: sq with a provider-adversarial head
+sqa idsse --ballin --labels folded --adv 0.1
+sqa metrica --ballin --labels folded --adv 0.1
+sqa skillcorner --ballin --labels folded --adv 0.1
