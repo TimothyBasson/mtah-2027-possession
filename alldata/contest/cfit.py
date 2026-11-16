@@ -63,6 +63,23 @@ def brief_weights(y, w, max_rows):
     return out
 
 
+def backed_weights(y, w, max_rows, km, m):
+    """brief_weights, but only for possessions where the ball backs the label: some row inside it
+    has the last kink (where the shown ball was really played) nearer the labelled team by >= m."""
+    out = np.ones(len(y), np.float32)
+    if w == 1:
+        return out
+    e = np.flatnonzero(np.diff(y) != 0) + 1
+    s, t = np.r_[0, e], np.r_[e, len(y)]
+    for j in range(1, len(s)):
+        k = y[s[j]]
+        if k in (0, 1) and y[s[j] - 1] == 1 - k and t[j] - s[j] < max_rows:
+            sg = 1.0 if k == 0 else -1.0
+            if (km[s[j]:t[j]] * sg >= m).any():
+                out[s[j]:t[j]] = w
+    return out
+
+
 def batch(train, rng, B, T, a, sym):
     perm, sw, mi = sym
     provs = sorted({m["provider"] for m in train})
@@ -87,12 +104,21 @@ def batch(train, rng, B, T, a, sym):
         if len(X) < T or (y >= 0).mean() < 0.3:
             continue
         # pseudo-labelled matches are not reweighted: their brief spells are the teacher's own
-        # guesses, and weighting them makes the adapted net cut finer still (review of PR 61)
-        bw = 1.0 if prov == "pseudo" else a.brief
-        key = ("bw", bw, rows)
+        # guesses, and weighting them makes the adapted net cut finer still (review of PR 61).
+        # --backed runs (alldata/briefsafe) were trained with them reweighted when the ball backs them.
+        bw = 1.0 if prov == "pseudo" and a.backed is None else a.brief
+        if a.backed is not None:
+            key = ("bk", bw, rows, v)
+            if key not in h:
+                km = h["F"][v][:, a.km_col]
+                h[key] = backed_weights(yall, bw, rows, km, a.backed), backed_weights(h["yf"], bw, rows, km, a.backed)
+        else:
+            key = ("bw", bw, rows)
         if key not in h:
             h[key] = brief_weights(yall, bw, rows), brief_weights(h["yf"], bw, rows)
         w, w2 = h[key][0][s:s + T], h[key][1][s:s + T]
+        if prov in a.brief_skip:   # brief weighting on labelled IDSSE / Metrica windows only
+            w, w2 = np.ones_like(w), np.ones_like(w2)
         if rng.random() < 0.5:
             X, y, y2 = X[:, perm] * sw, swap_y(y), swap_y(y2)
         if rng.random() < 0.5:
@@ -138,6 +164,10 @@ def main():
     ap.add_argument("--brief", type=float, default=1.0)
     ap.add_argument("--brief-len", type=float, default=5.0)
     ap.add_argument("--focal", type=float, default=0.0)
+    ap.add_argument("--backed", type=float, default=None,
+                    help="weigh only brief possessions the ball backs (last kink margin >= this; needs --extra)")
+    ap.add_argument("--brief-skip", nargs="*", default=[],
+                    help="providers whose windows are not brief-weighted (e.g. skillcorner pseudo)")
     ap.add_argument("--mine-skip", nargs="*", default=["skillcorner", "pseudo"])
     a = ap.parse_args()
     a.share = {k: float(v) for k, v in (x.split("=") for x in a.share)}
@@ -150,6 +180,8 @@ def main():
         train, val = train + val, []
         test = load_matches(a.drop_cols, os.path.join(CACHE, "bar"), a.extra, os.path.join(CACHE, "contest_bar"))
     names = ms[0]["names"]
+    if a.backed is not None:
+        a.km_col = names.index("k_last_m")
     if a.pseudo:
         train = train + [pseudo_labels(m, a.pseudo, a.fold, a.conf, a.pv) for m in test]
     sym = cfeats.symmetry(names)
