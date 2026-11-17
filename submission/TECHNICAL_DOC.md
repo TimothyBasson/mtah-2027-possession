@@ -1,7 +1,7 @@
 <!--
-DRAFT. Rename to Gambtt.md (or export Gambtt.pdf) when it is uploaded: SUBMISSION.md asks
-for both files to carry the team name. *.pdf is git-ignored in this repo, so export the PDF into
-submission/out/.
+DRAFT. Build the upload with `python submission/build_doc_pdf.py` -> submission/out/Gambtt.pdf
+(SUBMISSION.md asks for the team name on the file; *.pdf is git-ignored). This comment is left out
+of the PDF.
 
 The six sections below are the ones SUBMISSION.md lists. "A few pages is plenty."
 Lines starting "TODO" are decisions still open; delete them as they close.
