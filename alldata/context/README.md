@@ -15,7 +15,7 @@ Inputs per 5 fps frame, BAR-ATH-like ball (version 1): the first stage's held-ou
 log-probabilities (`pw1e`, both heads, from the fold where the match's own provider was held out),
 the learned touch detector (`t1`, same folds), and the first stage's own rows (build.py). A frame
 encoder and a short TCN (local), then a 3-layer transformer over the **whole half** in 2 s tokens
-with absolute match-time encoding, added back at frame rate, then a short TCN. The output is a
+with a match-time encoding (see the caveat under Readings), added back at frame rate, then a short TCN. The output is a
 residual on the first stage's logits (zero at the start). Trained on whole halves (random crops of
 30-100%) of the other two providers' matches, SkillCorner at most a quarter of draws. Team swap
 and mirror as augmentation and averaged at prediction. `--no-ctx` is the control: the same net
