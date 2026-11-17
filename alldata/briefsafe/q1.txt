@@ -1,0 +1,12 @@
+qa skillcorner --extra --brief 3 --focal 1 --pseudo cr1e --brief-skip skillcorner pseudo
+qb skillcorner --extra --brief 3 --focal 1 --pseudo c1e --brief-skip skillcorner pseudo
+qa idsse --extra --brief 3 --focal 1 --pseudo cr1e --brief-skip skillcorner pseudo
+qa metrica --extra --brief 3 --focal 1 --pseudo cr1e --brief-skip skillcorner pseudo
+qb idsse --extra --brief 3 --focal 1 --pseudo c1e --brief-skip skillcorner pseudo
+qb metrica --extra --brief 3 --focal 1 --pseudo c1e --brief-skip skillcorner pseudo
+qas1 skillcorner --extra --brief 3 --focal 1 --pseudo cr1e --brief-skip skillcorner pseudo --seed 1
+qbs1 skillcorner --extra --brief 3 --focal 1 --pseudo c1e --brief-skip skillcorner pseudo --seed 1
+qas1 idsse --extra --brief 3 --focal 1 --pseudo cr1e --brief-skip skillcorner pseudo --seed 1
+qas1 metrica --extra --brief 3 --focal 1 --pseudo cr1e --brief-skip skillcorner pseudo --seed 1
+qbs1 idsse --extra --brief 3 --focal 1 --pseudo c1e --brief-skip skillcorner pseudo --seed 1
+qbs1 metrica --extra --brief 3 --focal 1 --pseudo c1e --brief-skip skillcorner pseudo --seed 1
