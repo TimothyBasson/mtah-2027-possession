@@ -32,7 +32,7 @@ Held out by provider, BAR-ATH-like ball, mean of IDSSE / Metrica / SkillCorner, 
 |---|---|---|---|---|---|
 | base `pw1e` (+ touch) | 0.666 / 0.760 | 0.794 / 0.831 | 0.417 / 0.520 | 0.616 / 0.696 | **0.626 / 0.704** |
 | `cx1` full residual, seed 0 (+ touch) | 0.660 / 0.732 | 0.790 / 0.841 | 0.400 / 0.510 | 0.605 / 0.681 | 0.617 / 0.694 |
-| `cx2` team-only, seed 0 (+ touch) | 0.677 / 0.756 | 0.795 / 0.843 | 0.408 / 0.519 | 0.618 / 0.698 | 0.627 / 0.706 |
+| `cx2` team-only, seed 0 (+ touch); single seed, IDSSE seed spread 0.003 | 0.677 / 0.756 | 0.795 / 0.843 | 0.408 / 0.519 | 0.618 / 0.698 | 0.627 / 0.706 |
 
 IDSSE fold only (plain decode), context against its control:
 
@@ -48,9 +48,15 @@ Readings:
   F1 0.988 to 0.932, folded IDSSE -0.033. Keeping the dead call from the first stage removes that.
 - With the dead call fixed the second stage is level with the base: +0.001 / +0.002 with touch
   evidence, SkillCorner as built 0.417 to 0.408, team accuracy 0.898 to 0.897. Far from +0.01.
-- The whole-half transformer and the no-context control score the same on every comparison made,
-  so long-range context carries no usable signal for who owns a brief possession beyond what the
-  first stage's own 60 s window already sees. This matches the earlier findings that the families
+- The whole-half transformer and the no-context control score the same on every comparison made:
+  no signal was found with this setup. That is weaker than "context is useless", because the runs
+  had two train/test mismatches that handicap the context branch (found in review, PR 63): the
+  time encoding started at each training crop instead of the half's start (so it was not absolute
+  match time in training), and zero padding of shorter crops was attended without a mask. Both
+  are fixed in `ctx.py` since; the numbers above are from the earlier code (commit 08b3565) and
+  were not re-run (deadline day; team accuracy sits at 0.898 either way). The stacking is also not
+  nested (the base for other providers' matches was trained on the test provider), which biases
+  towards a gain, so a null stays a null. This matches the earlier findings that the families
   miss the same turnovers and that which brief touches a provider labels does not transfer.
 - No BAR-ATH file was built: nothing here clears the bar, and a version on the submission's
   with-Tim base would need its held-out predictions, which were never saved.
