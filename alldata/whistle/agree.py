@@ -3,7 +3,7 @@
     python alldata/whistle/agree.py TAGS.npz [--offset0 0 --offset1 0] [--sub FILE]
 
 TAGS.npz from tag.py. Times are mapped to video frames (25 fps) plus a per-half offset (0 for the
-tactical video's own audio; 4014 / 26920 for the broadcast's, second half from broadcast frame 85,500).
+tactical video's own audio; 4014 / 26920 for the broadcast's, second half from broadcast audio frame 86,700).
 No ground truth is read: the reference is the submission's decoded dead-ball frames, so this says
 whether the detector fires where the model already sees stoppages, more than at random moments.
 """
@@ -30,7 +30,7 @@ def peaks(score, thr, min_gap=4):
     return np.array(out, int)
 
 
-def to_frames(t, o0, o1, split=85_500):
+def to_frames(t, o0, o1, split=86_700):  # audio-frame halftime gap on the broadcast (86,637-86,822)
     f = np.round(t * 25).astype(int)
     return np.where(f < split, f + o0, f + o1)
 
