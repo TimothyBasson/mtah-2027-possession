@@ -1,0 +1,68 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+Downloading nvidia-cufile (1.3MiB)
+Downloading nvidia-nccl-cu13 (206.0MiB)
+Downloading nvidia-nvshmem-cu13 (129.1MiB)
+Downloading nvidia-cuda-cccl (3.9MiB)
+Downloading nvidia-cuda-runtime (2.2MiB)
+Downloading cuda-bindings (8.0MiB)
+Downloading nvidia-cudnn-cu13 (495.1MiB)
+Downloading nvidia-cufft (208.1MiB)
+Downloading triton (272.5MiB)
+Downloading nvidia-cusparse (144.0MiB)
+ Downloaded nvidia-cufile
+Downloading sympy (6.0MiB)
+Downloading nvidia-cusparselt-cu13 (162.3MiB)
+Downloading nvidia-cuda-nvrtc (44.8MiB)
+Downloading nvidia-nvjitlink (44.5MiB)
+Downloading nvidia-cuda-cupti (11.4MiB)
+Downloading networkx (2.0MiB)
+Downloading nvidia-cublas (386.1MiB)
+Downloading nvidia-cusolver (217.4MiB)
+Downloading torch (514.2MiB)
+ Downloaded nvidia-cuda-runtime
+ Downloaded cuda-bindings
+ Downloaded nvidia-cuda-cccl
+ Downloaded nvidia-cufft
+ Downloaded nvidia-cuda-cupti
+ Downloaded networkx
+ Downloaded sympy
+ Downloaded nvidia-cusparse
+ Downloaded nvidia-cusparselt-cu13
+ Downloaded nvidia-nvjitlink
+ Downloaded nvidia-cudnn-cu13
+ Downloaded nvidia-nvshmem-cu13
+ Downloaded triton
+ Downloaded nvidia-cuda-nvrtc
+ Downloaded nvidia-nccl-cu13
+ Downloaded nvidia-cusolver
+ Downloaded nvidia-cublas
+ Downloaded torch
+Installed 29 packages in 164ms
+reading BAR-ATH_tactical_atd.txt (cached after the first run) ...
+  199319 tracking lines, 0 malformed and skipped, 0 frames with no line (counted as ball missing)
+  keeper slots [24, 46]: 17946 frames counted for the team defending the goal they stand by, 1330 of them within 3 m of the ball
+  1290 touches, 50% with a player within reach; 16.6% of frames in flight
+ball place on graded frames: in play 57.7%  outside 1.0%  lost@line 11.0%  lost@play 21.0%  stale 9.3%
+player speed (m/s) on graded frames: <0.6 10.8%  <0.9 11.2%  <1.2 16.7%  <1.5 19.8%  <2.0 15.4%  <2.5 7.0%  >=2.5 17.7%
+flight on graded frames: H<0.5s 2.4%  H<1.5s 3.2%  H>=1.5s 1.7%  A<0.5s 1.3%  A<1.5s 1.8%  A>=1.5s 1.2%  unknown 4.4%
+width, home minus away (m) on graded frames: <-5 7.9%  <-3.5 7.0%  <-2 7.7%  <-1 7.1%  <0 8.4%  <1 7.2%  <2 7.5%  <3.5 12.2%  <5 13.2%  >=5 15.9%
+ball place given live, by hand: in play 59.0%  outside 0.3%  lost@line 4.0%  lost@play 21.7%  stale 15.0%
+ball place given dead, by hand: in play 41.0%  outside 4.0%  lost@line 25.0%  lost@play 15.0%  stale 15.0%
+control clue: reading positions and evaluating the classifier (cached after) ...
+hold_restarts: 585 frames turned to D
+  restart 18253 -> 18364 (+4.4 s); nearest tagged set piece -1.8 s
+  restart 27133 -> 27284 (+6.0 s); nearest tagged set piece +20.4 s
+  restart 62397 -> 62478 (+3.2 s); nearest tagged set piece -18.6 s
+  restart 82878 -> 82914 (+1.4 s); nearest tagged set piece +77.3 s
+  restart 144204 -> 144334 (+5.2 s); nearest tagged set piece -5.8 s
+  restart 148689 -> 148765 (+3.0 s); nearest tagged set piece -5.3 s
+-> evaluation/results/kp_base.csv
+half 1: H  28309  A  14748  D  36410 (D 46%)
+   117 possessions median   8.2 s  mean  14.7 s  p90  37.2 s  max    59 s  under 2 s 6%  under 4 s 28%
+    45 stoppages   median  21.6 s  mean  32.4 s  p90  62.9 s  max   213 s  under 2 s 0%  under 4 s 9%
+half 2: H  24061  A  17060  D  38269 (D 48%)
+   124 possessions median   9.1 s  mean  13.3 s  p90  29.3 s  max    57 s  under 2 s 8%  under 4 s 25%
+    57 stoppages   median  21.1 s  mean  26.9 s  p90  50.5 s  max   222 s  under 2 s 2%  under 4 s 4%
+102 stoppages: 19 blind (ball missing throughout), 48 same team before and after, 8 both; 13 start more than 2 s into a missing ball
+Smart Tagging: a decoded restart within 2 s of 54 of the 58 tagged set pieces. No tagged set piece within 5 s of their end: 41 of all 102 stoppages, 7 of the 13 that start more than 2 s into a missing ball, 3 of the 8 blind same-team ones
+e76d697a8c681732f55ebe02a27e8ed5b8f6ac299270ccc7e03a79bedc7221ed  evaluation/results/kp_base.csv
