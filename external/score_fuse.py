@@ -11,6 +11,8 @@ p(H, A, D) for a match comes from the fold net that never saw the match's provid
 providers it was trained on and added to the decoder's log emissions next to the control
 classifier's. Everything else is external/score_control.py: same ball, same tables, same folded
 yardstick. Prints aggregates only, and saves every match's scores to data/cache/fuse_<out>.npz.
+--keeper '{"k": {}}' also scores each variant with hmm.keeper_hold.keeper_holds applied after the
+restart hold (the dict's values are its keyword arguments) and lists where it fired.
 """
 
 import argparse
@@ -31,9 +33,12 @@ import score_hmm as sh  # noqa: E402
 from control import CONTROL_SECONDS, control_labels  # noqa: E402
 from control_features import CACHE, match_ball  # noqa: E402
 from hmm.net_clue import log_ratio  # noqa: E402
+from hmm.keeper_hold import keeper_holds  # noqa: E402
+import json  # noqa: E402
 from hmm.clues import ball_is_usable, ball_place_category, gap_distance_category  # noqa: E402
 
 STATE = {}
+STATS = []
 
 
 def _init(state):
@@ -65,6 +70,7 @@ def label_shares(paths):
 
 
 def run(name):
+    STATS.clear()
     paths, tabs, loso, variants = (STATE[k] for k in ("paths", "tables", "loso", "variants"))
     k = name.split("_")[0]
     speed_t, flight_t, gap_t, width_t = tabs[k]
@@ -101,9 +107,24 @@ def run(name):
                           extra=[(width, width_t, ww)], direct=direct, min_possession=fold)
         if STATE.get("hold_restart"):
             pred = dec.hold_restarts(pred, bx, by, fps)
+        base_pred = pred
+        pred = base_pred.copy()
         pred[d["labels"] == "X"] = "X"
         out[label] = [sh.score(gt, pred) for gt in views]
-    return name, out
+        for kname, kopts in STATE.get("keeper", {}).items():
+            players = d["players"]
+            kp, fired = keeper_holds(base_pred, players[:, :, 0].astype(float),
+                                     players[:, :, 1].astype(float), d["team"], bx, by, pitch,
+                                     fps, **kopts)
+            kp[d["labels"] == "X"] = "X"
+            out[label + "+" + kname] = [sh.score(gt, kp) for gt in views]
+            if label == next(iter(variants)):
+                for b, s, e, letter in fired:
+                    gt = d["labels"][s:e]
+                    STATS.append((name, kname, b, s, e, letter, float(np.mean(gt == "D")),
+                                  float(np.mean(gt == letter)), float(np.mean(views[1][s:e] == letter)),
+                                  "".join(gt[::25]), str(base_pred[b - 1]) if b else ""))
+    return name, out, list(STATS)
 
 
 def parse(spec):
@@ -151,6 +172,7 @@ def main():
                     help="v9 as of PR 47: without holding each stoppage until a still, seen ball is "
                          "kicked (hmm.decode.hold_restarts, on by default)")
     ap.add_argument("--out", default="")
+    ap.add_argument("--keeper", default="", help='JSON {name: keeper_holds kwargs} to also score')
     a = ap.parse_args()
     paths = {os.path.basename(p)[:-4]: p
              for p in sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
@@ -161,9 +183,26 @@ def main():
     state = dict(paths=paths, tables=sc.tables(all_paths), shares=label_shares(all_paths),
                  loso=dict(np.load(os.path.join(CACHE, a.loso))), variants=variants,
                  tags=a.tag.split(","), fold_seconds=a.fold_seconds,
-                 min_possession=a.min_possession, hold_restart=a.hold_restart)
+                 min_possession=a.min_possession, hold_restart=a.hold_restart,
+                 keeper=json.loads(a.keeper) if a.keeper else {})
     with Pool(a.jobs, initializer=_init, initargs=(state,)) as pool:
-        rows = dict(pool.map(run, list(paths), chunksize=1))
+        res = pool.map(run, list(paths), chunksize=1)
+    rows = {n: o for n, o, _ in res}
+    stats = [x for _, _, st in res for x in st]
+    if stats:
+        json.dump(stats, open(os.path.join(CACHE, "keeper_stats.json"), "w"), default=int)
+        print("\nkeeper_holds firings: share of their frames that are truly dead, and truly the keeper's team")
+        for kname in state["keeper"]:
+            fs = [x for x in stats if x[1] == kname]
+            print("  {}: {} firings, {:.0f} s; truly dead {:.0%}, keeper team (raw) {:.0%}, folded {:.0%}".format(
+                kname, len(fs), sum((x[4] - x[2]) for x in fs) / 25,
+                np.average([x[6] for x in fs], weights=[x[4]-x[3] for x in fs]) if fs else 0,
+                np.average([x[7] for x in fs], weights=[x[4]-x[3] for x in fs]) if fs else 0,
+                np.average([x[8] for x in fs], weights=[x[4]-x[3] for x in fs]) if fs else 0))
+            for k in sh.SETS:
+                ks = [x for x in fs if x[0].startswith(k)]
+                print("    {}: {} firings, {:.0f} s, truly dead {:.0%}".format(k, len(ks), sum(x[4]-x[3] for x in ks)/25,
+                    np.average([x[6] for x in ks], weights=[x[4]-x[3] for x in ks]) if ks else 0))
     report(rows, next(iter(variants)))
     if a.out:
         np.savez(os.path.join(CACHE, "fuse_{}.npz".format(a.out)),
