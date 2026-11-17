@@ -33,9 +33,13 @@ unknown and likely lower.
 
 ## Effect on BAR-ATH
 
-The tracker's gaps are mostly stoppages: the submission calls 88.6% of gap frames dead (13% of
-seen frames), and gaps over 10 s are 87-97% dead. The models read "no ball" as a dead-ball clue,
-so a fill mostly lands where it can only hurt.
+The submission calls 88.6% of the tracker's gap frames dead (13% of seen frames), and gaps over
+10 s 87-97%. That figure describes the model, not the match: it calls them dead partly *because*
+the ball is missing. The non-circular number is the public window's truth: of its 885 graded
+tracker-gap frames, 55.8% are dead (14.7% of seen frames), and the submission calls 58.0% of them
+dead. So the gaps are mostly but not overwhelmingly stoppages (a 5-minute sample; the long gaps of
+the full match are not in it), and the model's dead calls there are about as frequent as the
+truth's.
 
 | file | ball seen (graded) | frames changed | dead share | team spells | public 5 min spellF1 (bootstrap 5-95%) | Smart Tagging phase share vs sub |
 |---|---|---|---|---|---|---|
@@ -48,6 +52,10 @@ anything; it only rules out a large gain. The tag check is a smoke test. Neither
 the all-gaps fill is worse on the whole-match tag check with a bootstrap band below zero.
 
 ## What was not done (honest limits)
+
+- **The null result is about these nets, not about the video ball.** The learned nets were trained
+  on balls with tracker-like gaps (alldata/learned feats.bar_like), so a filled BAR-ATH ball is out
+  of their training distribution. Retraining with simulated video fills would be the fair test.
 
 - **No held-out score.** The detector cannot be run on the outside matches (no video), so there is
   no spellF1 for this on IDSSE / Metrica / SkillCorner. A simulation (outside ball hidden like

@@ -18,13 +18,9 @@ def detections():
 
 
 def scanned_frames():
-    t = np.load(os.path.join(ROOT, "data/cache/video/targets.npz"))
-    want = np.union1d(t["gap"], t["val"])
-    out = []
-    for p in glob.glob(os.path.join(ROOT, "data/cache/video/det_*.npz")):
-        z = np.load(p); f0, n = int(z["first"]), int(z["n"])
-        out.append(want[(want >= f0) & (want < f0 + n)])
-    return np.unique(np.concatenate(out))
+    """Frames detect.py actually decoded: every decoded frame has at least one row (a NaN row when
+    nothing was found), so the rows are the exact set."""
+    return np.unique(detections()[:, 0]).astype(int)
 
 
 def picks(min_conf=MIN_CONF):

@@ -65,3 +65,6 @@ env/
 
 # -- training logs (deep/run_folds.sh, deep/train.py) -----------------------------------------
 logs/
+
+# Ultralytics downloads its weights into the working directory (alldata/video/detect.py)
+yolo*.pt
