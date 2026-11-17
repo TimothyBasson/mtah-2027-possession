@@ -84,7 +84,9 @@ The net runs on one thread with torch pinned, so a rerun on the same machine doe
 arithmetic. Across CPUs with different instruction sets the last bits of a probability can
 differ, and a near-tie in the Viterbi path could then move a boundary: two runs on one machine
 give the same file (sha256 cf1a838d...2ce02d31 for PR 47; e76d697a...bedc7221ed with the restart hold
-and the keeper fix of PR 57), and it has not been checked on a second one.
+and the keeper fix of PR 57; 6c565c68...5eefa121e with the keeper-area clue of PR 68 at 4x, the
+default since 2026-11-17, --keeper 0 for the e76d697a file), and it has not been checked on a
+second one.
     python -m hmm.decode --no-control       # v6 again (v7 is commit fe457a3: its classifier read
                                             # columns the v8 features leave out)
     python -m hmm.decode --no-control --no-width   # v5 again
@@ -118,7 +120,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
 from hmm.ball import flight_clue, mirror_flight  # noqa: E402
-from hmm import trees  # noqa: E402
+from hmm import ahead, keeper, trees  # noqa: E402
 from hmm.clues import (  # noqa: E402
     KEEPER_ON_BALL, MISSING_AFTER_LINE, N_DISTANCE_BINS, N_GAP_BINS, N_PLACES, ball_is_usable,
     ball_place_category, cache_key, gap_distance_category, keeper_slots, load_distances,
@@ -323,6 +325,35 @@ MIN_POSSESSION_SECONDS = 0.0
 # missing.
 NET_MODELS = tuple(os.path.join(ROOT, "deep", "models", name) for name in ("bt.pt", "sw25.pt"))
 NET_WEIGHT = 0.3
+# Look-ahead ball clue (hmm/ahead.py): category shares over the three external providers' labels,
+# each provider counted equally, times 1000 (the pseudo-count of 1 per cell is the floor).
+AHEAD_GIVEN_HOME = np.array([28.0, 1.4, 6.7, 50.9, 6.4, 47.5, 34.3, 22.0, 721.1, 81.7])
+AHEAD_GIVEN_DEAD = np.array([419.0, 30.2, 30.2, 110.2, 71.1, 48.3, 3.5, 3.5, 243.7, 40.2])
+AHEAD_MULTIPLE = 0.0
+
+
+# Keeper-area ball clue (hmm/keeper.py): frames per million in each category (KEEP_MISS_HOME,
+# KEEP_MISS_AWAY, KEEP_STILL_HOME, KEEP_STILL_AWAY, none) over the three external providers'
+# labels, each provider counted equally (home: H frames plus A frames mirrored; dead: D frames
+# both ways round), from kp/fit_table.py, per --keeper-ends. Only the "box" and "next" gaps were
+# counted; the still-ball categories (2, 3) hurt IDSSE held out and are left at zero.
+KEEPER_GIVEN = {
+    "box": ([18286.7, 5074.9, 0.0, 0.0, 2976638.4], [5498.2, 5498.2, 0.0, 0.0, 2989003.5]),
+    "next": ([24825.5, 9282.4, 0.0, 0.0, 2965892.0], [7863.1, 7863.1, 0.0, 0.0, 2984273.7]),
+}
+KEEPER_CATS = (0, 1)
+KEEPER_ENDS = "box"
+KEEPER_MULTIPLE = 4.0
+
+
+def keeper_table(ends=KEEPER_ENDS):
+    """log p(keeper category | state), states x keeper categories (hmm/keeper.py)."""
+    return keeper.table(*KEEPER_GIVEN[ends])
+
+
+def ahead_table(home=AHEAD_GIVEN_HOME, dead=AHEAD_GIVEN_DEAD):
+    """log p(next sighting | last sighting, state), states x ahead categories (hmm/ahead.py)."""
+    return ahead.table(home, dead)
 
 # A restart is the kick, not the moment the ball is put down. Where the decoder ends a stoppage
 # while the ball, seen, stays still (under RESTART_STILL m/s for RESTART_MIN_STILL s) and is then
@@ -642,6 +673,49 @@ def load_net(model_paths=NET_MODELS, threads=1):
     return log_ratio(probs, halves, len(players))
 
 
+def keeper_positions(game=GAME, data_dir=None):
+    """(ball_x, ball_y, usable, px, py, keeper_slot, pitch, halves) for the look-ahead and keeper
+    clues. A keeper is either keeper slot of the metadata, credited to the team defending the goal
+    he stands by (team_by_frame). Positions are cached under data/cache."""
+    meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
+    n_frames = source_frames("tactical", game)
+    pitch = GAMES[game]["pitch"]
+    team_of_track = team_of_each_track(meta_path)
+    keepers = keeper_slots(meta_path)
+    halves = graded_segments(game)
+    key = cache_key(raw_path, team_of_track, n_frames, pitch, FPS, keepers, halves)
+    cache_path = os.path.join(CACHE_DIR, "positions_{}.npz".format(key))
+    if os.path.exists(cache_path):
+        z = np.load(cache_path)
+        px, py, ball_x, ball_y = z["px"], z["py"], z["bx"], z["by"]
+    else:
+        px, py, ball_x, ball_y = read_positions(raw_path, len(team_of_track), n_frames, pitch)[:4]
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        np.savez(cache_path, px=px, py=py, bx=ball_x, by=ball_y)
+    team = team_by_frame(px, team_of_track, keepers, halves, pitch[0])
+    keeper_slot = np.full((n_frames, 2), -1, int)
+    for slot in keepers:
+        for side in (0, 1):
+            keeper_slot[team[:, slot] == side, side] = slot
+    usable = ball_is_usable(ball_x, ball_y, pitch)
+    return (ball_x, ball_y, usable, px.astype(float), py.astype(float), keeper_slot, pitch,
+            halves)
+
+
+def load_ahead(game=GAME, data_dir=None):
+    """(frames,) look-ahead ball category for every video frame (hmm/ahead.py), -1 where the ball
+    is seen."""
+    bx, by, usable, px, py, keeper_slot, pitch, halves = keeper_positions(game, data_dir)
+    return ahead.ahead_category(bx, by, usable, px, py, keeper_slot, pitch, FPS, halves)
+
+
+def load_keeper(game=GAME, data_dir=None, use=KEEPER_CATS, ends=KEEPER_ENDS):
+    """(frames,) keeper-area ball category for every video frame (hmm/keeper.py), -1 elsewhere."""
+    bx, by, usable, px, py, keeper_slot, pitch, halves = keeper_positions(game, data_dir)
+    return keeper.keeper_category(bx, by, usable, px, py, keeper_slot, pitch, FPS, halves,
+                                  use=use, ends=ends)
+
+
 def load_observations(game=GAME, data_dir=None):
     """(gap-distance, place, speed, flight, width) categories for every video frame."""
     meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
@@ -830,6 +904,16 @@ def main():
                                  MIN_POSSESSION_SECONDS))
     parser.add_argument("--weight", type=float, default=WEIGHT,
                         help="emission weight (v5: {}, v4: {})".format(WEIGHT, WEIGHT_V4))
+    parser.add_argument("--ahead", type=float, default=AHEAD_MULTIPLE,
+                        help="look-ahead ball clue (hmm/ahead.py) at this multiple of --weight "
+                             "(default {:g}; 0 for none, which is v9)".format(AHEAD_MULTIPLE))
+    parser.add_argument("--keeper", type=float, default=KEEPER_MULTIPLE,
+                        help="keeper-area ball clue (hmm/keeper.py) at this multiple of --weight "
+                             "(default {:g}; 0 for none, which is v9 as of PR 60)".format(KEEPER_MULTIPLE))
+    parser.add_argument("--keeper-cats", default="".join(map(str, KEEPER_CATS)),
+                        help="keeper categories used (0/1 ball missing at the home/away keeper, "
+                             "2/3 ball still at him)")
+    parser.add_argument("--keeper-ends", default=KEEPER_ENDS, choices=sorted(KEEPER_GIVEN))
     parser.add_argument("--hand-gap", action="store_true",
                         help="ablation: v4's hand-set gap table, without the distance")
     parser.add_argument("--no-width", action="store_true",
@@ -869,6 +953,13 @@ def main():
     clues = [others[0], (place, place_table(live, dead))] + others[1:]
 
     extra = [] if args.no_width else [(width, width_table(), WIDTH_WEIGHT)]
+    if args.ahead > 0:
+        extra.append((load_ahead(), ahead_table(), args.ahead * args.weight))
+    if args.keeper > 0:
+        cats = tuple(int(c) for c in args.keeper_cats)
+        kc = load_keeper(use=cats, ends=args.keeper_ends)
+        print("keeper clue: {} frames in a keeper category".format(int(np.sum(kc >= 0))))
+        extra.append((kc, keeper_table(args.keeper_ends), args.keeper * args.weight))
     direct = None if args.no_control else args.control_weight * load_control(
         model_path=args.control_model)
     use_net = not (args.no_net or args.no_control)
@@ -905,6 +996,12 @@ def main():
                                            ("_mp{:g}".format(args.min_possession),
                                             not args.no_control
                                             and args.min_possession != MIN_POSSESSION_SECONDS),
+                                           ("_ahead{:g}".format(args.ahead),
+                                            args.ahead != AHEAD_MULTIPLE),
+                                           ("_keeper{:g}_{}_{}".format(args.keeper,
+                                                                       args.keeper_cats,
+                                                                       args.keeper_ends),
+                                            args.keeper != KEEPER_MULTIPLE),
                                            ("_handgap", args.hand_gap),
                                            ("_nowidth", args.no_width),
                                            ("_fitplace", args.fit_place),
