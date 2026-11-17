@@ -119,7 +119,8 @@ class Net(nn.Module):
         self.out = nn.Linear(d, 2 if team_only else 6)
         nn.init.zeros_(self.out.weight); nn.init.zeros_(self.out.bias)
 
-    def forward(self, x, base):
+    def forward(self, x, base, off=None, lens=None):
+        """off: (B,) first token's index in the half (crops); lens: (B,) real frames (padding after)."""
         B, T, _ = x.shape
         h = self.inp(x)
         h = self.tcn(h.transpose(1, 2)).transpose(1, 2)
@@ -127,8 +128,15 @@ class Net(nn.Module):
             P = self.pool
             Tp = (T + P - 1) // P
             hp = F.pad(h, (0, 0, 0, Tp * P - T)).reshape(B, Tp, P, -1).mean(2)
-            hp = hp + time_enc(Tp, hp.shape[-1]).to(hp)
-            c = self.enc(hp)
+            if off is None:
+                hp = hp + time_enc(Tp, hp.shape[-1]).to(hp)
+            else:
+                hp = hp + torch.stack([time_enc(Tp, hp.shape[-1], int(o)) for o in off]).to(hp)
+            mask = None
+            if lens is not None:
+                ntok = (lens + P - 1) // P
+                mask = torch.arange(Tp)[None, :] >= ntok[:, None]   # True = padding, not attended
+            c = self.enc(hp, src_key_padding_mask=mask)
             c = c.repeat_interleave(P, 1)[:, :T]
             h = h + self.mix(torch.cat([h, c], -1))
         h = self.post(h.transpose(1, 2)).transpose(1, 2)
@@ -174,16 +182,17 @@ def draw(train, rng, B, share, sym, crop, noise):
             X = X * mi
         if noise:
             X = X + rng.normal(0, noise, X.shape).astype(np.float32)
-        out.append((X, bs, y, yf))
+        out.append((X, bs, y, yf, s // 10))
     L = max(len(o[0]) for o in out)
     nf = out[0][0].shape[1]
     Xb = np.zeros((B, L, nf), np.float32); Bb = np.zeros((B, L, 6), np.float32)
     Yb = np.full((B, L), -1, np.int64); Yf = np.full((B, L), -1, np.int64)
-    for i, (X, bs, y, yf) in enumerate(out):
+    offs = torch.tensor([o[4] for o in out]); lens = torch.tensor([len(o[0]) for o in out])
+    for i, (X, bs, y, yf, _) in enumerate(out):
         n = len(X)
         Xb[i, :n], Bb[i, :n], Yb[i, :n], Yf[i, :n] = X, bs, y, yf
     t = torch.from_numpy
-    return t(Xb), t(Bb), t(Yb), t(Yf)
+    return t(Xb), t(Bb), t(Yb), t(Yf), offs, lens
 
 
 @torch.no_grad()
@@ -241,8 +250,8 @@ def main():
     t0 = time.time()
     for step in range(a.steps):
         net.train()
-        X, bs, y, yf = draw(train, rng, a.batch, share, sym, a.crop, a.noise)
-        lg = net(X, bs)
+        X, bs, y, yf, offs, lens = draw(train, rng, a.batch, share, sym, a.crop, a.noise)
+        lg = net(X, bs, offs, lens)
         loss = (F.cross_entropy(lg[..., :3].reshape(-1, 3), y.reshape(-1), ignore_index=-1, label_smoothing=0.02)
                 + F.cross_entropy(lg[..., 3:].reshape(-1, 3), yf.reshape(-1), ignore_index=-1, label_smoothing=0.02))
         opt.zero_grad()
