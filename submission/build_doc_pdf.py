@@ -105,6 +105,8 @@ def main():
     pdf_path = os.path.join(OUT_DIR, name + ".pdf")
     cmd = [find_chrome(args.chrome), "--headless", "--disable-gpu", "--no-pdf-header-footer",
            "--print-to-pdf=" + pdf_path, "file://" + html_path]
+    if os.path.exists(pdf_path):
+        os.remove(pdf_path)  # so a run that writes nothing cannot pass off the last PDF as new
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         cmd.insert(1, "--no-sandbox")  # Chrome refuses to run as root (containers) without it
     result = subprocess.run(cmd, capture_output=True, text=True)
