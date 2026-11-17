@@ -47,7 +47,7 @@ Reproducibility
 Public repository
 - [x] Git history audited for data, ground truth and label files across all 84 branches on GitHub: clean (2026-11-17). Re-check if new branches are pushed: the script was removed in a53aadc, so recover it first: `git show d94a530:submission/audit_public_repo.py > submission/audit_public_repo.py && git fetch origin && python3 submission/audit_public_repo.py` (it finds the repo from its own path, so it must sit in `submission/`; delete it afterwards). This needs `d94a530` reachable: merge PR 38 with a merge commit, not a squash, or run the re-check before the branch is deleted
 - [ ] Repo and data out of iCloud's reach (Desktop is synced; offloaded inputs read as empty -- `make_submission.py` stops on them, other scripts do not)
-- [ ] Root README explains this is our submission and how to reproduce it (it is still the organisers' README)
+- [x] Root README explains this is our submission and how to reproduce it
 - [ ] Repo made public, URL opened in a logged-out browser
 
 Upload
