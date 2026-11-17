@@ -88,7 +88,7 @@ Some parts of the pipeline read the match being labelled. None of them uses a BA
 | Restart hold and keeper hold | parameters swept on the outside matches | applied after decoding | no |
 | Public 5-minute ground truth | not used for learning | not applicable | scored as a pipeline check only |
 
-No setting was tuned on the public window; the code records this beside each one (`hmm/decode.py`, `hmm/ball.py`, `deep/README.md`, `external/README.md`). The choice of hmm_v9 over the nets alone was made on the held-out outside matches (0.677 against 0.660 in the same decoder).
+The restart hold and the keeper rules were adopted from failure types seen on BAR-ATH's video; their parameters were set on the outside matches only, and no frame of BAR-ATH was labelled or corrected by hand. No setting was tuned on the public window; the code records this beside each one (`hmm/decode.py`, `hmm/ball.py`, `deep/README.md`, `external/README.md`). The choice of hmm_v9 over the nets alone was made on the held-out outside matches (0.677 against 0.660 in the same decoder).
 
 ## 4. Possession rules implemented
 
