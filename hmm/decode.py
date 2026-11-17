@@ -371,6 +371,18 @@ RESTART_MIN_STILL = 0.5
 RESTART_WAIT = 10.0
 RESTART_MAX_MISSING = 1.0
 
+# Keeper holding the ball read as a stoppage (hmm/keeper_hold.py; on by default since 2026-11-17,
+# --no-keeper-hold turns it off).
+# Where the tracker loses the ball in the keeper's hands and the players slow down, the decoder can
+# call dead ball while the keeper holds it. After decoding, a stoppage that starts with the ball at
+# the defending keeper inside his area, ends with the ball seen again at that team's player inside
+# the area but outside the goal area, and shows no placed ball away from him, is given to the
+# keeper's team, if the decoder already gives that team the play after it and it lasts at most
+# 12 s. Held out by provider, with the keeper-area clue at 4x, it is flat: 0.727 / 0.807 / 0.496,
+# mean 0.6767, against 0.6763 (0.6637 against 0.6633 with the net weight picked per provider on
+# the other two; kp/score_keeper.py --keeper-hold). On BAR-ATH it moves 698 frames; the public
+# window is 0.774 either way.
+
 
 def gap_table():
     """log p(gap bin | state), states x gap bins."""
@@ -891,6 +903,10 @@ def main():
     parser.add_argument("--no-hold-restart", dest="hold_restart", action="store_false",
                         help="ablation: end a stoppage where Viterbi does, without holding it until "
                              "a still, seen ball is kicked (hold_restarts)")
+    parser.add_argument("--no-keeper-hold", dest="keeper_hold", action="store_false",
+                        help="ablation: leave a stoppage the decoder calls while a keeper holds "
+                             "the ball as it is (hmm.keeper_hold, on by default)")
+    parser.add_argument("--keeper-opts", default="", help="JSON kwargs for keeper_holds")
     parser.add_argument("--no-net", action="store_true",
                         help="ablation: without the players-only net, which is v8")
     parser.add_argument("--net-model", default=",".join(NET_MODELS),
@@ -987,6 +1003,23 @@ def main():
             print("  restart {} -> {} (+{:.1f} s); nearest tagged set piece {}".format(
                 a, b, (b - a) / FPS, "none" if near is None else "{:+.1f} s".format((near - b) / FPS)))
         labels = held
+    if args.keeper_hold:
+        import json
+        from hmm.keeper_hold import keeper_holds
+        meta_path, raw_path = require(["atd_meta", "atd_raw"])
+        team_of_track = team_of_each_track(meta_path)
+        n_frames = source_frames("tactical")
+        pitch = GAMES[GAME]["pitch"]
+        px, py, ball_x, ball_y = read_positions(raw_path, len(team_of_track), n_frames, pitch)[:4]
+        team = team_by_frame(px, team_of_track, keeper_slots(meta_path), segments, pitch[0])
+        kept, fired = keeper_holds(labels, px.astype(float), py.astype(float), team, ball_x,
+                                   ball_y, pitch, FPS,
+                                   **(json.loads(args.keeper_opts) if args.keeper_opts else {}))
+        print("keeper_holds: {} frames handed to the keeper's team".format(
+            int(np.sum(kept != labels))))
+        for b, s, e, letter in fired:
+            print("  stoppage {}-{} ({:.1f} s) -> {} from {}".format(s, e, (e - s) / FPS, letter, b))
+        labels = kept
     ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),
                                            ("_cw{:g}".format(args.control_weight),
                                             not args.no_control
@@ -1005,7 +1038,8 @@ def main():
                                            ("_handgap", args.hand_gap),
                                            ("_nowidth", args.no_width),
                                            ("_fitplace", args.fit_place),
-                                           ("_nohold", not args.hold_restart)) if on)
+                                           ("_nohold", not args.hold_restart),
+                                           ("_nokeeperhold", not args.keeper_hold)) if on)
     path = write_submission(
         args.out or os.path.join(RESULTS_DIR, "hmm_v{}{}.csv".format(
             6 if args.no_control else 9 if use_net else 8, ablation)), labels)

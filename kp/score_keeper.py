@@ -28,6 +28,7 @@ from control_features import CACHE, match_ball  # noqa: E402
 from hmm import ahead, keeper  # noqa: E402
 from hmm.clues import ball_is_usable, ball_place_category, gap_distance_category  # noqa: E402
 from hmm.net_clue import log_ratio  # noqa: E402
+from hmm.keeper_hold import keeper_holds  # noqa: E402
 
 STATE = {}
 SCALE = 1e6
@@ -92,8 +93,15 @@ def run(name):
                           extra=extra, direct=direct)
         if STATE["hold_restart"]:
             pred = dec.hold_restarts(pred, bx, by, fps)
+        base = pred.copy()
         pred[d["labels"] == "X"] = "X"
         out[label] = [sh.score(gt, pred) for gt in views]
+        if STATE.get("keeper_hold"):
+            kp = keeper_holds(base, d["players"][:, :, 0].astype(float),
+                              d["players"][:, :, 1].astype(float), d["team"], bx, by, pitch,
+                              fps)[0]
+            kp[d["labels"] == "X"] = "X"
+            out[label + "+hold"] = [sh.score(gt, kp) for gt in views]
     return name, out
 
 
@@ -118,6 +126,8 @@ def main():
     ap.add_argument("--loso", default="control_loso.npz")
     ap.add_argument("--fold-seconds", type=float, default=sf.CONTROL_SECONDS)
     ap.add_argument("--no-hold-restart", dest="hold_restart", action="store_false")
+    ap.add_argument("--keeper-hold", action="store_true",
+                    help="also score each variant with hmm.keeper_hold.keeper_holds after it")
     ap.add_argument("--out", default="")
     a = ap.parse_args()
     paths = {os.path.basename(p)[:-4]: p
@@ -145,12 +155,12 @@ def main():
     state = dict(paths=paths, tables=sc.tables(paths), shares=sf.label_shares(paths),
                  loso=dict(np.load(os.path.join(CACHE, a.loso))), variants=variants,
                  tags=a.tag.split(","), fold_seconds=a.fold_seconds, keeper=tabs, configs=cfg,
-                 wc=a.wc, wn=a.wn, hold_restart=a.hold_restart)
+                 wc=a.wc, wn=a.wn, hold_restart=a.hold_restart, keeper_hold=a.keeper_hold)
     with Pool(a.jobs, initializer=_init, initargs=(state,)) as pool:
         rows = dict(pool.map(run, list(paths), chunksize=1))
     sf.report(rows, next(iter(variants)))
     if a.out:
-        labels = list(variants)
+        labels = list(next(iter(rows.values())))
         np.savez(os.path.join(CACHE, "keeper_{}.npz".format(a.out)),
                  names=np.array(list(rows)), variants=np.array(labels),
                  scores=np.array([[rows[n][m] for m in labels] for n in rows]))
