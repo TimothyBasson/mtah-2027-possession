@@ -36,6 +36,6 @@ show the effect it is aimed at; it shows the clue costs little.
 
 ## BAR-ATH (kp/barath.sh)
 
-`--keeper 0` is byte-identical to main (sha256 e76d697a...bedc7221ed). Public window spellF1 0.774
+On by default at 4x since 2026-11-17 (hmm_v9.csv sha256 6c565c68...5eefa121e). `--keeper 0` gives the file of PR 60 (sha256 e76d697a...bedc7221ed). Public window spellF1 0.774
 at every weight. At 4x, 0.9% of graded frames change and the dead share goes 0.470 to 0.462; at 8x,
 1.4% and 0.457.

@@ -7,7 +7,7 @@
 
 The default nets (tpsN, tpsNs1) read Tim's hmm/ v8 as an input: its decoded labels and its control
 classifier's posteriors on BAR-ATH. When those are not cached, this script first runs
-`python -m hmm.decode --no-net --no-hold-restart` (v8 as trained on, restart hold pinned off) and tim.py --bar. The fallback nets do not read them.
+`python -m hmm.decode --no-net --no-hold-restart --keeper 0` (v8 as trained on, restart hold pinned off) and tim.py --bar. The fallback nets do not read them.
 
 Averages the probabilities of the named runs' all-match nets (train.py --fold none), decodes
 them as deep/run.py does, and writes evaluation/results/<out>. The decode also reads the touches
@@ -101,8 +101,9 @@ def tim_ready():
     import subprocess
     env = dict(os.environ, PYTHONHASHSEED="0")
     # v8 exactly as the nets were trained on and as the submission was made: since PR 60 the
-    # restart hold is on by default in hmm.decode, and it moves 14 BAR-ATH frames of the file.
-    subprocess.run([sys.executable, "-m", "hmm.decode", "--no-net", "--no-hold-restart",
+    # restart hold is on by default in hmm.decode, and it moves 14 BAR-ATH frames of the file;
+    # since PR 68 the keeper-area clue is on by default too.
+    subprocess.run([sys.executable, "-m", "hmm.decode", "--no-net", "--no-hold-restart", "--keeper", "0",
                     "--out", os.path.join(ROOT, "evaluation", "results", "hmm_v8.csv")],
                    cwd=ROOT, env=env, check=True)
     subprocess.run([sys.executable, os.path.join(HERE, "tim.py"), "--bar"], cwd=ROOT, env=env, check=True)

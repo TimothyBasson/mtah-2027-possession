@@ -84,7 +84,9 @@ The net runs on one thread with torch pinned, so a rerun on the same machine doe
 arithmetic. Across CPUs with different instruction sets the last bits of a probability can
 differ, and a near-tie in the Viterbi path could then move a boundary: two runs on one machine
 give the same file (sha256 cf1a838d...2ce02d31 for PR 47; e76d697a...bedc7221ed with the restart hold
-and the keeper fix of PR 57), and it has not been checked on a second one.
+and the keeper fix of PR 57; 6c565c68...5eefa121e with the keeper-area clue of PR 68 at 4x, the
+default since 2026-11-17, --keeper 0 for the e76d697a file), and it has not been checked on a
+second one.
     python -m hmm.decode --no-control       # v6 again (v7 is commit fe457a3: its classifier read
                                             # columns the v8 features leave out)
     python -m hmm.decode --no-control --no-width   # v5 again
@@ -341,7 +343,7 @@ KEEPER_GIVEN = {
 }
 KEEPER_CATS = (0, 1)
 KEEPER_ENDS = "box"
-KEEPER_MULTIPLE = 0.0
+KEEPER_MULTIPLE = 4.0
 
 
 def keeper_table(ends=KEEPER_ENDS):
@@ -907,7 +909,7 @@ def main():
                              "(default {:g}; 0 for none, which is v9)".format(AHEAD_MULTIPLE))
     parser.add_argument("--keeper", type=float, default=KEEPER_MULTIPLE,
                         help="keeper-area ball clue (hmm/keeper.py) at this multiple of --weight "
-                             "(default {:g}; 0 for none)".format(KEEPER_MULTIPLE))
+                             "(default {:g}; 0 for none, which is v9 as of PR 60)".format(KEEPER_MULTIPLE))
     parser.add_argument("--keeper-cats", default="".join(map(str, KEEPER_CATS)),
                         help="keeper categories used (0/1 ball missing at the home/away keeper, "
                              "2/3 ball still at him)")
