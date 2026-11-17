@@ -360,12 +360,11 @@ def ahead_table(home=AHEAD_GIVEN_HOME, dead=AHEAD_GIVEN_DEAD):
 # while the ball, seen, stays still (under RESTART_STILL m/s for RESTART_MIN_STILL s) and is then
 # kicked (over RESTART_KICK m/s) within RESTART_WAIT s, the stoppage is held until the kick
 # (hold_restarts). The gap clue reads a player standing over a placed free kick or goal kick as
-# possession; video notes on BAR-ATH (2026-11-16) flag restarts called 3-6 s early that way.
-# On by default since 2026-11-16 (the person checked every firing on BAR-ATH against the video;
-# --no-hold-restart turns it off). Held out by provider it is flat: 0.726 / 0.807 / 0.496 against
-# v9's 0.725 / 0.807 / 0.496, since the outside providers hide or freeze the ball in a stoppage
-# and the rule rarely fires there; spellF1 averages IoU 0.3-0.7, so a few seconds at the start of
-# a long spell seldom changes a match.
+# possession, so without the hold a restart can be called several seconds before the kick.
+# On by default since 2026-11-16 (--no-hold-restart turns it off). Held out by provider it is
+# flat: 0.726 / 0.807 / 0.496 against v9's 0.725 / 0.807 / 0.496, since the outside providers
+# hide or freeze the ball in a stoppage and the rule rarely fires there; spellF1 averages IoU
+# 0.3-0.7, so a few seconds at the start of a long spell seldom changes a match.
 RESTART_STILL = 1.0
 RESTART_KICK = 5.0
 RESTART_MIN_STILL = 0.5
