@@ -42,6 +42,9 @@ def drop_ball(ball, seen, fps, seed=0, labels=None):
         i, on = i + n, not on
     out = ball.copy()
     out[~keep] = np.nan
+    if os.environ.get("VIDEO_FILL"):  # PR 71's video ball, simulated (external/video_sim.py)
+        from video_sim import fill
+        out = fill(ball, out, fps, float(os.environ["VIDEO_FILL"]))
     return out
 
 

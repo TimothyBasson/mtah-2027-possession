@@ -1,0 +1,60 @@
+== v57 wn 0.1
+  box:01:4               0.598 | 0.699 (+0.000, se 0.000, up 0/7) | 0.975 0.914 | 282
+  box:01:4+hold          0.598 | 0.699 (+0.000, se 0.000, up 1/7) | 0.975 0.914 | 282
+
+metrica (3 matches): spellF1 raw | folded (change from box:01:4 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  box:01:4               0.727 | 0.816 (+0.000, se 0.000, up 0/3) | 0.928 0.966 | 250
+  box:01:4+hold          0.727 | 0.816 (+0.000, se 0.000, up 0/3) | 0.928 0.966 | 250
+
+skillcorner (20 matches): spellF1 raw | folded (change from box:01:4 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  box:01:4               0.437 | 0.501 (+0.000, se 0.000, up 0/20) | 0.954 0.846 | 284
+  box:01:4+hold          0.437 | 0.502 (+0.000, se 0.000, up 4/20) | 0.954 0.846 | 284
+
+mean of the providers: raw | folded | alive/dead | team acc
+  box:01:4               0.587 | 0.6719 | 0.952 | 0.909   (0.699 / 0.816 / 0.501)
+  box:01:4+hold          0.587 | 0.6720 | 0.952 | 0.909   (0.699 / 0.816 / 0.502)
+== v57 wn 0.2
+  box:01:4               0.613 | 0.721 (+0.000, se 0.000, up 0/7) | 0.976 0.919 | 281
+  box:01:4+hold          0.614 | 0.721 (+0.001, se 0.000, up 2/7) | 0.976 0.919 | 280
+
+metrica (3 matches): spellF1 raw | folded (change from box:01:4 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  box:01:4               0.723 | 0.812 (+0.000, se 0.000, up 0/3) | 0.927 0.964 | 250
+  box:01:4+hold          0.723 | 0.812 (+0.000, se 0.000, up 0/3) | 0.927 0.964 | 250
+
+skillcorner (20 matches): spellF1 raw | folded (change from box:01:4 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  box:01:4               0.439 | 0.504 (+0.000, se 0.000, up 0/20) | 0.956 0.846 | 287
+  box:01:4+hold          0.439 | 0.504 (+0.000, se 0.000, up 3/20) | 0.956 0.846 | 287
+
+mean of the providers: raw | folded | alive/dead | team acc
+  box:01:4               0.592 | 0.6788 | 0.953 | 0.910   (0.721 / 0.812 / 0.504)
+  box:01:4+hold          0.592 | 0.6791 | 0.953 | 0.910   (0.721 / 0.812 / 0.504)
+== v57 wn 0.3
+  box:01:4               0.620 | 0.721 (+0.000, se 0.000, up 0/7) | 0.976 0.920 | 285
+  box:01:4+hold          0.620 | 0.721 (-0.000, se 0.001, up 1/7) | 0.976 0.920 | 285
+
+metrica (3 matches): spellF1 raw | folded (change from box:01:4 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  box:01:4               0.717 | 0.804 (+0.000, se 0.000, up 0/3) | 0.927 0.961 | 250
+  box:01:4+hold          0.717 | 0.804 (+0.000, se 0.000, up 0/3) | 0.927 0.961 | 250
+
+skillcorner (20 matches): spellF1 raw | folded (change from box:01:4 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  box:01:4               0.437 | 0.499 (+0.000, se 0.000, up 0/20) | 0.957 0.845 | 291
+  box:01:4+hold          0.437 | 0.499 (+0.000, se 0.000, up 6/20) | 0.957 0.845 | 290
+
+mean of the providers: raw | folded | alive/dead | team acc
+  box:01:4               0.591 | 0.6749 | 0.953 | 0.909   (0.721 / 0.804 / 0.499)
+  box:01:4+hold          0.591 | 0.6750 | 0.953 | 0.909   (0.721 / 0.804 / 0.499)
+== v57 wn 0.4
+  box:01:4               0.627 | 0.727 (+0.000, se 0.000, up 0/7) | 0.975 0.922 | 286
+  box:01:4+hold          0.628 | 0.728 (+0.001, se 0.000, up 2/7) | 0.975 0.922 | 286
+
+metrica (3 matches): spellF1 raw | folded (change from box:01:4 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  box:01:4               0.707 | 0.798 (+0.000, se 0.000, up 0/3) | 0.926 0.959 | 249
+  box:01:4+hold          0.707 | 0.798 (+0.000, se 0.000, up 0/3) | 0.926 0.959 | 249
+
+skillcorner (20 matches): spellF1 raw | folded (change from box:01:4 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  box:01:4               0.433 | 0.495 (+0.000, se 0.000, up 0/20) | 0.957 0.844 | 295
+  box:01:4+hold          0.433 | 0.495 (-0.000, se 0.000, up 3/20) | 0.957 0.844 | 295
+
+mean of the providers: raw | folded | alive/dead | team acc
+  box:01:4               0.589 | 0.6732 | 0.952 | 0.908   (0.727 / 0.798 / 0.495)
+  box:01:4+hold          0.589 | 0.6734 | 0.953 | 0.908   (0.728 / 0.798 / 0.495)
