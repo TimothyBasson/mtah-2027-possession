@@ -8,6 +8,8 @@ Nothing here is final. The method, the team name and the document can all change
 |---|---|---|
 | `submission.json` | team name, which method, and the command for each method | anything changes; this is the only place the choice lives |
 | `make_submission.py` | checks inputs exist and are not empty or iCloud-offloaded, runs the method, validates with the organisers' checker, refuses a degenerate file (almost all D, or a team missing), writes `out/<team>.csv` + a manifest | rarely; add methods in the json instead |
+| `doc/Gambtt.pdf` | the technical document, as uploaded with the submission | when the team's working copy (a Claude Doc) changes |
+| `doc/Gambtt.tex` | its LaTeX source; rebuild with `tectonic Gambtt.tex` in `doc/` | with the PDF |
 | `out/` | built files. Git-ignored: a submission is a full-match label file | never commit |
 
 ## Use
