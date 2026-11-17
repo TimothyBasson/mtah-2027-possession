@@ -5,7 +5,9 @@ merges the possessions either side, so one miss costs up to three. This folder a
 the ball: detect the touches themselves from the smoothed ball's change of velocity beside a
 player, then use them in the decode and as an input.
 
-**Status.** The submission since 2026-11-16 18:34Z (Gambtt: "yes make it the sub"): `python alldata/learned/run.py` writes `alldata_learned_tim_touch.csv`.
+**Superseded as the submission (2026-11-17).** Gambtt chose hmm_v9 (`python -m hmm.decode`, built by `submission/make_submission.py`) as the submitted file; the technical document submitted with it describes that model. Everything below still holds and the file is still built by `python alldata/learned/run.py` (or `make_submission.py --method alldata`); it is no longer the one uploaded.
+
+**Status.** The submission from 2026-11-16 18:34Z to 2026-11-17 (Gambtt: "yes make it the sub"): `python alldata/learned/run.py` writes `alldata_learned_tim_touch.csv`.
 
 **Result.** A learned touch detector works on the smoothed ball and on an unseen provider, and
 as decode evidence it adds **+0.010 / +0.008** (as built / folded) without retraining anything;
