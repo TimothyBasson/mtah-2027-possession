@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "viz",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["--yes", "http-server@14.1.1", "data", "-p", "8765", "-c-1", "--silent"],
+      "runtimeExecutable": "/opt/homebrew/bin/python3",
+      "runtimeArgs": ["viz/combined/serve.py", "--port", "8765"],
       "port": 8765
     }
   ]

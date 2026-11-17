@@ -20,7 +20,7 @@ import torch.nn.functional as F
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data as D  # noqa: E402
 import trackers as TR  # noqa: E402
-from net import PossessionNet  # noqa: E402
+from net import PTIME, PossessionNet  # noqa: E402
 
 VAL = {"idsse": 1, "metrica": 1, "skillcorner": 3, "soccertrack": 1}  # last n matches of each training provider
 PAD = 50  # frames of context either side of a raw window, for smoothing and velocities
@@ -42,13 +42,14 @@ def edges(y):
     """1 where the label changes within 2 steps (0.4 s) either side; ungraded frames don't count."""
     ch = np.zeros(len(y), bool)
     d = (y[1:] != y[:-1]) & (y[1:] >= 0) & (y[:-1] >= 0)
-    for k in range(-2, 3):
+    r = round(10 / D.STEP)
+    for k in range(-r, r + 1):
         i = np.flatnonzero(d) + 1 + k
         ch[i[(i >= 0) & (i < len(y))]] = True
     return ch.astype(np.float32)
 
 
-def spell_weights(y, power, ref=25, lo=0.5, hi=4.0):
+def spell_weights(y, power, ref=125 // D.STEP, lo=0.5, hi=4.0):
     """Per-frame loss weight so short possessions are not drowned by long ones: a frame in an H or A
     run of n steps weighs (ref / n) ** power, clipped. spellF1 counts each possession once, a
     per-frame loss counts it once per frame. ref is 5 s at 5 fps."""
@@ -80,7 +81,8 @@ def ball_targets(X, M, ball, y):
     ok_p = seen & M.any(-1)
     ptr = torch.softmax(-d / 2.0, -1)
     free = torch.log1p(d.min(-1)[0].clamp(max=60))
-    seg = (b[:, 1:] - b[:, :-1]) / 0.2                      # (B, T-1, 2), nan where either end unseen
+    dt = D.STEP / 25
+    seg = (b[:, 1:] - b[:, :-1]) / dt                      # (B, T-1, 2), nan where either end unseen
     bvel = torch.full_like(b, float("nan"))
     bvel[:, 1:-1] = (seg[:, 1:] + seg[:, :-1]) / 2
     ok_v = seen & torch.isfinite(bvel[..., 0]) & (bvel.norm(dim=-1) < 40)
@@ -90,6 +92,27 @@ def ball_targets(X, M, ball, y):
     hit = (torch.nan_to_num(jump) > 5.0) & ok_t
     hit = F.max_pool1d(hit.float().unsqueeze(1), 3, 1, 1).squeeze(1)
     return dict(ptr=(ptr, ok_p), bvel=(torch.nan_to_num(bvel) / 10, ok_v), touch=(hit, ok_t), free=(free, ok_p))
+
+
+def restart_losses(extra, X, M, y, R):
+    """The stoppage and restart losses (deep/restarts.py): the pointer finds the restart taker
+    while the ball is dead, a head names the kind of restart, another counts the seconds to and
+    since a stop or start. Zero where a batch has no such frame."""
+    rb, rk, rt = R
+    z = extra["rkind"].sum() * 0
+    out = {}
+    ok = torch.isfinite(rb[..., 0]) & (y == 2) & M.any(-1)
+    if "ptr" in extra and ok.any():
+        scale = torch.tensor([52.5, 34.0])
+        d = ((X[..., :2] * scale - torch.nan_to_num(rb * scale).unsqueeze(2)) ** 2).sum(-1).sqrt().masked_fill(~M, 1e4)
+        out["taker"] = -(torch.softmax(-d[ok] / 2.0, -1) * F.log_softmax(extra["ptr"][ok], -1)).sum(-1).mean()
+    else:
+        out["taker"] = z
+    ok = (rk >= 0) & (y == 2)
+    out["kind"] = F.cross_entropy(extra["rkind"][ok], rk[ok]) if ok.any() else z
+    ok = torch.isfinite(rt) & (y >= 0).unsqueeze(-1)
+    out["time"] = F.smooth_l1_loss(extra["rtime"][ok], rt[ok], beta=0.1) if ok.any() else z
+    return out
 
 
 def ball_losses(extra, tg):
@@ -107,9 +130,32 @@ def ball_losses(extra, tg):
     return out
 
 
+def with_ball(X, ball):
+    """TEACHER ONLY (--teach): the players' features with the real ball appended per player (offset
+    to the ball, nearness, the ball's velocity, ball-seen). A net fed this is never used to label
+    a match; it exists to measure what the labels allow and to give soft targets to the players-
+    only net on training matches."""
+    seen = np.isfinite(ball[..., 0])
+    b = np.nan_to_num(ball) * np.array([52.5, 34.0], np.float32)
+    v = np.zeros_like(b)
+    v[1:-1] = (b[2:] - b[:-2]) / 0.4
+    okv = np.zeros(len(b), bool); okv[1:-1] = seen[2:] & seen[:-2]
+    v = np.where((okv & (np.linalg.norm(v, axis=-1) < 40))[:, None], v, 0) / 10
+    rel = b[:, None] - X[..., :2] * np.array([52.5, 34.0], np.float32)
+    dist = np.linalg.norm(rel, axis=-1, keepdims=True)
+    f = np.concatenate([np.clip(rel / 10, -3, 3), np.exp(-dist / 2), np.broadcast_to(v[:, None], rel.shape),
+                        np.ones_like(dist)], -1).astype(np.float32)
+    f = f * seen[:, None, None] * (np.abs(X).sum(-1, keepdims=True) > 0)
+    return np.concatenate([X, f], -1)
+
+
+NBALL = 6
+
+
 def batch(train, rng, B, T, a):
     provs = sorted({m["provider"] for m in train})
-    Xs, Ms, ys, bs, es, ws = [], [], [], [], [], []
+    Xs, Ms, ys, bs, es, ws, rs, qs = [], [], [], [], [], [], [], []
+    batch.prov = []  # each window's provider, for --label-weight and --own-head
     while len(Xs) < B:
         if a.share:  # e.g. soccertrack=0.15: that provider's share of windows, the rest split equally
             w = np.array([a.share.get(q, np.nan) for q in provs])
@@ -133,15 +179,22 @@ def batch(train, rng, B, T, a):
             X, M = X[PAD // D.STEP:PAD // D.STEP + T], M[PAD // D.STEP:PAD // D.STEP + T]
         if "w" not in h or h.get("wp") != a.spell:
             h["w"], h["wp"] = spell_weights(h["y"], a.spell), a.spell
-        ws.append(h["w"][s:s + T])
+        ws.append(h["w"][s:s + T] * a.provw.get(prov, 1.0))
         if len(X) < T or (y >= 0).mean() < 0.3:
             ws.pop()
             continue
         e = edges(y)
-        if rng.random() < 0.5:
+        r = h.get("restart")  # deep/restarts.py targets; positions turn with the pitch, the rest does not
+        rb = r["rb"][s:s + T].copy() if r else np.zeros((T, 2), np.float32)
+        swapped = rng.random() < 0.5
+        if swapped:
             X, y, ball = D.swap_teams(X, y, ball)
+            rb = -rb
         if rng.random() < 0.5:
             X, ball = D.mirror(X, ball)
+            rb[:, 1] *= -1
+        if r:
+            rs.append((rb, r["rk"][s:s + T], r["rt"][s:s + T]))
         X, M = X.copy(), M.copy()
         if a.noise:
             X[..., :2] += rng.normal(0, a.noise / 40, X[..., :2].shape).astype(np.float32)
@@ -149,35 +202,46 @@ def batch(train, rng, B, T, a):
         drop = rng.random(M.shape) < p
         M &= ~drop
         X[~M] = 0
-        Xs.append(X); Ms.append(M); ys.append(y); bs.append(ball); es.append(e)
+        if a.teach:
+            X = with_ball(X, ball)
+        if a.distill:
+            q = h["soft"][s:s + T]
+            if swapped:
+                q = q[:, [1, 0, 2]]
+            qs.append(q)
+        Xs.append(X); Ms.append(M); ys.append(y); bs.append(ball); es.append(e); batch.prov.append(prov)
     t = lambda v: torch.from_numpy(np.stack(v))  # noqa: E731
-    return t(Xs), t(Ms), t(ys), t(bs), t(es), t(ws)
+    R = tuple(t([r[i] for r in rs]) for i in range(3)) if rs else None
+    return t(Xs), t(Ms), t(ys), t(bs), t(es), t(ws), R, (t(qs) if qs else None)
 
 
 @torch.no_grad()
-def predict_half(net, h, tta=True):
-    """(T, 3) probabilities, averaged over the four symmetric views of the half."""
+def predict_half(net, h, tta=True, teach=False):
+    """(T, 3) probabilities, averaged over the four symmetric views of the half. teach: the
+    ball-fed teacher (never used to label a match)."""
     net.eval()
     out = 0
     views = [(s, m) for s in (0, 1) for m in (0, 1)] if tta else [(0, 0)]
     dummy_y, dummy_b = np.zeros(len(h["y"]), np.int64), h["ball"]
     for s, m in views:
-        X = h["X"]
+        X, b = h["X"], dummy_b
         if s:
-            X, _, _ = D.swap_teams(X, dummy_y, dummy_b)
+            X, _, b = D.swap_teams(X, dummy_y, b)
         if m:
-            X, _ = D.mirror(X, dummy_b)
+            X, b = D.mirror(X, b)
+        if teach:
+            X = with_ball(X, b)
         logits = net(torch.from_numpy(X)[None], torch.from_numpy(h["M"])[None])[0][0]
         p = F.softmax(logits, -1).numpy()
         out = out + (p[:, [1, 0, 2]] if s else p)
     return out / len(views)
 
 
-def frame_scores(net, ms):
+def frame_scores(net, ms, teach=False):
     acc, n = 0, 0
     for m in ms:
         for h in m["halves"]:
-            p = predict_half(net, h, tta=False)
+            p = predict_half(net, h, tta=False, teach=teach)
             g = h["y"] >= 0
             acc += (p.argmax(1)[g] == h["y"][g]).sum(); n += g.sum()
     return acc / max(n, 1)
@@ -210,13 +274,40 @@ def main():
     ap.add_argument("--bvel", type=float, default=0.3, help="v4: ball velocity loss")
     ap.add_argument("--touch", type=float, default=0.3, help="v4: ball struck/stopped loss")
     ap.add_argument("--free", type=float, default=0.2, help="v4: ball-to-nearest-player distance loss")
+    ap.add_argument("--label-weight", nargs="*", default=[],
+                    help="provider=weight of its windows in the label losses, e.g. skillcorner=0: the provider "
+                         "still teaches through the ball targets (gated by its live/dead labels), its H/A labels "
+                         "count less or not at all; equivalent to --provw only at --spell 0")
+    ap.add_argument("--own-head", nargs="*", default=[],
+                    help="providers whose labels train a label head of their own on the shared network; "
+                         "prediction uses the main head; their turnover edges train nothing either")
+    ap.add_argument("--drop", nargs="*", default=[], help="training matches to leave out, by name")
+    ap.add_argument("--clean", default="",
+                    help="train on labels cleaned with each training match's ball (deep/clean/labels.py), "
+                         "e.g. retime+lastmask+mask; scoring labels are untouched")
+    ap.add_argument("--clean-prov", nargs="*", default=[], help="providers to clean; default all in training")
+    ap.add_argument("--teach", action="store_true",
+                    help="a TEACHER: the real ball is an input. Never labels a match; see --distill")
+    ap.add_argument("--distill", default="", help="tag of a --teach run: its probabilities on the training matches are soft targets")
+    ap.add_argument("--kd", type=float, default=1.0, help="weight of the soft-target loss with --distill")
+    ap.add_argument("--hard", type=float, default=1.0, help="weight of the label loss (lower it with --distill)")
+    ap.add_argument("--ptime", type=int, default=0, choices=(0, 2, 3),
+                    help="per-player convolutions through time in the encoder: number of stages (net.PTIME)")
+    ap.add_argument("--provw", default="", help="e.g. skillcorner=0.25: weight of a provider's LABELS in the label and "
+                    "edge losses (its ball still teaches at full weight); for a provider whose labels are noisy")
+    ap.add_argument("--restart", type=float, default=0.0,
+                    help="teach stoppages and restarts (deep/restarts.py): weight of the taker pointer loss")
+    ap.add_argument("--rkind", type=float, default=0.2, help="with --restart: kind-of-restart loss")
+    ap.add_argument("--rtime", type=float, default=0.3, help="with --restart: seconds to/since a stop or start loss")
     ap.add_argument("--d", type=int, default=128)
     ap.add_argument("--no-gru", action="store_true")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--tag", default="v2")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
+    a.provw = {k: float(v) for k, v in (kv.split("=") for kv in a.provw.split(",") if kv)}
     a.share = {k: float(v) for k, v in (kv.split("=") for kv in a.share)}
+    a.label_weight = {k: float(v) for k, v in (kv.split("=") for kv in a.label_weight)}
     torch.set_num_threads(a.threads)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
@@ -227,10 +318,36 @@ def main():
             m["knocked"] = k["halves"]
     matches = [m for m in matches if m["provider"] in ("idsse", "metrica", "skillcorner") or m["provider"] in a.extra]
     train, val, test = split(matches, a.fold) if a.fold != "none" else (matches, [], [])
+    if a.clean:
+        assert not a.knock, "--clean does not relabel the knocked copies"
+        from clean.labels import clean
+        for m in train:
+            if a.clean_prov and m["provider"] not in a.clean_prov:
+                continue
+            lab = clean(np.load(D.match_path(m["name"])), a.clean)
+            code = np.full(len(lab), -1, np.int64)
+            for i, c in enumerate(D.CLASSES):
+                code[lab == c] = i
+            for h in m["halves"]:
+                h["y"] = code[h["frames"]]
+    if a.distill:
+        for m in train:
+            z = np.load(os.path.join(D.ROOT, "data", "cache", "deep", a.distill, a.fold, m["name"] + ".npz"))
+            for i, h in enumerate(m["halves"]):
+                h["soft"] = z[f"p{i}"].astype(np.float32)
+    if a.restart > 0:  # training matches only: a held-out match's ball is never read
+        import restarts
+        tg = restarts.load_all()
+        for m in train:
+            for h, r in zip(m["halves"], tg[m["name"]]):
+                h["restart"] = r
     if a.style:
         for m in train:
             m["raw"] = D.load_raw(D.match_path(m["name"]))
-    net = PossessionNet(nfeat=D.NFEAT, d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage)
+    train = [m for m in train if m["name"] not in a.drop]
+    assert not set(a.drop) - {m["name"] for m in matches}, "--drop names a match that is not there"
+    net = PossessionNet(nfeat=D.NFEAT + (NBALL if a.teach else 0), d=a.d, gru=not a.no_gru, ptr=a.ptr > 0 or a.stage, restart=a.restart > 0,
+                        ptime=PTIME[a.ptime] if a.ptime else None, alt=bool(a.own_head))
     opt = torch.optim.AdamW(net.parameters(), a.lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=0.1)
     out = os.path.join(D.ROOT, "data", "cache", "deep", a.tag, a.fold)
@@ -247,37 +364,63 @@ def main():
         print(f"resumed at step {start}", flush=True)
     for step in range(start + 1, a.steps + 1):
         net.train()
-        X, M, y, ball, e, w = batch(train, rng, a.batch, a.window, a)
+        X, M, y, ball, e, w, R, q = batch(train, rng, a.batch, a.window, a)
         logits, bhat, ehat, extra = net(X, M)
         g = y >= 0
-        loss_c = (F.cross_entropy(logits[g], y[g], reduction="none") * w[g]).sum() / w[g].sum()
+        if a.label_weight or a.own_head:
+            # a provider whose labels are trusted less: its windows weigh less in the label losses
+            # (0: it teaches only through the ball), or its labels go to a head of their own
+            lw = torch.tensor([a.label_weight.get(pv, 1.0) for pv in batch.prov])[:, None]
+            own = torch.tensor([pv in a.own_head for pv in batch.prov])[:, None]
+            gm, go, wm = g & ~own, g & own, w * lw
+            num = (F.cross_entropy(logits[gm], y[gm], reduction="none") * wm[gm]).sum()
+            if go.any():
+                num = num + (F.cross_entropy(extra["cls_alt"][go], y[go], reduction="none") * w[go]).sum()
+            loss_c = num / (wm[gm].sum() + w[go].sum()).clamp(min=1.0)
+        else:
+            loss_c = (F.cross_entropy(logits[g], y[g], reduction="none") * w[g]).sum() / w[g].sum()
         bg = g & (y < 2) & torch.isfinite(ball[..., 0])
         loss_b = F.smooth_l1_loss(bhat[bg], ball[bg], beta=0.1) if bg.any() else logits.sum() * 0
-        loss_e = F.binary_cross_entropy_with_logits(ehat[g], e[g])
-        loss = loss_c + a.ball * loss_b + a.edge * loss_e
+        if a.label_weight or a.own_head:  # an own-head provider's edges train nothing either
+            we = (lw * ~own).expand_as(e)[g]
+            loss_e = (F.binary_cross_entropy_with_logits(ehat[g], e[g], reduction="none") * we).sum() / we.sum().clamp(min=1.0)
+        elif a.provw:  # w carries the provider's label weight; the edge target is made of labels too
+            wn = (w[g] / w[g].mean()).clamp(max=4) if a.spell <= 0 else torch.ones_like(w[g])
+            loss_e = (F.binary_cross_entropy_with_logits(ehat[g], e[g], reduction="none") * wn).mean()
+        else:
+            loss_e = F.binary_cross_entropy_with_logits(ehat[g], e[g])
+        loss = a.hard * loss_c + a.ball * loss_b + a.edge * loss_e
+        if q is not None:
+            loss = loss - a.kd * (q[g] * F.log_softmax(logits[g], -1)).sum(-1).mean()
         loss_x = 0.0
         if a.ptr > 0:
             bl = ball_losses(extra, ball_targets(X, M, ball, y))
             loss = loss + a.ptr * bl["ptr"] + a.bvel * bl["bvel"] + a.touch * bl["touch"] + a.free * bl["free"]
             loss_x = bl["ptr"].item()
+        if a.restart > 0:
+            rl = restart_losses(extra, X, M, y, R)
+            loss = loss + a.restart * rl["taker"] + a.rkind * rl["kind"] + a.rtime * rl["time"]
+            loss_r = (rl["taker"].item(), rl["kind"].item(), rl["time"].item())
         opt.zero_grad(); loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
         opt.step(); sched.step()
-        run.append((loss_c.item(), loss_b.item(), loss_e.item(), loss_x))
+        run.append((loss_c.item(), loss_b.item(), loss_e.item(), loss_x) + (loss_r if a.restart > 0 else ()))
         if step % 100 == 0 or step == a.steps:
             r = np.mean(run, 0); run = []
             msg = f"{step:5d} ce {r[0]:.3f} ball {r[1]:.3f} edge {r[2]:.3f} ptr {r[3]:.3f}  {time.time() - t0:.0f}s"
+            if a.restart > 0:
+                msg += f"  taker {r[4]:.3f} kind {r[5]:.3f} time {r[6]:.3f}"
             if step % 500 == 0 or step == a.steps:
-                msg += f"  val acc {frame_scores(net, val):.3f}  test acc {frame_scores(net, test[:3]):.3f}"
+                msg += f"  val acc {frame_scores(net, val, a.teach):.3f}  test acc {frame_scores(net, test[:3], a.teach):.3f}"
             print(msg, flush=True)
             torch.save(dict(net=net.state_dict(), opt=opt.state_dict(), sched=sched.state_dict(),
                             rng=rng.bit_generator.state, torch_rng=torch.get_rng_state(), step=step), ckpt + ".tmp")
             os.replace(ckpt + ".tmp", ckpt)
     torch.save(net.state_dict(), os.path.join(out, "net.pt"))
-    for kind, ms in (("val", val), ("test", test)):
+    for kind, ms in (("val", val), ("test", test)) + ((("train", train),) if a.teach and a.fold != "none" else ()):
         for m in ms:
             np.savez_compressed(os.path.join(out, m["name"] + ".npz"), kind=kind,
-                                **{f"p{i}": predict_half(net, h) for i, h in enumerate(m["halves"])})
+                                **{f"p{i}": predict_half(net, h, teach=a.teach) for i, h in enumerate(m["halves"])})
 
 
 if __name__ == "__main__":

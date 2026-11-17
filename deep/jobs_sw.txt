@@ -1,0 +1,3 @@
+# second seed of sw25 (JOBS=1 beside the fine runs)
+sw25s1 idsse --steps 1500 --ptr 0.5 --provw skillcorner=0.25 --seed 1
+sw25s1 metrica --steps 1500 --ptr 0.5 --provw skillcorner=0.25 --seed 1

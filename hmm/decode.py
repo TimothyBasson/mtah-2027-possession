@@ -49,12 +49,46 @@ making a change of team cheaper where a second classifier sees one (helps the ra
 folded ones, and costs SkillCorner). The trees run in numpy (hmm/trees.py); only training needs
 scikit-learn.
 
+v8 changes what the control classifier reads and how it is trained (hmm/control.py
+joint_features, external/train_control.py):
+- It no longer reads what the ball does on its own (seen or not, its speed). Two of the three
+  outside providers freeze or hide the ball in a stoppage, and the classifier had learned that.
+- It also reads the team-shape features of seq/features.py: all 22 players, not only the ones by
+  the ball, so it has something to go on where the ball is missing or noisy.
+- The three providers count equally in training, the trees are regularised, and nothing is
+  stopped early.
+- Optional and off by default: a decoded possession under --min-possession seconds with the
+  other team on both sides goes back to that team (fold_brief_possessions).
+With the classifier trained with each set left out, spellF1 against the control-folded labels goes
+from v7's 0.609 / 0.798 / 0.428 to 0.644 / 0.816 / 0.480 (external/README.md).
+
 The gap clue counts a goalkeeper slot near a goal for the team defending that goal, not the team
 the metadata gives the slot: the tracker sometimes carries one keeper under the other keeper's
 slot (hmm/clues.py).
 
-    python -m hmm.decode                    # writes evaluation/results/hmm_v7.csv
-    python -m hmm.decode --no-control       # v6 again
+v9 adds the players-only net of deep/ (hmm/net_clue.py) as one more clue: its p(H, A, D) per
+frame, as a log ratio against the class shares it was trained on, at NET_WEIGHT. The net reads all
+22 players and never the ball, so it speaks where the ball is missing, which is where v8 loses
+most. Held out by provider the mean goes from 0.647 to 0.677 (IDSSE 0.644 to 0.728, Metrica 0.816
+to 0.807, SkillCorner 0.480 to 0.497; external/README.md). It needs torch (requirements-deep.txt).
+
+The weight was read off the held-out matches: picked for each provider on the other two the mean
+is 0.664. The nets that ship (2,000 steps on all 30 matches) are near neighbours of the fold nets
+those numbers come from (1,500 steps, a provider held out), not the same nets.
+
+    pip install -r requirements.txt -r requirements-deep.txt    # v9 needs torch (pinned)
+    python -m hmm.decode                    # writes evaluation/results/hmm_v9.csv
+    python -m hmm.decode --no-net           # v8 again, no torch needed
+
+The net runs on one thread with torch pinned, so a rerun on the same machine does the same
+arithmetic. Across CPUs with different instruction sets the last bits of a probability can
+differ, and a near-tie in the Viterbi path could then move a boundary: two runs on one machine
+give the same file (sha256 cf1a838d...2ce02d31 for PR 47; e76d697a...bedc7221ed with the restart hold
+and the keeper fix of PR 57; 6c565c68...5eefa121e with the keeper-area clue of PR 68 at 4x, the
+default since 2026-11-17, --keeper 0 for the e76d697a file), and it has not been checked on a
+second one.
+    python -m hmm.decode --no-control       # v6 again (v7 is commit fe457a3: its classifier read
+                                            # columns the v8 features leave out)
     python -m hmm.decode --no-control --no-width   # v5 again
     python -m hmm.decode --weight 0.1 --hand-gap   # v4 again; either flag alone takes that one
                                             # change back out, to tell them apart
@@ -86,13 +120,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
 from hmm.ball import flight_clue, mirror_flight  # noqa: E402
-from hmm import trees  # noqa: E402
+from hmm import ahead, keeper, trees  # noqa: E402
 from hmm.clues import (  # noqa: E402
     KEEPER_ON_BALL, MISSING_AFTER_LINE, N_DISTANCE_BINS, N_GAP_BINS, N_PLACES, ball_is_usable,
     ball_place_category, cache_key, gap_distance_category, keeper_slots, load_distances,
     mirror_gap_distance, read_positions, speed_category, team_by_frame, width_category)
-from hmm.control import control_log_ratio  # noqa: E402
-from hmm.control import features as control_features  # noqa: E402
+from hmm.control import control_log_ratio, hold, joint_features  # noqa: E402
 from hmm.model import (  # noqa: E402
     A, D, H, STATES, baum_welch, build_log_emit, forward_backward, rate_log_trans, viterbi)
 from starter.baseline import RESULTS_DIR, team_of_each_track, write_submission  # noqa: E402
@@ -257,21 +290,98 @@ IMPOSSIBLE = -1e9
 
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 
-# The control clue (v7): a classifier trained on the external matches (external/train_control.py)
-# says, per frame, how likely each state is given the players and ball around it; its posterior
-# over the class shares is added to the emissions at CONTROL_WEIGHT, on top of every v6 clue.
-# Replacing the gap-distance and flight clues with it instead was worse on all three sets: its
-# windowed features blur the moment of a switch, which those two clues mark. Chosen on the
-# external matches with the classifier trained with each set left out (external/score_control.py).
-# spellF1 change from v6, raw / folded labels, at 0.05 / 0.1 / 0.15 / 0.2:
-#   IDSSE        +0.057/+0.067  +0.071/+0.087  +0.082/+0.099  +0.084/+0.107
-#   Metrica      +0.011/+0.024  +0.014/+0.031  +0.011/+0.039  +0.013/+0.043
-#   SkillCorner  +0.026/+0.032  +0.024/+0.029  +0.021/+0.024  +0.016/+0.017
-# Chosen with each set left out in turn (mean of both views over the other two), the folds pick
-# 0.15, 0.15 and 0.2, and the set left out then gains +0.036 raw / +0.052 folded on average. Every
-# weight gains on every set in both views.
+# The control clue (v7, retrained for v8): a classifier trained on the external matches
+# (external/train_control.py) says, per frame, how likely each state is given the players and ball
+# around it; its posterior over the class shares is added to the emissions at CONTROL_WEIGHT, on
+# top of every v6 clue. Replacing the gap-distance and flight clues with it instead was worse on
+# all three sets (v7): its windowed features blur the moment of a switch, which those two clues
+# mark. Chosen on the external matches with the classifier trained with each set left out
+# (external/score_control.py). spellF1 against the control-folded labels,
+# at 0.15 / 0.2 / 0.3 (v6: 0.510, 0.764, 0.403):
+#   IDSSE        0.636  0.644  0.653
+#   Metrica      0.819  0.816  0.817
+#   SkillCorner  0.480  0.480  0.476
+# The means are 0.645, 0.647 and 0.649, which is flat, and SkillCorner, the set tracked most like
+# BAR-ATH, loses at 0.3. 0.2 is the middle. Every weight gains on every set.
 CONTROL_MODEL = os.path.join(ROOT, "hmm", "models", "control_state.npz")
-CONTROL_WEIGHT = 0.15
+CONTROL_WEIGHT = 0.2
+CONTROL_FEATURES = "joint1"
+
+# A possession briefer than this with the other team on both sides is given back to that team
+# after decoding (fold_brief_possessions). Off by default. On the external matches 1.5 s gains
+# 0.005 against the control-folded labels, but those labels are themselves folded by a rule of the
+# same shape (external/control.py), so part of that is the yardstick's own construction; against
+# the labels as they are it costs Metrica 0.014. And the challenge's ground truth does keep such
+# possessions: the public window has two of 17, 0.76 s and 1.32 s long, each between two spells
+# of the other team. That was looked at once, to check the assumption, not to choose the number.
+MIN_POSSESSION_SECONDS = 0.0
+# v9: the players-only net of deep/ (hmm/net_clue.py), its log ratio added to the emissions next
+# to the control clue. Two nets trained on all 30 outside matches, their probabilities averaged:
+# bt, and sw25 (bt with SkillCorner's labels at a quarter weight; deep/README.md). Held out by
+# provider, 0.3 is the best single weight and the score is within 0.005 of it from 0.2 to 0.4
+# (external/README.md). The 0.3 was read off the same matches it is scored on: 0.677 with it,
+# 0.664 with the weight picked for each provider on the other two, against v8's 0.647. Nearly all
+# of the gain is on IDSSE, whose ball is knocked out at random, which is not how BAR-ATH's goes
+# missing.
+NET_MODELS = tuple(os.path.join(ROOT, "deep", "models", name) for name in ("bt.pt", "sw25.pt"))
+NET_WEIGHT = 0.3
+# Look-ahead ball clue (hmm/ahead.py): category shares over the three external providers' labels,
+# each provider counted equally, times 1000 (the pseudo-count of 1 per cell is the floor).
+AHEAD_GIVEN_HOME = np.array([28.0, 1.4, 6.7, 50.9, 6.4, 47.5, 34.3, 22.0, 721.1, 81.7])
+AHEAD_GIVEN_DEAD = np.array([419.0, 30.2, 30.2, 110.2, 71.1, 48.3, 3.5, 3.5, 243.7, 40.2])
+AHEAD_MULTIPLE = 0.0
+
+
+# Keeper-area ball clue (hmm/keeper.py): frames per million in each category (KEEP_MISS_HOME,
+# KEEP_MISS_AWAY, KEEP_STILL_HOME, KEEP_STILL_AWAY, none) over the three external providers'
+# labels, each provider counted equally (home: H frames plus A frames mirrored; dead: D frames
+# both ways round), from kp/fit_table.py, per --keeper-ends. Only the "box" and "next" gaps were
+# counted; the still-ball categories (2, 3) hurt IDSSE held out and are left at zero.
+KEEPER_GIVEN = {
+    "box": ([18286.7, 5074.9, 0.0, 0.0, 2976638.4], [5498.2, 5498.2, 0.0, 0.0, 2989003.5]),
+    "next": ([24825.5, 9282.4, 0.0, 0.0, 2965892.0], [7863.1, 7863.1, 0.0, 0.0, 2984273.7]),
+}
+KEEPER_CATS = (0, 1)
+KEEPER_ENDS = "box"
+KEEPER_MULTIPLE = 4.0
+
+
+def keeper_table(ends=KEEPER_ENDS):
+    """log p(keeper category | state), states x keeper categories (hmm/keeper.py)."""
+    return keeper.table(*KEEPER_GIVEN[ends])
+
+
+def ahead_table(home=AHEAD_GIVEN_HOME, dead=AHEAD_GIVEN_DEAD):
+    """log p(next sighting | last sighting, state), states x ahead categories (hmm/ahead.py)."""
+    return ahead.table(home, dead)
+
+# A restart is the kick, not the moment the ball is put down. Where the decoder ends a stoppage
+# while the ball, seen, stays still (under RESTART_STILL m/s for RESTART_MIN_STILL s) and is then
+# kicked (over RESTART_KICK m/s) within RESTART_WAIT s, the stoppage is held until the kick
+# (hold_restarts). The gap clue reads a player standing over a placed free kick or goal kick as
+# possession; video notes on BAR-ATH (2026-11-16) flag restarts called 3-6 s early that way.
+# On by default since 2026-11-16 (the person checked every firing on BAR-ATH against the video;
+# --no-hold-restart turns it off). Held out by provider it is flat: 0.726 / 0.807 / 0.496 against
+# v9's 0.725 / 0.807 / 0.496, since the outside providers hide or freeze the ball in a stoppage
+# and the rule rarely fires there; spellF1 averages IoU 0.3-0.7, so a few seconds at the start of
+# a long spell seldom changes a match.
+RESTART_STILL = 1.0
+RESTART_KICK = 5.0
+RESTART_MIN_STILL = 0.5
+RESTART_WAIT = 10.0
+RESTART_MAX_MISSING = 1.0
+
+# Keeper holding the ball read as a stoppage (hmm/keeper_hold.py; on by default since 2026-11-17,
+# --no-keeper-hold turns it off).
+# Where the tracker loses the ball in the keeper's hands and the players slow down, the decoder can
+# call dead ball while the keeper holds it. After decoding, a stoppage that starts with the ball at
+# the defending keeper inside his area, ends with the ball seen again at that team's player inside
+# the area but outside the goal area, and shows no placed ball away from him, is given to the
+# keeper's team, if the decoder already gives that team the play after it and it lasts at most
+# 12 s. Held out by provider, with the keeper-area clue at 4x, it is flat: 0.727 / 0.807 / 0.496,
+# mean 0.6767, against 0.6763 (0.6637 against 0.6633 with the net weight picked per provider on
+# the other two; kp/score_keeper.py --keeper-hold). On BAR-ATH it moves 698 frames; the public
+# window is 0.774 either way.
 
 
 def gap_table():
@@ -410,13 +520,78 @@ def place_placebo(gap, place, speed, flight, log_trans, log_start, segments, kic
     return out
 
 
+def fold_brief_possessions(path, min_frames):
+    """Copy of a state path with every H or A run shorter than min_frames that has the other team
+    on both sides given back to that team. Repeats until nothing changes, since folding one run
+    joins its neighbours. Runs next to a stoppage are left alone."""
+    path = np.array(path, copy=True)
+    while min_frames > 1:
+        edges = np.flatnonzero(path[1:] != path[:-1]) + 1
+        starts, stops = np.r_[0, edges], np.r_[edges, len(path)]
+        changed = False
+        for i in range(1, len(starts) - 1):
+            a, b = starts[i], stops[i]
+            before, after = path[a - 1], path[b]
+            if (b - a < min_frames and path[a] != D and before == after and before != D
+                    and before != path[a]):
+                path[a:b] = before
+                changed = True
+        if not changed:
+            break
+    return path
+
+
+def ball_speed(ball_x, ball_y, fps, smooth=0.4):
+    """Ball speed in m/s, a running mean over `smooth` s; NaN where the ball is mostly unseen."""
+    v = np.hypot(np.gradient(np.asarray(ball_x, float)), np.gradient(np.asarray(ball_y, float))) * fps
+    w = max(1, int(round(smooth * fps)))
+    ok = np.isfinite(v)
+    num = np.convolve(np.where(ok, v, 0), np.ones(w), "same")
+    den = np.convolve(ok.astype(float), np.ones(w), "same")
+    return np.where(den > w / 2, num / np.maximum(den, 1), np.nan)
+
+
+def hold_restarts(labels, ball_x, ball_y, fps, still=RESTART_STILL, kick=RESTART_KICK,
+                  min_still=RESTART_MIN_STILL, wait=RESTART_WAIT, max_missing=RESTART_MAX_MISSING):
+    """Copy of a label path with each D -> H/A change moved to the kick, where the ball is seen
+    still after the change and then kicked within `wait` s and before that spell ends (see
+    RESTART_STILL). The spell's start moves to the kick; a spell is never removed."""
+    out = np.array(labels, copy=True)
+    speed = ball_speed(ball_x, ball_y, fps)
+    n = len(out)
+    for i in np.flatnonzero((out[:-1] == "D") & np.isin(out[1:], ["H", "A"])) + 1:
+        j, missing, n_still = i, 0, 0
+        spell_end = i
+        while spell_end < n and out[spell_end] == out[i]:
+            spell_end += 1
+        # the kick must fall inside the spell that follows the stoppage: a spell is moved, never
+        # removed
+        end = min(spell_end, i + int(wait * fps))
+        while j < end:
+            if np.isnan(speed[j]):
+                missing += 1
+                if missing > max_missing * fps:
+                    break
+            elif speed[j] < kick:
+                missing = 0
+                n_still += speed[j] < still
+            else:
+                break
+            j += 1
+        if j < end and speed[j] >= kick and n_still >= min_still * fps:
+            out[i:j] = "D"
+    return out
+
+
 def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIGHT, extra=(),
-           direct=None):
+           direct=None, min_possession=0):
     """Labels for every video frame: one Viterbi path per half, X everywhere else.
 
     clues is a list of (obs, log_table), each obs covering every video frame, all at `weight`.
     extra is a list of (obs, log_table, weight) for clues with a weight of their own. direct is a
-    (frames, 3) array added to the log emissions as it is (the control clue, already weighted)."""
+    (frames, 3) array added to the log emissions as it is (the control clue, already weighted).
+    min_possession, in frames, folds briefer possessions between two spells of the other team
+    (fold_brief_possessions); 0 leaves the path as Viterbi gives it."""
     labels = np.full(len(clues[0][0]), "X", dtype="<U1")
     for lo, hi in segments:
         log_emit = build_log_emit([(obs[lo:hi], table, weight) for obs, table in clues]
@@ -424,7 +599,8 @@ def decode(clues, log_trans, log_start, segments, kickoffs=KICKOFFS, weight=WEIG
         if direct is not None:
             log_emit = log_emit + direct[lo:hi]
         pin_dead_before_kickoff(log_emit, lo, hi, kickoffs)
-        labels[lo:hi] = STATES[viterbi(log_emit, log_trans, log_start)]
+        labels[lo:hi] = STATES[fold_brief_possessions(viterbi(log_emit, log_trans, log_start),
+                                                      min_possession)]
     return labels
 
 
@@ -443,8 +619,11 @@ def load_control(game=GAME, data_dir=None, model_path=CONTROL_MODEL):
     keepers = keeper_slots(meta_path)
     halves = graded_segments(game)
     stat = os.stat(model_path)
-    key = "{}_{}_{}".format(cache_key(raw_path, team_of_track, n_frames, pitch, FPS, keepers,
-                                      halves), stat.st_size, int(stat.st_mtime))
+    # CONTROL_FEATURES names the feature code: change it with joint_features, or a model file
+    # that stays the same would be read against scores cached from the old columns
+    key = "{}_{}_{}_{}".format(cache_key(raw_path, team_of_track, n_frames, pitch, FPS, keepers,
+                                         halves), stat.st_size, int(stat.st_mtime),
+                               CONTROL_FEATURES)
     cache_path = os.path.join(CACHE_DIR, "control_{}.npy".format(key))
     if os.path.exists(cache_path):
         return np.load(cache_path)
@@ -454,19 +633,99 @@ def load_control(game=GAME, data_dir=None, model_path=CONTROL_MODEL):
     model = trees.load(model_path)
     out = np.zeros((n_frames, 3))
     args = (px, py, team, ball_x, ball_y, pitch, FPS, halves)
-    X, names = control_features(*args)
-    Xs, _ = control_features(*args, swap=True)
+    X, names, frames = joint_features(*args)
+    Xs = joint_features(*args, swap=True)[0]
     missing = set(model["names"]) - set(names)
     if missing:
         sys.exit("the control model needs feature columns hmm/control.py no longer makes: {}"
                  .format(sorted(missing)))
     cols = [list(names).index(n) for n in model["names"]]  # the model's columns, in its order
     X, Xs = X[:, cols], Xs[:, cols]
+    inside = np.zeros(n_frames, bool)
     for lo, hi in halves:
-        out[lo:hi] = control_log_ratio(model, X[lo:hi], Xs[lo:hi])
+        inside[lo:hi] = True
+    scored = inside[frames]
+    ratio = np.zeros((len(frames), 3))
+    ratio[scored] = control_log_ratio(model, X[scored], Xs[scored])
+    out[inside] = hold(ratio, n_frames)[inside]
     os.makedirs(CACHE_DIR, exist_ok=True)
     np.save(cache_path, out)
     return out
+
+
+def load_net(model_paths=NET_MODELS, threads=1):
+    """(frames, 3) net clue for every video frame: log p(state | players) - log p(state) from the
+    players-only net(s) of deep/ on the graded halves, 0 elsewhere (hmm/net_clue.py). Needs torch
+    (requirements-deep.txt). The same tensors and prediction as deep/run.py; one thread, so a
+    rerun does the same arithmetic."""
+    for path in (os.path.join(ROOT, "deep"), os.path.join(ROOT, "possession"),
+                 os.path.join(ROOT, "external")):
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    try:
+        import torch
+    except ImportError:
+        sys.exit("hmm_v9 reads the players-only net and needs torch: pip install -r "
+                 "requirements-deep.txt (or uv sync --group deep), or pass --no-net for v8")
+    import data as D
+    import load
+    from net import load_net as load_weights
+    from train import predict_half
+    from hmm.net_clue import log_ratio
+    torch.set_num_threads(threads)
+    players, ball, team, halves = load.load()
+    probs = []
+    for path in model_paths:
+        net = load_weights(path, D.NFEAT)
+        probs.append([])
+        for a, b in halves:
+            X, M, bxy, _ = D.half_tensors(players, ball, team, a, b, load.PITCH, load.FPS)
+            probs[-1].append(predict_half(net, dict(X=X, M=M, y=np.zeros(len(X), np.int64),
+                                                    ball=bxy)))
+    return log_ratio(probs, halves, len(players))
+
+
+def keeper_positions(game=GAME, data_dir=None):
+    """(ball_x, ball_y, usable, px, py, keeper_slot, pitch, halves) for the look-ahead and keeper
+    clues. A keeper is either keeper slot of the metadata, credited to the team defending the goal
+    he stands by (team_by_frame). Positions are cached under data/cache."""
+    meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
+    n_frames = source_frames("tactical", game)
+    pitch = GAMES[game]["pitch"]
+    team_of_track = team_of_each_track(meta_path)
+    keepers = keeper_slots(meta_path)
+    halves = graded_segments(game)
+    key = cache_key(raw_path, team_of_track, n_frames, pitch, FPS, keepers, halves)
+    cache_path = os.path.join(CACHE_DIR, "positions_{}.npz".format(key))
+    if os.path.exists(cache_path):
+        z = np.load(cache_path)
+        px, py, ball_x, ball_y = z["px"], z["py"], z["bx"], z["by"]
+    else:
+        px, py, ball_x, ball_y = read_positions(raw_path, len(team_of_track), n_frames, pitch)[:4]
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        np.savez(cache_path, px=px, py=py, bx=ball_x, by=ball_y)
+    team = team_by_frame(px, team_of_track, keepers, halves, pitch[0])
+    keeper_slot = np.full((n_frames, 2), -1, int)
+    for slot in keepers:
+        for side in (0, 1):
+            keeper_slot[team[:, slot] == side, side] = slot
+    usable = ball_is_usable(ball_x, ball_y, pitch)
+    return (ball_x, ball_y, usable, px.astype(float), py.astype(float), keeper_slot, pitch,
+            halves)
+
+
+def load_ahead(game=GAME, data_dir=None):
+    """(frames,) look-ahead ball category for every video frame (hmm/ahead.py), -1 where the ball
+    is seen."""
+    bx, by, usable, px, py, keeper_slot, pitch, halves = keeper_positions(game, data_dir)
+    return ahead.ahead_category(bx, by, usable, px, py, keeper_slot, pitch, FPS, halves)
+
+
+def load_keeper(game=GAME, data_dir=None, use=KEEPER_CATS, ends=KEEPER_ENDS):
+    """(frames,) keeper-area ball category for every video frame (hmm/keeper.py), -1 elsewhere."""
+    bx, by, usable, px, py, keeper_slot, pitch, halves = keeper_positions(game, data_dir)
+    return keeper.keeper_category(bx, by, usable, px, py, keeper_slot, pitch, FPS, halves,
+                                  use=use, ends=ends)
 
 
 def load_observations(game=GAME, data_dir=None):
@@ -633,16 +892,44 @@ def report_baum_welch(clues, log_trans, segments, n_iter, weight=1.0):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", help="default evaluation/results/hmm_v7.csv (hmm_v6.csv with "
-                        "--no-control), with the variant flags in the name if any is set")
+    parser.add_argument("--out", help="default evaluation/results/hmm_v9.csv (hmm_v8.csv with "
+                        "--no-net, hmm_v6.csv with --no-control), with the variant flags in the name if any is set")
     parser.add_argument("--no-control", action="store_true",
                         help="ablation: without the control classifier, which is v6")
     parser.add_argument("--control-model", default=CONTROL_MODEL,
                         help="exported classifier (default hmm/models/control_state.npz)")
     parser.add_argument("--control-weight", type=float, default=CONTROL_WEIGHT,
                         help="weight on the control clue (default {})".format(CONTROL_WEIGHT))
+    parser.add_argument("--no-hold-restart", dest="hold_restart", action="store_false",
+                        help="ablation: end a stoppage where Viterbi does, without holding it until "
+                             "a still, seen ball is kicked (hold_restarts)")
+    parser.add_argument("--no-keeper-hold", dest="keeper_hold", action="store_false",
+                        help="ablation: leave a stoppage the decoder calls while a keeper holds "
+                             "the ball as it is (hmm.keeper_hold, on by default)")
+    parser.add_argument("--keeper-opts", default="", help="JSON kwargs for keeper_holds")
+    parser.add_argument("--no-net", action="store_true",
+                        help="ablation: without the players-only net, which is v8")
+    parser.add_argument("--net-model", default=",".join(NET_MODELS),
+                        help="comma-separated deep/ nets to average (default bt.pt and sw25.pt "
+                             "in deep/models)")
+    parser.add_argument("--net-weight", type=float, default=NET_WEIGHT,
+                        help="weight on the net clue (default {})".format(NET_WEIGHT))
+    parser.add_argument("--min-possession", type=float, default=MIN_POSSESSION_SECONDS,
+                        help="seconds under which a possession between two spells of the other "
+                             "team is folded (default {}; 0 for none)".format(
+                                 MIN_POSSESSION_SECONDS))
     parser.add_argument("--weight", type=float, default=WEIGHT,
                         help="emission weight (v5: {}, v4: {})".format(WEIGHT, WEIGHT_V4))
+    parser.add_argument("--ahead", type=float, default=AHEAD_MULTIPLE,
+                        help="look-ahead ball clue (hmm/ahead.py) at this multiple of --weight "
+                             "(default {:g}; 0 for none, which is v9)".format(AHEAD_MULTIPLE))
+    parser.add_argument("--keeper", type=float, default=KEEPER_MULTIPLE,
+                        help="keeper-area ball clue (hmm/keeper.py) at this multiple of --weight "
+                             "(default {:g}; 0 for none, which is v9 as of PR 60)".format(KEEPER_MULTIPLE))
+    parser.add_argument("--keeper-cats", default="".join(map(str, KEEPER_CATS)),
+                        help="keeper categories used (0/1 ball missing at the home/away keeper, "
+                             "2/3 ball still at him)")
+    parser.add_argument("--keeper-ends", default=KEEPER_ENDS, choices=sorted(KEEPER_GIVEN))
     parser.add_argument("--hand-gap", action="store_true",
                         help="ablation: v4's hand-set gap table, without the distance")
     parser.add_argument("--no-width", action="store_true",
@@ -682,20 +969,80 @@ def main():
     clues = [others[0], (place, place_table(live, dead))] + others[1:]
 
     extra = [] if args.no_width else [(width, width_table(), WIDTH_WEIGHT)]
+    if args.ahead > 0:
+        extra.append((load_ahead(), ahead_table(), args.ahead * args.weight))
+    if args.keeper > 0:
+        cats = tuple(int(c) for c in args.keeper_cats)
+        kc = load_keeper(use=cats, ends=args.keeper_ends)
+        print("keeper clue: {} frames in a keeper category".format(int(np.sum(kc >= 0))))
+        extra.append((kc, keeper_table(args.keeper_ends), args.keeper * args.weight))
     direct = None if args.no_control else args.control_weight * load_control(
         model_path=args.control_model)
+    use_net = not (args.no_net or args.no_control)
+    if use_net:
+        direct = direct + args.net_weight * load_net(tuple(args.net_model.split(",")))
+    fold = 0 if args.no_control else int(round(args.min_possession * FPS))
     labels = decode(clues, log_trans, np.log(START), segments, weight=args.weight, extra=extra,
-                    direct=direct)
+                    direct=direct, min_possession=fold)
+    if args.hold_restart:
+        meta_path, raw_path = require(["atd_meta", "atd_raw"])
+        ball_x, ball_y = load_distances(raw_path, team_of_each_track(meta_path),
+                                        source_frames("tactical"), GAMES[GAME]["pitch"], FPS,
+                                        CACHE_DIR, keepers=keeper_slots(meta_path),
+                                        halves=graded_segments())[:2]
+        held = hold_restarts(labels, ball_x, ball_y, FPS)
+        print("hold_restarts: {} frames turned to D".format(int(np.sum(held != labels))))
+        # every firing, label-free check: the nearest Smart Tagging set piece to the new restart
+        pieces = [t["start_frame"] for t in load_smart_tagging() if t["code"].lower() == "set pieces"]
+        moved = np.flatnonzero((held != labels)[1:] & ~(held != labels)[:-1]) + 1
+        for a in moved:
+            b = a
+            while b < len(held) and held[b] != labels[b]:
+                b += 1
+            near = min(pieces, key=lambda f: abs(f - b)) if pieces else None
+            print("  restart {} -> {} (+{:.1f} s); nearest tagged set piece {}".format(
+                a, b, (b - a) / FPS, "none" if near is None else "{:+.1f} s".format((near - b) / FPS)))
+        labels = held
+    if args.keeper_hold:
+        import json
+        from hmm.keeper_hold import keeper_holds
+        meta_path, raw_path = require(["atd_meta", "atd_raw"])
+        team_of_track = team_of_each_track(meta_path)
+        n_frames = source_frames("tactical")
+        pitch = GAMES[GAME]["pitch"]
+        px, py, ball_x, ball_y = read_positions(raw_path, len(team_of_track), n_frames, pitch)[:4]
+        team = team_by_frame(px, team_of_track, keeper_slots(meta_path), segments, pitch[0])
+        kept, fired = keeper_holds(labels, px.astype(float), py.astype(float), team, ball_x,
+                                   ball_y, pitch, FPS,
+                                   **(json.loads(args.keeper_opts) if args.keeper_opts else {}))
+        print("keeper_holds: {} frames handed to the keeper's team".format(
+            int(np.sum(kept != labels))))
+        for b, s, e, letter in fired:
+            print("  stoppage {}-{} ({:.1f} s) -> {} from {}".format(s, e, (e - s) / FPS, letter, b))
+        labels = kept
     ablation = "".join(tag for tag, on in (("_w{:g}".format(args.weight), args.weight != WEIGHT),
                                            ("_cw{:g}".format(args.control_weight),
                                             not args.no_control
                                             and args.control_weight != CONTROL_WEIGHT),
+                                           ("_nw{:g}".format(args.net_weight),
+                                            use_net and args.net_weight != NET_WEIGHT),
+                                           ("_mp{:g}".format(args.min_possession),
+                                            not args.no_control
+                                            and args.min_possession != MIN_POSSESSION_SECONDS),
+                                           ("_ahead{:g}".format(args.ahead),
+                                            args.ahead != AHEAD_MULTIPLE),
+                                           ("_keeper{:g}_{}_{}".format(args.keeper,
+                                                                       args.keeper_cats,
+                                                                       args.keeper_ends),
+                                            args.keeper != KEEPER_MULTIPLE),
                                            ("_handgap", args.hand_gap),
                                            ("_nowidth", args.no_width),
-                                           ("_fitplace", args.fit_place)) if on)
+                                           ("_fitplace", args.fit_place),
+                                           ("_nohold", not args.hold_restart),
+                                           ("_nokeeperhold", not args.keeper_hold)) if on)
     path = write_submission(
         args.out or os.path.join(RESULTS_DIR, "hmm_v{}{}.csv".format(
-            6 if args.no_control else 7, ablation)), labels)
+            6 if args.no_control else 9 if use_net else 8, ablation)), labels)
     print("-> {}".format(os.path.relpath(path, ROOT)))
     summarise(labels, segments)
     report_dead_runs(labels, place, segments, load_smart_tagging())

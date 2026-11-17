@@ -1,0 +1,45 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+('box', '01') idsse per 1e4 frames  home [131.7   5.1   0.    0. ]  dead [3.9 3.9 0.  0. ]
+('box', '01') metrica per 1e4 frames  home [13.9 30.   0.   0. ]  dead [24.6 24.6  0.   0. ]
+('box', '01') skillcorner per 1e4 frames  home [37.3 15.7  0.   0. ]  dead [26.5 26.5  0.   0. ]
+('box', '01') held out idsse log p(.|H) - log p(.|D): [ 0.   -0.11  0.    0.  ]  log p(.|A) - log p(.|D): [-0.11  0.    0.    0.  ]
+('box', '01') held out metrica log p(.|H) - log p(.|D): [ 1.71 -0.38  0.    0.  ]  log p(.|A) - log p(.|D): [-0.38  1.71  0.    0.  ]
+('box', '01') held out skillcorner log p(.|H) - log p(.|D): [1.63 0.21 0.   0.  ]  log p(.|A) - log p(.|D): [0.21 1.63 0.   0.  ]
+('next', '01') idsse per 1e4 frames  home [174.4  23.3   0.    0. ]  dead [3.9 3.9 0.  0. ]
+('next', '01') metrica per 1e4 frames  home [15.9 42.5  0.   0. ]  dead [37.2 37.2  0.   0. ]
+('next', '01') skillcorner per 1e4 frames  home [57.9 27.   0.   0. ]  dead [37.5 37.5  0.   0. ]
+('next', '01') held out idsse log p(.|H) - log p(.|D): [-0.01 -0.07  0.    0.  ]  log p(.|A) - log p(.|D): [-0.07 -0.01  0.    0.  ]
+('next', '01') held out metrica log p(.|H) - log p(.|D): [1.73 0.19 0.   0.  ]  log p(.|A) - log p(.|D): [0.19 1.73 0.   0.  ]
+('next', '01') held out skillcorner log p(.|H) - log p(.|D): [1.53 0.47 0.   0.  ]  log p(.|A) - log p(.|D): [0.47 1.53 0.   0.  ]
+
+idsse (7 matches): spellF1 raw | folded (change from v9 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  v9                     0.615 | 0.726 (+0.000, se 0.000, up 0/7) | 0.973 0.921 | 272
+  box:01:8               0.615 | 0.726 (+0.000, se 0.000, up 0/7) | 0.973 0.921 | 272
+  box:01:16              0.615 | 0.726 (+0.000, se 0.000, up 0/7) | 0.973 0.921 | 272
+  box:01:32              0.615 | 0.726 (+0.000, se 0.000, up 0/7) | 0.973 0.921 | 272
+  next:01:8              0.615 | 0.726 (+0.000, se 0.000, up 0/7) | 0.973 0.921 | 272
+  next:01:16             0.615 | 0.726 (+0.000, se 0.000, up 0/7) | 0.973 0.921 | 272
+
+metrica (3 matches): spellF1 raw | folded (change from v9 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  v9                     0.732 | 0.807 (+0.000, se 0.000, up 0/3) | 0.926 0.963 | 255
+  box:01:8               0.730 | 0.805 (-0.002, se 0.001, up 0/3) | 0.927 0.960 | 256
+  box:01:16              0.730 | 0.806 (-0.001, se 0.000, up 0/3) | 0.927 0.960 | 256
+  box:01:32              0.731 | 0.805 (-0.002, se 0.000, up 0/3) | 0.927 0.960 | 256
+  next:01:8              0.728 | 0.803 (-0.004, se 0.000, up 0/3) | 0.927 0.960 | 256
+  next:01:16             0.728 | 0.803 (-0.004, se 0.000, up 0/3) | 0.927 0.960 | 256
+
+skillcorner (20 matches): spellF1 raw | folded (change from v9 paired by match, se, up) | alive/dead, team acc (folded) | possessions
+  v9                     0.433 | 0.496 (+0.000, se 0.000, up 0/20) | 0.954 0.844 | 292
+  box:01:8               0.432 | 0.495 (-0.001, se 0.001, up 4/20) | 0.954 0.844 | 292
+  box:01:16              0.432 | 0.495 (-0.001, se 0.001, up 3/20) | 0.954 0.844 | 292
+  box:01:32              0.432 | 0.495 (-0.001, se 0.001, up 3/20) | 0.954 0.844 | 292
+  next:01:8              0.431 | 0.495 (-0.001, se 0.001, up 6/20) | 0.954 0.844 | 292
+  next:01:16             0.431 | 0.495 (-0.002, se 0.001, up 6/20) | 0.954 0.844 | 292
+
+mean of the providers: raw | folded | alive/dead | team acc
+  v9                     0.593 | 0.6764 | 0.951 | 0.910   (0.726 / 0.807 / 0.496)
+  box:01:8               0.592 | 0.6755 | 0.951 | 0.908   (0.726 / 0.805 / 0.495)
+  box:01:16              0.592 | 0.6756 | 0.951 | 0.908   (0.726 / 0.806 / 0.495)
+  box:01:32              0.592 | 0.6754 | 0.951 | 0.908   (0.726 / 0.805 / 0.495)
+  next:01:8              0.592 | 0.6748 | 0.951 | 0.908   (0.726 / 0.803 / 0.495)
+  next:01:16             0.591 | 0.6746 | 0.951 | 0.908   (0.726 / 0.803 / 0.495)
