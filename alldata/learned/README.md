@@ -4,6 +4,8 @@ The players-only rule of `deep/` does not apply in `alldata/`. This model reads 
 as the players, and is judged on spellF1 alone. Nothing in `deep/`, `hmm/` or their BAR-ATH files
 is changed. The sibling folder `alldata/physics/` attacks the same goal with rules and physics.
 
+**Superseded as the submission (2026-11-17).** Gambtt chose hmm_v9 (`python -m hmm.decode`, built by `submission/make_submission.py`) as the submitted file; see submission/TECHNICAL_DOC.md. Everything below still holds and the file is still built by `python alldata/learned/run.py` (or `make_submission.py --method alldata`); it is no longer the one uploaded.
+
 ```bash
 pip install -r requirements-deep.txt     # or: uv sync --group deep
 python alldata/learned/run.py            # BAR-ATH -> evaluation/results/alldata_learned_tim_touch.csv, the submission

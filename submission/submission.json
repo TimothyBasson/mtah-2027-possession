@@ -24,6 +24,13 @@
       "requirements": ["requirements.txt"],
       "model_files": ["hmm/models/control_state.npz"]
     },
+    "alldata": {
+      "description": "The previous submission (2026-11-16 to 2026-11-17): learned all-data model with Tim's v8 as input and touch evidence (alldata/learned/run.py). Superseded by hmm_v9; kept buildable",
+      "cmd": ["{python}", "alldata/learned/run.py", "--out", "{workdir}/candidate.csv"],
+      "produces": "candidate.csv",
+      "requirements": ["requirements.txt", "requirements-deep.txt"],
+      "model_files": ["alldata/learned/models/tpsN.pt", "alldata/learned/models/tpsNs1.pt", "alldata/touch/models/t1.pt", "deep/models/bt.pt", "hmm/models/control_state.npz"]
+    },
     "deep": {
       "description": "Ball-taught players-only network 'bt' (deep/run.py); needs torch",
       "cmd": ["{python}", "deep/run.py", "--tag", "bt", "--threads", "1", "--out", "{workdir}/candidate.csv"],
