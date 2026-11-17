@@ -118,7 +118,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from games import DATA_DIR, GAME, GAMES, half_video_blocks, require, source_frames  # noqa: E402
 from hmm.ball import flight_clue, mirror_flight  # noqa: E402
-from hmm import trees  # noqa: E402
+from hmm import ahead, trees  # noqa: E402
 from hmm.clues import (  # noqa: E402
     KEEPER_ON_BALL, MISSING_AFTER_LINE, N_DISTANCE_BINS, N_GAP_BINS, N_PLACES, ball_is_usable,
     ball_place_category, cache_key, gap_distance_category, keeper_slots, load_distances,
@@ -323,6 +323,16 @@ MIN_POSSESSION_SECONDS = 0.0
 # missing.
 NET_MODELS = tuple(os.path.join(ROOT, "deep", "models", name) for name in ("bt.pt", "sw25.pt"))
 NET_WEIGHT = 0.3
+# Look-ahead ball clue (hmm/ahead.py): category shares over the three external providers' labels,
+# each provider counted equally, times 1000 (the pseudo-count of 1 per cell is the floor).
+AHEAD_GIVEN_HOME = np.array([28.0, 1.4, 6.7, 50.9, 6.4, 47.5, 34.3, 22.0, 721.1, 81.7])
+AHEAD_GIVEN_DEAD = np.array([419.0, 30.2, 30.2, 110.2, 71.1, 48.3, 3.5, 3.5, 243.7, 40.2])
+AHEAD_MULTIPLE = 0.0
+
+
+def ahead_table(home=AHEAD_GIVEN_HOME, dead=AHEAD_GIVEN_DEAD):
+    """log p(next sighting | last sighting, state), states x ahead categories (hmm/ahead.py)."""
+    return ahead.table(home, dead)
 
 # A restart is the kick, not the moment the ball is put down. Where the decoder ends a stoppage
 # while the ball, seen, stays still (under RESTART_STILL m/s for RESTART_MIN_STILL s) and is then
@@ -642,6 +652,35 @@ def load_net(model_paths=NET_MODELS, threads=1):
     return log_ratio(probs, halves, len(players))
 
 
+def load_ahead(game=GAME, data_dir=None):
+    """(frames,) look-ahead ball category for every video frame (hmm/ahead.py), -1 where the ball
+    is seen. A keeper is either keeper slot of the metadata, credited to the team defending the
+    goal he stands by (team_by_frame). Positions are cached under data/cache."""
+    meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
+    n_frames = source_frames("tactical", game)
+    pitch = GAMES[game]["pitch"]
+    team_of_track = team_of_each_track(meta_path)
+    keepers = keeper_slots(meta_path)
+    halves = graded_segments(game)
+    key = cache_key(raw_path, team_of_track, n_frames, pitch, FPS, keepers, halves)
+    cache_path = os.path.join(CACHE_DIR, "positions_{}.npz".format(key))
+    if os.path.exists(cache_path):
+        z = np.load(cache_path)
+        px, py, ball_x, ball_y = z["px"], z["py"], z["bx"], z["by"]
+    else:
+        px, py, ball_x, ball_y = read_positions(raw_path, len(team_of_track), n_frames, pitch)[:4]
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        np.savez(cache_path, px=px, py=py, bx=ball_x, by=ball_y)
+    team = team_by_frame(px, team_of_track, keepers, halves, pitch[0])
+    keeper_slot = np.full((n_frames, 2), -1, int)
+    for slot in keepers:
+        for side in (0, 1):
+            keeper_slot[team[:, slot] == side, side] = slot
+    usable = ball_is_usable(ball_x, ball_y, pitch)
+    return ahead.ahead_category(ball_x, ball_y, usable, px.astype(float), py.astype(float),
+                                keeper_slot, pitch, FPS, halves)
+
+
 def load_observations(game=GAME, data_dir=None):
     """(gap-distance, place, speed, flight, width) categories for every video frame."""
     meta_path, raw_path = require(["atd_meta", "atd_raw"], game, data_dir)
@@ -830,6 +869,9 @@ def main():
                                  MIN_POSSESSION_SECONDS))
     parser.add_argument("--weight", type=float, default=WEIGHT,
                         help="emission weight (v5: {}, v4: {})".format(WEIGHT, WEIGHT_V4))
+    parser.add_argument("--ahead", type=float, default=AHEAD_MULTIPLE,
+                        help="look-ahead ball clue (hmm/ahead.py) at this multiple of --weight "
+                             "(default {:g}; 0 for none, which is v9)".format(AHEAD_MULTIPLE))
     parser.add_argument("--hand-gap", action="store_true",
                         help="ablation: v4's hand-set gap table, without the distance")
     parser.add_argument("--no-width", action="store_true",
@@ -869,6 +911,8 @@ def main():
     clues = [others[0], (place, place_table(live, dead))] + others[1:]
 
     extra = [] if args.no_width else [(width, width_table(), WIDTH_WEIGHT)]
+    if args.ahead > 0:
+        extra.append((load_ahead(), ahead_table(), args.ahead * args.weight))
     direct = None if args.no_control else args.control_weight * load_control(
         model_path=args.control_model)
     use_net = not (args.no_net or args.no_control)
@@ -905,6 +949,8 @@ def main():
                                            ("_mp{:g}".format(args.min_possession),
                                             not args.no_control
                                             and args.min_possession != MIN_POSSESSION_SECONDS),
+                                           ("_ahead{:g}".format(args.ahead),
+                                            args.ahead != AHEAD_MULTIPLE),
                                            ("_handgap", args.hand_gap),
                                            ("_nowidth", args.no_width),
                                            ("_fitplace", args.fit_place),

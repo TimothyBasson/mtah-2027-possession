@@ -1,0 +1,308 @@
+warning: The `UV_NATIVE_TLS` environment variable is deprecated and will be removed in a future release. Use `UV_SYSTEM_CERTS` instead.
+pitch (105.3, 68.0) keepers (23, 45)
+18257 Other | Dead ball resumed too quickly. Still dead
+    -4s D ball=(4,27) spd=2.60 keeperd=6.4,96.9
+    -2s D ball=(4,29) spd=1.62 keeperd=5.2,96.4
+    +0s H ball=(3,28) spd=1.47 keeperd=0.2,97.4
+    +2s H ball=(4,31) spd=0.99 keeperd=0.1,96.4
+    +4s H ball=(4,34) spd=0.77 keeperd=0.4,96.4
+    +6s H ball=(5,43) spd=0.81 keeperd=11.8,96.4
+    +8s H ball=(5,29) spd=0.97 keeperd=0.7,96.0
+   +10s H ball=(12,17) spd=1.61 keeperd=12.7,90.0
+23946 False stoppage | Ball marked dead here. Keeper is just holding it. 
+    -4s H ball=- spd=1.08 keeperd=nan,nan
+    -2s H ball=- spd=1.61 keeperd=nan,nan
+    +0s H ball=- spd=1.54 keeperd=nan,nan
+    +2s D ball=- spd=1.58 keeperd=nan,nan
+    +4s D ball=- spd=1.37 keeperd=nan,nan
+    +6s D ball=- spd=1.01 keeperd=nan,nan
+    +8s H ball=(11,28) spd=1.12 keeperd=14.1,6.3
+   +10s H ball=(15,17) spd=1.49 keeperd=26.1,17.4
+26688 False stoppage | Ball marked dead but keeper is just holding it aft
+    -4s H ball=(80,15) spd=1.32 keeperd=73.9,30.0
+    -2s H ball=(85,26) spd=1.91 keeperd=75.7,20.5
+    +0s D ball=- spd=1.24 keeperd=nan,nan
+    +2s D ball=- spd=1.41 keeperd=nan,nan
+    +4s D ball=- spd=1.60 keeperd=nan,nan
+    +6s D ball=- spd=1.28 keeperd=nan,nan
+    +8s D ball=- spd=1.27 keeperd=nan,nan
+   +10s D ball=- spd=1.29 keeperd=nan,nan
+30258 Other | No mistake here. Similar to other scnearios where 
+    -4s A ball=- spd=2.35 keeperd=nan,nan
+    -2s A ball=- spd=1.55 keeperd=nan,nan
+    +0s A ball=(96,34) spd=1.42 keeperd=80.7,0.2
+    +2s A ball=(94,36) spd=1.31 keeperd=79.4,1.4
+    +4s A ball=(94,35) spd=1.16 keeperd=79.1,0.9
+    +6s A ball=(93,35) spd=1.09 keeperd=77.7,0.7
+    +8s A ball=(91,36) spd=1.07 keeperd=75.7,0.8
+   +10s A ball=(90,36) spd=0.75 keeperd=75.1,0.6
+37281 Change too early | Predicting Barcelona possession too early from a g
+    -4s D ball=(2,39) spd=1.91 keeperd=4.2,nan
+    -2s D ball=(4,37) spd=4.01 keeperd=3.9,3.9
+    +0s D ball=(5,37) spd=3.72 keeperd=4.7,1.1
+    +2s H ball=(4,36) spd=2.23 keeperd=3.3,1.4
+    +4s H ball=(5,36) spd=2.11 keeperd=3.3,1.2
+    +6s H ball=(9,22) spd=1.63 keeperd=15.3,14.9
+    +8s H ball=(14,36) spd=1.48 keeperd=12.5,9.2
+   +10s H ball=(21,62) spd=2.20 keeperd=32.1,30.0
+43050 Missed stoppage | Dead ball starts here. Ball goes out for throw in
+    -4s A ball=(50,32) spd=3.68 keeperd=46.2,43.0
+    -2s A ball=(52,22) spd=3.02 keeperd=45.8,43.5
+    +0s A ball=- spd=1.75 keeperd=nan,nan
+    +2s A ball=- spd=3.12 keeperd=nan,nan
+    +4s H ball=- spd=2.43 keeperd=nan,nan
+    +6s H ball=(54,1) spd=1.56 keeperd=50.5,52.8
+    +8s H ball=(51,5) spd=1.68 keeperd=45.5,53.2
+   +10s H ball=(37,17) spd=1.48 keeperd=28.2,61.6
+43152 Other | Play resumes here from previously mentioned dead b
+    -4s A ball=- spd=1.74 keeperd=nan,nan
+    -2s A ball=- spd=3.18 keeperd=nan,nan
+    +0s H ball=- spd=2.34 keeperd=nan,nan
+    +2s H ball=(54,1) spd=1.54 keeperd=50.6,52.8
+    +4s H ball=(51,6) spd=1.67 keeperd=45.3,53.2
+    +6s H ball=(36,17) spd=1.47 keeperd=27.2,62.2
+    +8s H ball=(37,23) spd=1.64 keeperd=25.3,61.1
+   +10s H ball=(38,44) spd=1.69 keeperd=29.9,60.1
+65268 False stoppage | Ball actually didn't go out here. It was close to 
+    -4s H ball=(89,32) spd=3.33 keeperd=81.3,12.1
+    -2s H ball=(99,27) spd=4.05 keeperd=91.6,5.3
+    +0s D ball=(106,46) spd=1.65 keeperd=98.1,15.8
+    +2s D ball=- spd=1.02 keeperd=nan,nan
+    +4s D ball=- spd=0.88 keeperd=nan,nan
+    +6s D ball=- spd=1.19 keeperd=nan,nan
+    +8s D ball=- spd=1.18 keeperd=nan,nan
+   +10s D ball=- spd=1.18 keeperd=nan,nan
+69326 False stoppage | 
+    -4s A ball=- spd=1.20 keeperd=nan,nan
+    -2s A ball=- spd=1.29 keeperd=nan,nan
+    +0s D ball=- spd=0.83 keeperd=nan,nan
+    +2s D ball=- spd=1.02 keeperd=nan,nan
+    +4s H ball=(17,33) spd=1.97 keeperd=7.3,83.4
+    +6s H ball=(48,25) spd=3.75 keeperd=40.6,54.1
+    +8s H ball=(70,10) spd=3.98 keeperd=65.3,39.4
+   +10s H ball=(80,17) spd=4.02 keeperd=71.0,27.4
+69725 False stoppage | Bit of a scuffle by the away keeper end. No stoppa
+    -4s H ball=(93,16) spd=4.89 keeperd=84.5,18.8
+    -2s H ball=- spd=3.89 keeperd=nan,nan
+    +0s D ball=- spd=1.55 keeperd=nan,nan
+    +2s D ball=- spd=1.10 keeperd=nan,nan
+    +4s D ball=- spd=1.10 keeperd=nan,nan
+    +6s D ball=- spd=1.05 keeperd=nan,nan
+    +8s A ball=(82,33) spd=1.19 keeperd=72.3,12.1
+   +10s A ball=(78,28) spd=1.44 keeperd=68.2,21.6
+76462 False stoppage | Ball isn't dead. Attack turned into a shot and the
+    -4s H ball=(79,67) spd=2.78 keeperd=71.4,38.3
+    -2s H ball=(89,56) spd=2.33 keeperd=77.4,23.9
+    +0s D ball=- spd=1.33 keeperd=nan,nan
+    +2s D ball=- spd=1.27 keeperd=nan,nan
+    +4s D ball=- spd=1.45 keeperd=nan,nan
+    +6s D ball=- spd=1.45 keeperd=nan,nan
+    +8s D ball=- spd=1.60 keeperd=nan,nan
+   +10s D ball=- spd=1.57 keeperd=nan,nan
+82248 False stoppage | Keeper gets the ball again (gathers) and called de
+    -4s H ball=(70,39) spd=2.35 keeperd=60.8,28.7
+    -2s H ball=(87,35) spd=3.26 keeperd=77.4,12.6
+    +0s D ball=- spd=1.36 keeperd=nan,nan
+    +2s D ball=- spd=1.43 keeperd=nan,nan
+    +4s D ball=- spd=1.48 keeperd=nan,nan
+    +6s D ball=- spd=1.50 keeperd=nan,nan
+    +8s D ball=- spd=1.31 keeperd=nan,nan
+   +10s D ball=- spd=1.31 keeperd=nan,nan
+90376 Other | Not sure if this matters but a lot of this period 
+    -4s D ball=- spd=nan keeperd=nan,nan
+    -2s D ball=- spd=nan keeperd=nan,nan
+    +0s D ball=- spd=nan keeperd=nan,nan
+    +2s D ball=- spd=nan keeperd=nan,nan
+    +4s D ball=- spd=nan keeperd=nan,nan
+    +6s D ball=- spd=nan keeperd=nan,nan
+    +8s D ball=- spd=nan keeperd=nan,nan
+   +10s D ball=- spd=nan keeperd=nan,nan
+110811 Other | Dead ball starts here but it's still half time. Si
+    -4s X ball=(50,47) spd=0.98 keeperd=53.8,51.4
+    -2s X ball=(50,48) spd=1.02 keeperd=54.8,52.5
+    +0s D ball=(49,50) spd=0.67 keeperd=56.0,53.6
+    +2s D ball=(32,65) spd=0.48 keeperd=78.3,76.1
+    +4s D ball=(40,64) spd=0.91 keeperd=71.5,69.3
+    +6s D ball=(51,67) spd=0.78 keeperd=64.4,62.5
+    +8s D ball=(43,31) spd=0.62 keeperd=57.3,54.1
+   +10s D ball=(47,45) spd=1.05 keeperd=56.7,53.9
+121243 Other | Ball is still dead here. Throw in not taken yet
+    -4s D ball=(92,69) spd=1.34 keeperd=34.4,94.6
+    -2s D ball=(92,70) spd=1.21 keeperd=35.2,95.1
+    +0s A ball=(94,67) spd=1.48 keeperd=31.6,95.6
+    +2s A ball=(90,69) spd=1.41 keeperd=34.8,92.8
+    +4s A ball=(89,69) spd=0.91 keeperd=35.0,92.5
+    +6s A ball=(89,67) spd=0.96 keeperd=33.5,91.1
+    +8s A ball=(79,63) spd=1.12 keeperd=36.1,80.7
+   +10s A ball=(66,56) spd=2.32 keeperd=42.2,66.4
+121399 Other | Play resumes around here
+    -4s A ball=(89,69) spd=1.09 keeperd=35.1,92.5
+    -2s A ball=(89,69) spd=0.95 keeperd=34.9,92.4
+    +0s A ball=(88,66) spd=1.01 keeperd=32.8,90.3
+    +2s A ball=(77,62) spd=1.39 keeperd=36.6,78.6
+    +4s A ball=(64,55) spd=2.56 keeperd=43.3,64.3
+    +6s A ball=(54,49) spd=3.43 keeperd=48.5,52.6
+    +8s A ball=(51,49) spd=3.15 keeperd=48.6,50.0
+   +10s A ball=(58,55) spd=1.71 keeperd=41.3,59.0
+123481 False stoppage | Ball doesn't go dead here
+    -4s H ball=- spd=1.27 keeperd=nan,nan
+    -2s H ball=- spd=2.23 keeperd=nan,nan
+    +0s H ball=- spd=1.51 keeperd=nan,nan
+    +2s D ball=- spd=1.13 keeperd=nan,nan
+    +4s D ball=- spd=1.09 keeperd=nan,nan
+    +6s D ball=- spd=0.64 keeperd=nan,nan
+    +8s D ball=- spd=1.05 keeperd=nan,nan
+   +10s D ball=- spd=0.61 keeperd=nan,nan
+123754 Missed stoppage | Ball goes dead just after this for a very short pe
+    -4s D ball=- spd=0.98 keeperd=nan,nan
+    -2s D ball=- spd=0.74 keeperd=nan,nan
+    +0s H ball=(77,4) spd=1.17 keeperd=36.4,66.8
+    +2s H ball=(78,9) spd=1.46 keeperd=30.1,66.8
+    +4s H ball=(80,20) spd=2.49 keeperd=20.2,67.1
+    +6s H ball=(82,35) spd=2.86 keeperd=11.3,70.0
+    +8s H ball=(79,46) spd=3.48 keeperd=16.4,69.2
+   +10s H ball=(57,66) spd=3.75 keeperd=44.2,58.3
+129496 Other | Ball is still dead from the previous period. Incor
+    -4s D ball=(0,53) spd=1.07 keeperd=90.8,15.4
+    -2s D ball=- spd=1.05 keeperd=nan,nan
+    +0s H ball=- spd=2.83 keeperd=nan,nan
+    +2s D ball=- spd=1.10 keeperd=nan,nan
+    +4s D ball=(5,57) spd=1.05 keeperd=86.5,19.2
+    +6s D ball=(8,61) spd=0.95 keeperd=84.3,24.2
+    +8s D ball=- spd=0.91 keeperd=nan,nan
+   +10s H ball=- spd=1.95 keeperd=nan,nan
+129744 Other | Here again ball is still dead. The slots seem to m
+    -4s D ball=(8,61) spd=0.99 keeperd=84.4,24.0
+    -2s D ball=- spd=0.98 keeperd=nan,nan
+    +0s D ball=- spd=1.50 keeperd=nan,nan
+    +2s D ball=- spd=0.81 keeperd=nan,nan
+    +4s D ball=- spd=0.65 keeperd=nan,nan
+    +6s D ball=- spd=0.82 keeperd=nan,nan
+    +8s D ball=- spd=0.67 keeperd=nan,nan
+   +10s D ball=- spd=0.65 keeperd=nan,nan
+133696 Missed stoppage | Ball goes dead here for a brief period before a qu
+    -4s A ball=(8,39) spd=1.41 keeperd=1.5,2.8
+    -2s A ball=(16,30) spd=1.54 keeperd=nan,9.3
+    +0s A ball=(26,17) spd=1.57 keeperd=nan,26.8
+    +2s H ball=(32,9) spd=1.58 keeperd=nan,35.8
+    +4s H ball=(34,7) spd=1.48 keeperd=nan,37.3
+    +6s H ball=(30,19) spd=2.27 keeperd=nan,30.8
+    +8s H ball=(11,25) spd=1.70 keeperd=nan,10.6
+   +10s D ball=- spd=1.09 keeperd=nan,nan
+133928 False stoppage | Incorrect stoppage here again due to the ball not 
+    -4s H ball=(32,14) spd=1.80 keeperd=nan,34.0
+    -2s H ball=- spd=2.67 keeperd=nan,nan
+    +0s H ball=(6,26) spd=1.01 keeperd=nan,1.4
+    +2s D ball=- spd=1.37 keeperd=nan,nan
+    +4s D ball=- spd=1.40 keeperd=nan,nan
+    +6s D ball=- spd=1.27 keeperd=nan,nan
+    +8s D ball=- spd=1.26 keeperd=nan,nan
+   +10s D ball=- spd=1.26 keeperd=nan,nan
+144205 Change too early | Ball is still dead
+    -4s D ball=(107,32) spd=0.88 keeperd=6.1,98.9
+    -2s D ball=(105,40) spd=1.12 keeperd=1.0,97.0
+    +0s H ball=(102,41) spd=1.38 keeperd=2.2,94.5
+    +2s H ball=(102,41) spd=1.37 keeperd=0.9,94.5
+    +4s H ball=(102,41) spd=1.30 keeperd=2.2,94.5
+    +6s H ball=(97,27) spd=1.25 keeperd=15.2,90.2
+    +8s H ball=- spd=1.78 keeperd=nan,nan
+   +10s H ball=- spd=2.24 keeperd=nan,nan
+144339 Other | Dead ball ends here
+    -4s H ball=(102,41) spd=1.33 keeperd=0.7,94.5
+    -2s H ball=(102,41) spd=1.46 keeperd=1.8,94.6
+    +0s H ball=(102,39) spd=1.27 keeperd=2.5,94.0
+    +2s H ball=(82,14) spd=1.66 keeperd=36.6,77.0
+    +4s H ball=- spd=1.99 keeperd=nan,nan
+    +6s H ball=- spd=2.73 keeperd=nan,nan
+    +8s H ball=- spd=2.05 keeperd=nan,nan
+   +10s H ball=(68,17) spd=1.23 keeperd=37.0,63.4
+148692 Change too early | Ball is still dead
+    -4s A ball=(99,43) spd=1.47 keeperd=5.1,nan
+    -2s D ball=(103,43) spd=1.26 keeperd=2.6,nan
+    +0s H ball=(102,43) spd=1.28 keeperd=4.2,nan
+    +2s H ball=(101,41) spd=1.46 keeperd=3.4,nan
+    +4s H ball=(88,37) spd=1.66 keeperd=12.5,nan
+    +6s H ball=(84,41) spd=1.71 keeperd=16.0,nan
+    +8s H ball=(83,57) spd=2.38 keeperd=24.5,nan
+   +10s H ball=(75,60) spd=2.11 keeperd=32.3,nan
+148781 Other | Play resumes here
+    -4s D ball=(102,43) spd=1.27 keeperd=3.5,nan
+    -2s H ball=(101,43) spd=1.47 keeperd=4.9,nan
+    +0s H ball=(94,38) spd=1.59 keeperd=6.7,nan
+    +2s H ball=(84,37) spd=1.79 keeperd=16.3,nan
+    +4s H ball=(85,56) spd=2.35 keeperd=22.5,nan
+    +6s H ball=(78,59) spd=2.15 keeperd=29.1,nan
+    +8s H ball=(68,64) spd=1.45 keeperd=38.8,nan
+   +10s H ball=(67,65) spd=0.75 keeperd=40.5,nan
+150665 False stoppage | Ball is still in play
+    -4s H ball=(14,61) spd=1.44 keeperd=84.6,28.4
+    -2s A ball=(11,47) spd=1.37 keeperd=84.1,14.9
+    +0s D ball=(6,13) spd=1.24 keeperd=92.5,20.4
+    +2s D ball=(8,3) spd=1.61 keeperd=93.3,31.0
+    +4s D ball=(9,-4) spd=1.57 keeperd=95.0,37.8
+    +6s H ball=(11,1) spd=1.41 keeperd=90.7,32.7
+    +8s H ball=(13,9) spd=1.28 keeperd=86.0,26.8
+   +10s H ball=(20,6) spd=1.33 keeperd=80.9,32.4
+150745 Other | Ball only becomes dead here
+    -4s A ball=(8,26) spd=1.11 keeperd=87.0,10.8
+    -2s D ball=(7,7) spd=1.36 keeperd=92.5,26.4
+    +0s D ball=(8,-2) spd=1.55 keeperd=94.6,35.9
+    +2s D ball=(10,-2) spd=1.58 keeperd=93.0,35.5
+    +4s H ball=(12,7) spd=1.38 keeperd=87.2,27.7
+    +6s H ball=(13,3) spd=1.27 keeperd=88.0,32.4
+    +8s H ball=(23,9) spd=1.35 keeperd=76.6,31.8
+   +10s H ball=(34,22) spd=2.09 keeperd=61.4,33.5
+156799 False stoppage | Ball never goes dead here. Bit of a scuffle though
+    -4s A ball=(18,23) spd=2.02 keeperd=71.6,18.5
+    -2s A ball=(24,16) spd=1.76 keeperd=67.7,25.5
+    +0s D ball=- spd=1.37 keeperd=nan,nan
+    +2s D ball=- spd=1.12 keeperd=nan,nan
+    +4s D ball=- spd=0.94 keeperd=nan,nan
+    +6s D ball=- spd=0.92 keeperd=nan,nan
+    +8s H ball=- spd=1.45 keeperd=nan,nan
+   +10s H ball=(19,15) spd=1.45 keeperd=72.4,24.0
+168311 False stoppage | Ball doesn't go dead here. Just reutrning to the k
+    -4s A ball=- spd=1.51 keeperd=nan,nan
+    -2s A ball=(91,9) spd=0.97 keeperd=26.2,86.2
+    +0s D ball=(97,27) spd=0.88 keeperd=4.9,90.1
+    +2s H ball=- spd=1.54 keeperd=nan,nan
+    +4s H ball=- spd=1.70 keeperd=nan,nan
+    +6s H ball=- spd=1.67 keeperd=nan,nan
+    +8s H ball=- spd=1.55 keeperd=nan,nan
+   +10s H ball=- spd=1.23 keeperd=nan,nan
+173370 Other | Don't think away gets the ball here. Just goesd de
+    -4s A ball=(91,55) spd=1.88 keeperd=23.1,86.7
+    -2s H ball=(94,49) spd=2.43 keeperd=16.0,89.0
+    +0s H ball=(99,54) spd=2.58 keeperd=17.0,94.9
+    +2s D ball=- spd=1.29 keeperd=nan,nan
+    +4s D ball=- spd=1.34 keeperd=nan,nan
+    +6s D ball=- spd=1.37 keeperd=nan,nan
+    +8s D ball=- spd=1.41 keeperd=nan,nan
+   +10s D ball=- spd=1.48 keeperd=nan,nan
+182589 Change too early | Ball only stops being dead (kicked from free kick)
+    -4s D ball=- spd=1.78 keeperd=nan,nan
+    -2s H ball=- spd=2.31 keeperd=nan,nan
+    +0s H ball=- spd=2.63 keeperd=nan,nan
+    +2s H ball=(35,18) spd=2.86 keeperd=62.2,29.8
+    +4s H ball=(28,8) spd=1.90 keeperd=71.9,30.9
+    +6s D ball=- spd=1.50 keeperd=nan,nan
+    +8s D ball=- spd=0.79 keeperd=nan,nan
+   +10s D ball=- spd=0.88 keeperd=nan,nan
+189232 Change too late | Dead ball startedf a bit earlier
+    -4s A ball=(55,44) spd=1.36 keeperd=43.1,47.3
+    -2s A ball=(39,45) spd=1.09 keeperd=58.3,63.4
+    +0s D ball=(32,44) spd=1.26 keeperd=62.0,69.4
+    +2s D ball=(32,41) spd=1.09 keeperd=53.1,69.6
+    +4s D ball=(36,40) spd=1.16 keeperd=40.2,65.3
+    +6s D ball=- spd=1.02 keeperd=nan,nan
+    +8s D ball=- spd=1.05 keeperd=nan,nan
+   +10s A ball=- spd=1.12 keeperd=nan,nan
+189462 Other | Ball is still dead
+    -4s D ball=- spd=0.90 keeperd=nan,nan
+    -2s D ball=- spd=0.94 keeperd=nan,nan
+    +0s A ball=- spd=1.09 keeperd=nan,nan
+    +2s A ball=- spd=1.67 keeperd=nan,nan
+    +4s D ball=- spd=0.70 keeperd=nan,nan
+    +6s D ball=- spd=0.62 keeperd=nan,nan
+    +8s D ball=- spd=0.48 keeperd=nan,nan
+   +10s D ball=- spd=0.79 keeperd=nan,nan
