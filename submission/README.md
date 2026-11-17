@@ -9,7 +9,7 @@ Nothing here is final. The method, the team name and the document can all change
 | `submission.json` | team name, which method, and the command for each method | anything changes; this is the only place the choice lives |
 | `make_submission.py` | checks inputs exist and are not empty or iCloud-offloaded, runs the method, validates with the organisers' checker, refuses a degenerate file (almost all D, or a team missing), writes `out/<team>.csv` + a manifest | rarely; add methods in the json instead |
 | `audit_public_repo.py` | searches all of git history for data, ground truth and label files | run before making the repo public |
-| `TECHNICAL_DOC.md` | draft of the technical document, six required sections; the source of the PDF | as decisions close |
+| `TECHNICAL_DOC.md` | earlier draft of the technical document. **The working copy is now a Claude Doc**, which exports the upload PDF; replace this file with the final text or delete it | before going public |
 | `build_doc_pdf.py` | renders the doc to `out/<team>.pdf` via headless Chrome (`pip install markdown==3.7`); open TODOs are highlighted | rarely |
 | `out/` | built files. Git-ignored: a submission is a full-match label file | never commit |
 
