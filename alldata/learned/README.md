@@ -47,7 +47,7 @@ are the fallbacks.
 
 One command makes the submission from the provided data alone. `run.py` uses the committed nets
 in `models/`, `deep/models/bt.pt`, and for the default nets Tim's v8 on BAR-ATH, which it
-produces itself when missing by running his code unchanged (`python -m hmm.decode --no-net`,
+produces itself when missing by running his code unchanged (`python -m hmm.decode --no-net --no-hold-restart`, the hold pinned off since PR 60,
 then `tim.py --bar`). It reads no ground truth. Checked on 2026-11-16 in a fresh clone holding
 only `data/tactical/`: two runs, the second with every cache removed, give the same file byte
 for byte (sha256 `75139e82...d6ec5b762`, about 2 minutes on one CPU), and it passes
