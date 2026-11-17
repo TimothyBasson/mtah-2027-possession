@@ -1,4 +1,8 @@
 <!--
+SUPERSEDED as the working copy (2026-11-17): the team now drafts and comments on the technical
+document in a Claude Doc, and exports the upload PDF from there. This file is the earlier draft;
+either replace it with the final text before the repo goes public, or delete it.
+
 DRAFT. Build the upload with `python submission/build_doc_pdf.py` -> submission/out/Gambtt.pdf
 (SUBMISSION.md asks for the team name on the file; *.pdf is git-ignored). This comment is left out
 of the PDF.

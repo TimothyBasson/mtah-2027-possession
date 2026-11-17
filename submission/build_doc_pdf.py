@@ -103,9 +103,14 @@ def main():
         return
 
     pdf_path = os.path.join(OUT_DIR, name + ".pdf")
-    subprocess.run([find_chrome(args.chrome), "--headless", "--disable-gpu", "--no-pdf-header-footer",
-                    "--print-to-pdf=" + pdf_path, "file://" + html_path],
-                   check=True, capture_output=True)
+    cmd = [find_chrome(args.chrome), "--headless", "--disable-gpu", "--no-pdf-header-footer",
+           "--print-to-pdf=" + pdf_path, "file://" + html_path]
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        cmd.insert(1, "--no-sandbox")  # Chrome refuses to run as root (containers) without it
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode or not os.path.isfile(pdf_path):
+        sys.exit("Chrome failed (exit {}):\n{}\nFallback: --html-only, then print the HTML from a "
+                 "browser.".format(result.returncode, (result.stderr or result.stdout).strip()[-2000:]))
     todos = len(re.findall(r"\bTODO\b", re.sub(r"<!--.*?-->", "", md_text, flags=re.S)))
     print("-> " + os.path.relpath(pdf_path))
     if todos:
