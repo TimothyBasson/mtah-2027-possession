@@ -35,7 +35,7 @@ def main():
     rest = np.array([s[j] for j in range(1, len(s)) if l[j] == 1 and l[j - 1] == 2 and s[j] - s[j - 1] >= 50])
 
     def t_of(frames):  # video frame -> audio seconds
-        o = np.where(frames < 85_500 + a.offset0, a.offset0, a.offset1)
+        o = np.where(frames < 100_000, a.offset0, a.offset1)  # split in the halftime gap (video frames 90,652-110,807)
         return (frames - o) / 25.0
 
     bins = np.arange(-6, 6.01, 0.5)

@@ -60,6 +60,33 @@ supports it on this audio.
 Not tried (would need more than a quick run): a whistle detector trained on labelled whistles
 from other matches' audio (we have none), and source separation before detection.
 
+## Rival entries (checked 2026-11-17)
+
+Soma (`briannlongzhao/more-than-a-hack-2027-public`, `solution/whistle.py`) and Tiki-Taka Tensors
+(`lisovoy7/Tiki-Taka-Tensors`, `possession/audio.py`) both use the tactical audio with a narrow
+band at about 3.8 kHz, which they read off this recording's spectrogram ("in this recording the
+referee whistle fundamental sits around 3.8 kHz"). Soma also requires a steady pitch, sharpness
+and a 28 dB peak. Neither uses it as a raw stoppage trigger. Soma dropped its unconditional
+whistle rule (it fired where play went on) and only lets a whistle start a stoppage when the
+tracking shows play stopping within 8 s. Tiki-Taka Tensors found that AudioSet taggers fail on
+the whistle and that direct triggers added false stoppages, so it keeps the band only as one
+weak feature in an unsupervised clustering. A third entry (oogabooga) measured its own BAR-ATH
+whistles as 55% inside stoppages and 11% followed by one.
+
+`tone.py` copies that shape (steady, sharp tone, 0.2 s or more) in the generic referee-whistle
+band, 3.0-4.2 kHz, not fitted to this match:
+
+| track | peak | events | near a stoppage start (chance 0.09) | stoppages with one |
+|---|---|---|---|---|
+| tactical | 20 dB | 193 | 0.12 | 0.19 |
+| tactical | 28 dB | 138 | 0.11 | 0.12 |
+| broadcast | 20 dB | 94 | 0.17 | 0.13 |
+| broadcast | 28 dB | 42 | 0.24 | 0.08 |
+
+At best this is 2-2.6x chance at a tenth of the stoppages, and only on the broadcast mix. That
+matches what the rivals report: a hint that needs the tracking to confirm it, and none of them
+shows a held-out gain from it. Not adopted.
+
 ## Files
 
 Features and tagger outputs (no audio) in `/mnt/project-files/alldata/whistle/`: `tac.npz`,
