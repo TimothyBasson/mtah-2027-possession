@@ -11,8 +11,15 @@
 
   "methods": {
     "hmm": {
-      "description": "Sticky HMM over tracking clues + learned control classifier, Viterbi per half (hmm/decode.py)",
+      "description": "hmm_v9: sticky HMM, tracking clues + control classifier + two players-only nets, Viterbi per half, restart and keeper holds (hmm/decode.py). Python 3.11, needs torch",
       "cmd": ["{python}", "-m", "hmm.decode", "--out", "{workdir}/candidate.csv"],
+      "produces": "candidate.csv",
+      "requirements": ["requirements.txt", "requirements-deep.txt"],
+      "model_files": ["hmm/models/control_state.npz", "deep/models/bt.pt", "deep/models/sw25.pt"]
+    },
+    "hmm_v8": {
+      "description": "Fallback without torch: hmm_v9 minus the nets (hmm.decode --no-net)",
+      "cmd": ["{python}", "-m", "hmm.decode", "--no-net", "--out", "{workdir}/candidate.csv"],
       "produces": "candidate.csv",
       "requirements": ["requirements.txt"],
       "model_files": ["hmm/models/control_state.npz"]
