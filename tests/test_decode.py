@@ -286,3 +286,22 @@ def test_width_does_not_override_a_player_on_the_ball():
     labels = decode([home_on_ball, in_play], transitions(), np.log(START), segments=[(0, n)],
                     kickoffs=(), extra=[(width, width_table(), WIDTH_WEIGHT)])
     assert WIDTH_WEIGHT < WEIGHT and (labels[25:] == "H").all()
+
+
+def test_a_brief_possession_between_two_spells_of_the_other_team_is_folded():
+    from hmm.decode import fold_brief_possessions
+    from hmm.model import A, D, H
+    path = np.array([H] * 10 + [A] * 3 + [H] * 10 + [A] * 3 + [D] * 5 + [H] * 2 + [A] * 9)
+    out = fold_brief_possessions(path, 5)
+    assert list(out[:23]) == [H] * 23            # H A H: the touch goes back to H
+    assert list(out[23:26]) == [A] * 3           # next to a stoppage: left alone
+    assert list(out[31:33]) == [H] * 2           # after a stoppage: left alone
+    assert np.array_equal(fold_brief_possessions(path, 0), path)
+
+
+def test_folding_repeats_until_nothing_brief_is_left():
+    from hmm.decode import fold_brief_possessions
+    from hmm.model import A, H
+    path = np.array([H] * 8 + [A] * 2 + [H] * 3 + [A] * 8)
+    # the 2-frame A run folds into H, which makes one 13-frame H run that stays
+    assert list(fold_brief_possessions(path, 4)) == [H] * 13 + [A] * 8

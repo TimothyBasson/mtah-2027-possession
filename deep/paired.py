@@ -48,7 +48,7 @@ def main():
     sets = [s.split(",") for s in sys.argv[1:3]]
     tags = sets[0] + sets[1]
     paths = sorted(glob.glob(os.path.join(ROOT, "data", "external", "*.npz")))
-    with Pool(4) as pool:
+    with Pool(int(os.environ.get("POOL", 4))) as pool:
         rows = pool.map(one, [(p, tags) for p in paths])
     names = [n for n, _ in rows]
     S = np.stack([r for _, r in rows])  # (matches, tags, decodes, truths)

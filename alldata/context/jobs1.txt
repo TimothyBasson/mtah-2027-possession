@@ -1,0 +1,12 @@
+cx1 idsse
+cx1 metrica
+cx1 skillcorner
+nc1 idsse --no-ctx
+nc1 metrica --no-ctx
+nc1 skillcorner --no-ctx
+cx1s1 idsse --seed 1
+cx1s1 metrica --seed 1
+cx1s1 skillcorner --seed 1
+nc1s1 idsse --no-ctx --seed 1
+nc1s1 metrica --no-ctx --seed 1
+nc1s1 skillcorner --no-ctx --seed 1

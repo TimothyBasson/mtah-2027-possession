@@ -1,0 +1,8 @@
+# TAG FOLD [train.py options]. The held-out fold nets behind hmm_v9 (external/score_fuse.py --tag bt,b2).
+bt idsse --steps 1500 --ptr 0.5
+bt metrica --steps 1500 --ptr 0.5
+bt skillcorner --steps 1500 --ptr 0.5
+# b2: sw25 where SkillCorner is in training, a second seed of bt where it is not
+b2 idsse --steps 1500 --ptr 0.5 --provw skillcorner=0.25
+b2 metrica --steps 1500 --ptr 0.5 --provw skillcorner=0.25
+b2 skillcorner --steps 1500 --ptr 0.5 --seed 1

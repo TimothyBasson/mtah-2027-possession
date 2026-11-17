@@ -24,6 +24,18 @@ from hmm import trees
 from hmm.ball import ball_velocity, detect_touches
 from hmm.clues import ball_is_usable, median_player_speed, metres_outside, team_width_difference
 
+# v8: the classifier is trained and evaluated on every STRIDE-th frame, and each score is held for
+# the frames around it. Neighbouring frames repeat each other.
+STRIDE = 5
+# Column-name fragments joint_features() leaves out: what the ball does on its own (whether it is
+# seen, how fast it moves, how long since it was seen). IDSSE freezes the ball in a stoppage and
+# Metrica hides it, so a classifier given these columns learns "still or missing means dead", which
+# is how those two providers record a stoppage and not football. Held out, SkillCorner pays for it
+# (external/README.md).
+BALL_ALONE = ("seen", "ball_speed", "bspeed", "ball_dv", "line_at_last_seen")
+# The team-shape feature groups taken from seq/features.py: players only, and the ball against the
+# players. Its k_ group (the ball alone) is left out for the same reason.
+SHAPE_GROUPS = ("p_", "b_")
 # Seconds either side of the frame for the windowed averages.
 WINDOWS = (0.5, 1.5, 4.0)
 # Seconds before / after the frame for the one-sided windows.
@@ -265,3 +277,33 @@ def features(px, py, team, ball_x, ball_y, pitch, fps, halves, swap=False):
     names = list(cols)
     X = np.column_stack([np.asarray(cols[k], np.float32) for k in names])
     return X, names
+
+
+def joint_features(px, py, team, ball_x, ball_y, pitch, fps, halves, swap=False, stride=STRIDE):
+    """(X, names, frames): the v8 classifier's inputs on every stride-th frame.
+
+    features() above without its BALL_ALONE columns, next to the team-shape features of
+    seq/features.py (how wide, deep and far up the pitch each team stands, which way both drift,
+    who is goal-side of the ball). The first set reads the players nearest the ball; the second
+    reads all 22, so it still speaks where the ball is missing or noisy. Arguments as features().
+    """
+    from seq.features import compute  # here, not at the top: seq/ imports hmm/
+    X, names = features(px, py, team, ball_x, ball_y, pitch, fps, halves, swap=swap)
+    keep = [i for i, n in enumerate(names) if not any(b in n for b in BALL_ALONE)]
+    team = np.asarray(team)
+    players = np.stack([np.asarray(px, np.float32), np.asarray(py, np.float32)], axis=-1)
+    ball = np.column_stack([np.asarray(ball_x, float), np.asarray(ball_y, float)])
+    usable = ball_is_usable(ball_x, ball_y, pitch)
+    ball[~usable] = np.nan
+    S, shape_names, frames = compute(players, ball, 1 - team if swap else team,
+                                     [(lo, hi - 1) for lo, hi in halves], pitch, fps,
+                                     stride=stride)
+    keep_shape = [i for i, n in enumerate(shape_names) if n.startswith(SHAPE_GROUPS)]
+    return (np.hstack([X[frames][:, keep], S[:, keep_shape]]),
+            [names[i] for i in keep] + [shape_names[i] for i in keep_shape], frames)
+
+
+def hold(values, n_frames, stride=STRIDE):
+    """Per-frame copy of values given on every stride-th frame from 0: each is held for the
+    stride frames centred on it."""
+    return values[np.clip((np.arange(n_frames) + stride // 2) // stride, 0, len(values) - 1)]

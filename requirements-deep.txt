@@ -1,2 +1,4 @@
 # deep/ (the learned possession model). CPU is enough: inference on the match takes seconds.
 torch==2.15.0
+# alldata/learned feats.lowpass and alldata/robust (research reproduction only; the BAR-ATH run does not need it)
+scipy==1.17.1

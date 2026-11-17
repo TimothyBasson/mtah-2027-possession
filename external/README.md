@@ -8,6 +8,8 @@ for ours:
 uv run python external/build.py            # -> data/external/*.npz (gitignored, ~1 min/match)
 uv run python external/score.py --seen 0.59 [param=value ...]
 uv run python external/score_hmm.py --seen 0.59   # the HMM decoder in hmm/, and smooth50 (all three sets)
+uv run python external/score_control.py           # hmm_v8 against hmm_v6, raw and folded labels (below)
+uv run python external/score_fuse.py --tag bt,b2  # hmm_v9: v8 plus the players-only net (below)
 ```
 
 | set | matches | tracking | label source |
@@ -248,6 +250,238 @@ which is the dead-ball pattern. Metrica shows the same pattern: there the ball i
 dead frames and 12% of live ones. So IDSSE under `--seen` punishes "missing means dead" more than
 our match would.
 Scores also get no help from set-piece tags, because these matches have no Smart Tagging.
+
+## Stoppage edges: the restart hold (`hmm.decode`, `--no-hold-restart`), `edge_diag.py`, `edge_post.py`
+
+The decoder reads a player standing over a placed ball as possession, calling live restarts
+several seconds before the kick. `hold_restarts` (hmm/decode.py, on by default since 2026-11-16;
+`--no-hold-restart` turns it off) moves the start of the spell after a stoppage to the kick,
+where a seen ball that was still (under 1 m/s for 0.5 s) is kicked (over 5 m/s) within 10 s and
+before that spell ends. A spell is moved, never removed. Its parameters were chosen and swept on
+the outside providers only; nothing about BAR-ATH is in the code.
+
+| | IDSSE | Metrica | SkillCorner | mean | fair | BAR-ATH public |
+|---|---|---|---|---|---|---|
+| v9 | 0.725 | 0.807 | 0.496 | 0.676 | 0.663 | 0.774 (0.761 with PR 57's keeper fix) |
+| v9 + restart hold (default) | 0.726 | 0.807 | 0.496 | 0.6764 | 0.663 | 0.787 (0.774 with PR 57's keeper fix) |
+
+Held out it is flat in every setting tried (still 0.5-2 m/s, kick 3-5 m/s, 0.5-2 s still:
+0.6761-0.6765), because the outside providers hide or freeze the ball in a stoppage and the rule
+rarely fires there, so the held-out numbers are no evidence either way. The public-window gain is
+one restart (1.0 s early instead of 5.4 s), well inside the bootstrap band. On the full match it
+fires 7 times (6 with PR 57's keeper fix), moving restarts by 1.4-6.0 s; the decoder prints each firing with the
+nearest Smart Tagging set piece (4 within 6 s, 3 with none within 18 s; Smart Tagging misses
+about half of all set pieces). It does not reach throw-ins (the ball moves with the thrower) or
+restarts with the ball unseen.
+
+Also measured, not kept: turning an H or A spell between two decoded stoppages into D. Under
+1.5 s it is flat (0.6762), from 2 s on it costs (2 s 0.6754, 3 s 0.6715). Spell errors on the
+held-out decodes (edge_diag.py dumps them) are mostly 2-5 s possessions of the other team, missed
+(IDSSE 116, Metrica 32, SkillCorner 293) and invented (30, 4, 428) in similar numbers, which is
+team-naming quality, not a boundary bias a rule can move. Restart timing on the outside matches
+is already within 0.3 s at the median.
+
+## hmm_v9: the players-only net as a clue, `score_fuse.py`
+
+    python external/control_features.py && python external/train_control.py --loso
+    sh deep/queue.sh deep/jobs_v9.txt          # six held-out fold nets, about 3 hours on 3 cores
+    python external/score_fuse.py --tag bt,b2  # variants are "control weight:net weight"
+
+v9 is v8 with one more term in the decoder's log emissions: the per-frame p(H, A, D) of the
+players-only net of `deep/`, as a log ratio against the class shares it was trained on, at a
+weight of 0.3 (`hmm/net_clue.py`, `hmm.decode.NET_WEIGHT`). Nothing else changes: same control
+classifier, same tables, same chain. Each match is read by nets that never saw its provider.
+Folded spellF1, measured 2026-11-16 (v8 rerun the same day reproduces 0.644 / 0.816 / 0.480):
+
+| folded spellF1 | v8 | net alone in the decoder (no control clue) | v9, one net (`bt`) | **v9, two nets averaged** | v9 - v8, paired (se, matches up) |
+|---|---|---|---|---|---|
+| IDSSE (7) | 0.644 | 0.692 | 0.716 | **0.728** | +0.084 (0.010, 7 of 7) |
+| Metrica (3) | 0.816 | 0.799 | 0.808 | **0.807** | -0.009 (0.007, 1 of 3) |
+| SkillCorner (20) | 0.480 | 0.489 | 0.496 | **0.497** | +0.016 (0.004, 16 of 20) |
+| mean of the three | 0.647 | 0.660 | 0.674 | **0.677** | |
+
+Against the labels as they are: 0.576 to 0.592. Alive/dead F1 0.946 to 0.951, team accuracy on
+frames both call live 0.904 to 0.910 (IDSSE 0.900 to 0.921, Metrica 0.966 to 0.964, SkillCorner
+0.845 to 0.845). With `--min-possession 1.5` (still off): 0.652 to 0.681.
+
+**The weight was read off these matches.** Two nets, control weight 0.2:
+
+| net weight | 0 (v8) | 0.05 | 0.1 | 0.15 | 0.2 | 0.25 | 0.3 | 0.4 | 0.5 |
+|---|---|---|---|---|---|---|---|---|---|
+| IDSSE | 0.644 | 0.670 | 0.689 | 0.705 | 0.715 | 0.721 | 0.728 | 0.727 | 0.726 |
+| Metrica | 0.816 | 0.819 | 0.816 | 0.810 | 0.807 | 0.810 | 0.807 | 0.800 | 0.794 |
+| SkillCorner | 0.480 | 0.489 | 0.495 | 0.495 | 0.496 | 0.497 | 0.497 | 0.490 | 0.487 |
+| mean | 0.647 | 0.659 | 0.667 | 0.670 | 0.673 | 0.676 | 0.677 | 0.673 | 0.669 |
+
+Picked for each provider on the other two, the folds choose 0.1, 0.3 and 0.3 and the provider
+left out scores 0.689 / 0.807 / 0.497: a mean of **0.664**, which is the fair size. The gap to
+0.677 is all IDSSE: Metrica and SkillCorner together are flat from 0.05 to 0.3, so they cannot
+see that IDSSE wants more of the net.
+
+**Where the gain is.** IDSSE's ball is knocked out to 59% seen in short random gaps, and that is
+where v8 loses most there (with the true ball back v8 scores 0.752 on IDSSE; measured in another
+thread the same day). The net reads all 22 players and fills those gaps. Metrica's labels and
+ball come from the same events and its ball is only missing in stoppages, so there the net has
+nothing to add and smooths a few short possessions away. SkillCorner gains in alive/dead (0.942
+to 0.954), not in team naming.
+
+**The two nets.** `bt` is `deep/`'s shipped net. `b2` is, for the IDSSE and Metrica folds,
+`sw25` (the same net with SkillCorner's labels at a quarter weight, `--provw skillcorner=0.25`,
+the one variant `deep/README.md` found level or up everywhere), and for the SkillCorner fold,
+where `sw25` is `bt`, a second seed of `bt`. `b2` alone in v9 scores 0.735 / 0.804 / 0.496
+(0.679); the average is kept because two nets are steadier than one (`deep/`'s seed spread is
+0.013). For BAR-ATH the decoder averages `deep/models/bt.pt` and `deep/models/sw25.pt`, both
+trained on all 30 matches.
+
+Tried on the way and not kept (one net, mean of the three):
+
+| | mean | note |
+|---|---|---|
+| the net's outputs as 45 columns of the control classifier (`net_features.py`, `train_control.py --net bt`): p(H, A, D), the pointer's lean, pointer and ball guess against the visible ball, windows | 0.658 (0.659 / 0.827 / 0.487) | up on v8 everywhere, but well under the sum in the decoder; held-out log loss on SkillCorner worsens 0.76 to 0.87 |
+| that classifier and the net in the decoder together | 0.662 to 0.668 | no better than v8's classifier with the net |
+| a different net weight where the ball is not seen (0.5 to 0.8 against 0.1 to 0.3) | 0.667 to 0.672 | flat |
+| the net's alive/dead part at half or 1.5 times its team part | 0.672 | flat |
+| without the width clue, or the hand-built clues at 0.15 | 0.673, 0.671 | flat |
+| control weight 0.1 to 0.3 beside the net | 0.669 to 0.674 | flat |
+
+**What ships is a near neighbour of what was measured.** The fold nets behind the tables are
+trained for 1,500 steps with a provider held out (`deep/jobs_v9.txt`); `bt.pt` and `sw25.pt` are
+trained for 2,000 steps on all 30 matches. On the SkillCorner fold `b2` is a second seed of
+`bt`, not the `sw25` recipe, since `sw25` only differs where SkillCorner is in training. And
+`hmm.net_clue.NET_PRIOR` counts the three providers equally, while `sw25` trains with
+SkillCorner's labels at a quarter weight, so its implied class shares differ a little (D 0.38
+against 0.35). No provider mean here has a bootstrap interval: with 3, 7 and 20 matches, the
+paired standard errors in the first table are what there is, and by them Metrica's drop is noise
+and SkillCorner's gain is small but consistent.
+
+**On BAR-ATH (2026-11-16, check only; nothing was chosen on it).** `python -m hmm.decode` and
+`python -m hmm.decode --no-net` on the tactical tracking, with `deep/run.py` (`bt` alone) beside
+them:
+
+| full match, no labels read | `hmm_v8` | `hmm_v9` | `deep` (`bt`) |
+|---|---|---|---|
+| possessions, half 1 / half 2 | 127 / 137 | 117 / 124 | 125 / 147 |
+| mean possession | 13.6 / 12.0 s | 14.9 / 13.3 s | 13.9 / 11.4 s |
+| median possession | 8.0 / 7.8 s | 8.4 / 9.1 s | 7.5 / 7.0 s |
+| possessions under 2 s | 10% / 10% | 6% / 8% | |
+| dead share of graded frames | 46% / 48% | 45% / 48% | 45% / 47% |
+| home's share of live frames | 64% / 58% | 66% / 59% | 65% / 58% |
+| stoppages | 110 | 102 | |
+| a decoded restart within 2 s of the 58 tagged set pieces | 54 | 53 | |
+
+v9 has 8.7% fewer possessions than v8 (241 against 264) and the same dead share. The public
+window's possessions have a mean of 14.2 s. v8 and v9 differ on 5.8% of graded frames: 6.8% where
+the ball is seen (59% of frames) and 4.3% where it is not; where both call the ball live they
+name different teams on 5.0%; v8 is dead where v9 is live on 1.7% and the reverse on 1.5%. v9
+sits between its two parents: it differs from `deep` on 5.3% of graded frames, where v8 differs
+from `deep` on 10.5%.
+
+| public 5 minutes, `run_evaluation.py --bootstrap 1000` (17 possessions) | spellF1 (5-95%) | macroF1 (5-95%) | alive/dead | team, both alive | possessions |
+|---|---|---|---|---|---|
+| `hmm_v8` | 0.679 (0.48 to 0.84) | 0.861 (0.62 to 0.90) | 0.962 | 0.916 | 16 |
+| `hmm_v9` | 0.774 (0.58 to 0.90) | 0.904 (0.64 to 0.95) | 0.972 | 0.943 | 14 |
+| `deep` (`bt`) | 0.745 (0.51 to 0.89) | 0.900 (0.68 to 0.97) | 0.960 | 0.977 | 12 |
+
+The intervals overlap almost entirely, so the window does not say v9 is better; it says nothing
+has gone wrong. `hmm_v9.csv` passes `evaluation/validate_submission.py`, and two runs on the same
+machine (Intel Xeon with AVX-512, torch 2.15.0, one thread) give the same file, sha256
+`cf1a838d...2ce02d31`. It has not been regenerated on a second CPU. `python -m hmm.decode` needs
+torch (`requirements-deep.txt`); `--no-net` gives v8 without it. The outside sets lose the ball at
+random and BAR-ATH loses it around restarts in long gaps (above), so the size of IDSSE's gain
+should not be expected here; the direction on the public window is the same.
+
+## hmm_v8: the control classifier retrained, `score_control.py`
+
+    python external/control_features.py && python external/train_control.py --loso
+    python external/score_control.py
+
+The number to compare a change on is the **folded** column: spellF1 against the labels folded
+towards the challenge's controlled-possession rule (`external/control.py`), each provider scored
+by a classifier trained on the other two, ball at `--seen 0.59`. Measured 2026-11-14:
+
+| folded spellF1 | hmm_v6 | hmm_v7 (weight 0.15) | hmm_v8 (weight 0.2) | v8 - v7 | v8 with `--min-possession 1.5` |
+|---|---|---|---|---|---|
+| IDSSE (7) | 0.510 | 0.609 | 0.644 | +0.035 | 0.650 |
+| Metrica (3) | 0.764 | 0.798 | 0.816 | +0.018 | 0.819 |
+| SkillCorner (20) | 0.403 | 0.428 | 0.480 | +0.052 | 0.486 |
+| mean of the three | 0.559 | 0.612 | 0.647 | +0.035 | 0.652 |
+
+v8 is up on v6 on every match (7 of 7, 3 of 3, 20 of 20). Against the labels as they are it
+scores 0.543 / 0.765 / 0.420 (v7: 0.523 / 0.769 / 0.376).
+
+**The weight was read off these matches.** Chosen for each provider on the other two (0.15 / 0.2 /
+0.3), the folds pick 0.15, 0.3 and 0.3, and the provider left out then scores 0.636 / 0.817 /
+0.476: a mean of **0.643**, which is the fair size. (With the fold length chosen the same way:
+0.646.) Every setting in this grid has a mean between 0.645 and 0.655 and no provider below v7:
+
+| mean (IDSSE / Metrica / SkillCorner) | weight 0.15 | 0.2 | 0.3 |
+|---|---|---|---|
+| no fold | 0.645 (0.636 / 0.819 / 0.480) | **0.647** (0.644 / 0.816 / 0.480) | 0.649 (0.653 / 0.817 / 0.476) |
+| fold under 1 s | 0.646 (0.640 / 0.817 / 0.481) | 0.647 (0.647 / 0.812 / 0.481) | 0.648 (0.655 / 0.813 / 0.477) |
+| fold under 1.5 s | 0.650 (0.641 / 0.823 / 0.485) | 0.652 (0.650 / 0.819 / 0.486) | 0.655 (0.659 / 0.822 / 0.483) |
+| fold under 2 s | 0.649 (0.634 / 0.823 / 0.490) | 0.651 (0.641 / 0.820 / 0.492) | 0.652 (0.649 / 0.819 / 0.489) |
+
+The same classifier built by the scratch scripts that came before this code scored 0.644 where
+this code scores 0.645 (weight 0.15, no fold), and a build with three extra signals (below) scored
+0.640, so differences under 0.005 here are noise.
+
+What changed, one step at a time (mean of the three, weight 0.15 unless said):
+
+| | IDSSE | Metrica | SkillCorner | mean |
+|---|---|---|---|---|
+| v7 | 0.609 | 0.798 | 0.428 | 0.612 |
+| without the ball-alone columns (`--drop seen,ball_speed,bspeed,ball_dv`) | 0.601 | 0.794 | 0.458 | 0.617 |
+| ... providers weighted equally, regularised, no early stopping | 0.610 | 0.796 | 0.459 | 0.621 |
+| the team-shape features alone, same training | 0.614 | 0.807 | 0.481 | 0.634 |
+| both feature sets (the v8 classifier) | 0.636 | 0.819 | 0.480 | 0.645 |
+| ... weight 0.2 (v8) | 0.644 | 0.816 | 0.480 | 0.647 |
+| ... with brief possessions folded at 1.5 s (not the default) | 0.650 | 0.819 | 0.486 | 0.652 |
+
+The first three rows after v7 were measured with scratch scripts before the code in this
+repository was written, and differ from it in small ways (the ball outside the pitch was not
+masked for the team-shape features).
+
+- **The ball on its own is left out** (`hmm.control.BALL_ALONE`, and seq's `k_` group). IDSSE
+  freezes the ball in a stoppage and Metrica hides it, and v7's classifier had learned that: held
+  out, it called 16% of graded SkillCorner frames dead against a true 29%, with a log loss of
+  1.08. Now 0.76.
+- **The team-shape features of `seq/features.py`** (`p_` and `b_` groups) sit next to the control
+  features in one classifier (`hmm.control.joint_features`). They read all 22 players, and carry
+  most of the SkillCorner gain; the two sets add up on IDSSE.
+- **Training:** the three providers count equally, at least 200 rows a leaf, L2 1.0, 300 rounds
+  with no early stopping (v7 stopped on a random 10% of rows, which are neighbours of the
+  training rows).
+- **Folding brief possessions is built but off** (`hmm.decode.fold_brief_possessions`,
+  `--min-possession`): a decoded possession under 1.5 s with the other team on both sides goes
+  back to that team. It gains 0.005 here, but the folded labels are made by a rule of the same
+  shape (`external/control.py`), so part of that is the yardstick agreeing with itself: against the
+  labels as they are, the fold costs Metrica 0.014 and IDSSE 0.016. And the challenge's ground
+  truth keeps such possessions: the public window has two among its 17, 0.76 s and 1.32 s long,
+  each between two spells of the other team. That was looked at once to check the assumption, not
+  to choose a number.
+
+Tried and not kept, each scored the same way:
+
+| | mean | note |
+|---|---|---|
+| a touch-balance signal, the ball's direction of travel, 20 s windows | 0.631 to 0.647 at 0.15 to 0.2, no fold | no better than without; the ball's direction costs SkillCorner 0.025 |
+| separate weights for the classifier's alive/dead and team parts | 0.642 to 0.653 | flat around equal weights |
+| clipping the classifier's log ratio at 1 to 3 | 0.609 to 0.612 on v7 | nothing |
+| the chain's mean possession 20 s, or 60% of possessions ending dead | +0.001 | nothing |
+| a second classifier over the first one's posteriors through time, trained on cross-provider posteriors | 0.640 | better team accuracy, worse alive/dead on SkillCorner |
+| training IDSSE and Metrica on broadcast-like copies (branch `claude/project-thread-hqpy4o`) | +0.004 | noise-sized once the ball-alone columns are out |
+| per-match prior or temperature correction (branch `claude/project-thread-kvq2x5`) | +0.005 at best on v7 | the decoder adds a likelihood ratio, which a prior shift does not change |
+
+**What is left** is naming the team in open play on SkillCorner: its team accuracy is 0.845 on
+frames both call live (IDSSE 0.900, Metrica 0.967), and none of the above moved it by more than
+0.005.
+
+**Not checked on BAR-ATH.** None of this was run on our match: the gated data was not on the
+machine that did this work. `python -m hmm.decode` now needs the retrained
+`hmm/models/control_state.npz` and writes `hmm_v8.csv`. Before submitting it, compare it with
+`hmm_v7.csv` on the public window and by eye, as v7 was. The team-shape features depend on
+tracking quality the outside sets do not show (`p_tracked`, the defensive lines, the 6-player
+floor), and how they behave on BAR-ATH's fragmented slots is unchecked, as it was for `seq/`.
 
 ## The learned labeller (`seq/`), `score_seq.py --seen 0.59`
 

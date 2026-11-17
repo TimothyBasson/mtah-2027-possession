@@ -108,6 +108,42 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
 #scores b{color:var(--text)}
 .hk{color:var(--home)}.ak{color:var(--away)}.dk{color:var(--dead)}.lk{color:var(--line)}
 .err{margin-top:10px;color:var(--bad);font-size:14px}
+/* In-viewer notes (serve.py keeps them in data/viz/notes/). */
+:root{--note:#B07800}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--note:#FFD24A}}
+:root[data-theme="dark"]{--note:#FFD24A}
+.keys span.nk{display:inline-block;width:3px;height:10px;background:var(--note);vertical-align:-1px;margin-right:5px}
+button.primary{background:var(--text);color:var(--card);border-color:var(--text)}
+button.primary:hover{background:var(--text);opacity:.88}
+#nNotes{font-variant-numeric:tabular-nums;color:var(--muted);margin-left:4px}
+dialog{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:16px;width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 48px)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog h2{font-size:16px;font-weight:600;margin:0 0 4px}
+dialog .ctx{margin:0 0 12px;font-size:13px;color:var(--muted)}
+dialog label.f{display:block;font-size:13px;color:var(--muted);margin-top:10px}
+dialog input[type=text],dialog textarea{display:block;width:100%;margin-top:4px;font:inherit;font-size:14px;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px 10px}
+dialog textarea{resize:vertical;min-height:70px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chips button{font-size:12px;padding:2px 10px;border-radius:999px}
+.chips button.on{background:var(--text);color:var(--card)}
+.drow{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;align-items:center}
+.drow .st{margin-right:auto;font-size:12px;color:var(--muted)}
+#notesDlg{width:min(760px,calc(100vw - 32px))}
+.tally{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;gap:4px 10px;align-items:center;font-size:13px;margin:10px 0 4px}
+.tally button{font-size:13px;padding:1px 8px;text-align:left;border-color:transparent}
+.tally button.on{border-color:var(--text)}
+.tally .bar{height:10px;background:var(--note);border-radius:2px}
+.tally .n{font-variant-numeric:tabular-nums;color:var(--muted)}
+.nlist{margin-top:10px;max-height:min(50vh,420px);overflow:auto;border-top:1px solid var(--border)}
+.nrow{display:grid;grid-template-columns:5.5em minmax(0,1fr) auto;gap:4px 10px;padding:8px 2px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px}
+.nrow:hover{background:var(--bg)}
+.nrow .t{font-variant-numeric:tabular-nums;font-weight:600}
+.nrow .tag{font-weight:600}
+.nrow .meta{color:var(--muted);font-size:12px}
+.nrow .txt{white-space:pre-wrap;overflow-wrap:anywhere}
+.nrow .acts{display:flex;gap:4px;align-items:flex-start}
+.nrow .acts button{font-size:12px;padding:1px 8px}
+.empty{color:var(--muted);font-size:13px;padding:12px 2px}
 </style>
 </head>
 <body>
@@ -123,6 +159,7 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
         <div class="row" id="hudTruth"><span class="k">Truth</span><span class="dot"></span><b>–</b></div>
         <div class="row" id="hudPred"><span class="k">Estimate</span><span class="dot"></span><b>–</b></div>
         <div class="row" id="hudBall"><span class="k">Ball</span><b>–</b></div>
+        <div class="row" id="hudNote" hidden><span class="k">Note</span><b></b></div>
       </div>
     </div></div>
     <div class="striplabel"><span>Whole match</span><span id="wholeRange"></span></div>
@@ -138,6 +175,8 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
       <button id="play">Play</button>
       <button id="back" title="Previous frame (←)">◀ frame</button>
       <button id="fwd" title="Next frame (→)">frame ▶</button>
+      <button id="addNote" title="Pause and note this moment (N)">+ Note</button>
+      <button id="showNotes" title="Every note on this match, and which kinds of mistake come up most">Notes<span id="nNotes"></span></button>
       <select id="speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option><option value="6">6×</option></select>
       <label class="tg"><input type="checkbox" id="showTrack" checked> Tracking on video</label>
       <label class="tg"><input type="checkbox" id="showIds" checked> Slot numbers</label>
@@ -163,6 +202,26 @@ label.tg{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4
   </div>
 </div>
 </main>
+<dialog id="noteDlg" aria-labelledby="noteHead">
+  <h2 id="noteHead">Note at <span id="noteAt"></span></h2>
+  <p class="ctx" id="noteCtx"></p>
+  <label class="f">Kind of mistake
+    <input type="text" id="noteTag" list="tagList" autocomplete="off" placeholder="Pick one below or type your own">
+  </label>
+  <datalist id="tagList"></datalist>
+  <div class="chips" id="tagChips"></div>
+  <label class="f">What happened
+    <textarea id="noteText" rows="3" placeholder="e.g. throw-in at 23:10, model keeps Barcelona in possession through it"></textarea>
+  </label>
+  <div class="drow"><span class="st">⌘/Ctrl + Enter saves · Esc cancels</span><button id="noteCancel">Cancel</button><button id="noteSave" class="primary">Save note</button></div>
+</dialog>
+<dialog id="notesDlg" aria-labelledby="notesHead">
+  <h2 id="notesHead">Notes on this match</h2>
+  <p class="ctx" id="notesWhere"></p>
+  <div class="tally" id="tally"></div>
+  <div class="nlist" id="nlist"></div>
+  <div class="drow"><button id="notesExport" title="Download every note on this match as JSON">Export JSON</button><button id="notesClose" class="primary">Close</button></div>
+</dialog>
 <script>
 const D = __COMBINED_DATA__;
 const NF = D.n_frames, FPS = D.clock.fps, CH = D.chunk, NCH = Math.ceil(NF / CH), ZOOM = 60 * FPS;
@@ -271,7 +330,7 @@ $('legend').innerHTML = [
 ].map(([st, t]) => '<div><span class="sw" style="' + st + '"></span>' + t + '</div>').join('');
 $('keys').innerHTML = [['--home', name.H], ['--away', name.A], ['--dead', 'Dead ball'], ['--none', 'No label']]
   .map(([c, t]) => '<span><span class="k" style="background:var(' + c + ')"></span>' + t + '</span>').join('') +
-  '<span>' + (HAS_TRUTH ? 'Truth on top where it exists · ' : '') + (D.pred ? 'your estimate below · ' : '') + 'click or drag to move</span>';
+  '<span><span class="nk"></span>Your notes</span><span>' + (HAS_TRUTH ? 'Truth on top where it exists · ' : '') + (D.pred ? 'your estimate below · ' : '') + 'click or drag to move</span>';
 $('wholeRange').textContent = '0:00 – ' + videoTime(NF - 1, 0);
 
 // ---- tracking, loaded a minute at a time --------------------------------------------------
@@ -574,6 +633,8 @@ wholeBase.width = whole.width; wholeBase.height = whole.height;
 paintLabels(wholeBase.getContext('2d'), whole.width, whole.height, 0, NF);
 function drawWhole(v) {
   wc.clearRect(0, 0, whole.width, whole.height); wc.drawImage(wholeBase, 0, 0);
+  wc.fillStyle = css('--note');
+  for (const n of notes) wc.fillRect(n.frame / (NF - 1) * whole.width - 1.5, 0, 3, whole.height);
   wc.fillStyle = css('--text'); wc.fillRect(v / (NF - 1) * whole.width - 1, 0, 2, whole.height);
 }
 const zoom = $('zoom'), zc = zoom.getContext('2d');
@@ -582,6 +643,8 @@ function drawZoom(v) {
   const a = v - ZOOM, b = v + ZOOM;
   zc.clearRect(0, 0, zoom.width, zoom.height);
   paintLabels(zc, zoom.width, zoom.height, a, b);
+  zc.fillStyle = css('--note');
+  for (const n of notes) if (n.frame >= a && n.frame <= b) zc.fillRect((n.frame - a) / (b - a) * zoom.width - 2, 0, 4, zoom.height);
   zc.fillStyle = css('--text'); zc.fillRect(zoom.width / 2 - 1, 0, 2, zoom.height);
   zoomFrom = a;
   $('zoomRange').textContent = videoTime(Math.max(0, a), 0) + ' – ' + videoTime(Math.min(NF - 1, b), 0);
@@ -788,6 +851,181 @@ const STEPS = DX && (() => {
   };
 })();
 
+// ---- in-viewer notes -----------------------------------------------------------------------
+// One store per match, shared by every page of that match whatever prediction it shows; each note
+// keeps the prediction it was taken against and both labels at its frame. Served by
+// viz/combined/serve.py the notes go to data/viz/notes/<match>.json; anywhere else (from disk,
+// http-server) they stay in this browser and move to the file the next time the page is served.
+const NOTE_MATCH = D.match || 'BAR-ATH';
+const NOTE_API = '/api/notes/' + encodeURIComponent(NOTE_MATCH), NOTE_LS = 'notes:' + NOTE_MATCH;
+const PRESETS = ['Missed stoppage', 'False stoppage', 'Wrong team', 'Change too late', 'Change too early',
+  'Missed short possession', 'Truth looks wrong', 'Tracking problem', 'Other'];
+let notes = [], notesOnServer = false, notesErr = '', editing = null, tagFilter = null;
+const lsNotes = {
+  get() { try { return JSON.parse(localStorage.getItem(NOTE_LS) || '[]'); } catch (e) { return []; } },
+  set(n) { try { n.length ? localStorage.setItem(NOTE_LS, JSON.stringify(n)) : localStorage.removeItem(NOTE_LS); return true; } catch (e) { return false; } },
+};
+// The likely kind of mistake from the labels at the frame, where there is truth to compare with.
+function suggestTag(t, p) {
+  if (!t || !p || t === 'X' || p === 'X' || t === p) return '';
+  return t === 'D' ? 'Missed stoppage' : p === 'D' ? 'False stoppage' : 'Wrong team';
+}
+// The server takes one note at a time (add or replace by id, delete by id) and answers with the
+// whole file, so a second page open on the same match, or this one left open with an old list,
+// never writes over notes it hasn't seen. A note the server couldn't take waits in this browser and
+// goes up on the next load.
+async function serverNotes(method, note, id) {
+  const r = await fetch(NOTE_API + (id ? '/' + encodeURIComponent(id) : ''), { method, cache: 'no-store',
+    headers: note ? { 'Content-Type': 'application/json' } : {}, body: note ? JSON.stringify(note) : undefined });
+  if (!r.ok) throw new Error('the notes server answered ' + r.status);
+  notes = (await r.json()).notes || [];
+}
+async function loadNotes() {
+  if (location.protocol.startsWith('http')) try { await serverNotes('GET'); notesOnServer = true; } catch (e) {}
+  const local = lsNotes.get();
+  if (!notesOnServer) notes = local;
+  else if (local.length) {                                   // taken with no server: move them to the file
+    try { for (const n of local) await serverNotes('PUT', n, n.id); lsNotes.set([]); } catch (e) {}
+  }
+  notesChanged();
+}
+// Apply one change: on the server when there is one, else to the list kept in this browser.
+async function changeNote(note, remove) {
+  notesErr = '';
+  if (notesOnServer) {
+    try { await serverNotes(remove ? 'DELETE' : 'PUT', remove ? null : note, note.id); return notesChanged(); }
+    catch (e) { notesErr = 'Couldn\'t save to the notes server (' + e.message + ')'; }
+  }
+  notes = notes.filter(x => x.id !== note.id);
+  if (!remove) notes.push(note);
+  notes.sort((a, b) => a.frame - b.frame);
+  const kept = notesOnServer ? lsNotes.set([...lsNotes.get().filter(x => x.id !== note.id), ...(remove ? [] : [note])]) : lsNotes.set(notes);
+  if (notesErr) notesErr += kept ? '; kept in this browser, it goes to the file next time the page loads.' : '.';
+  else if (!kept) notesErr = 'This browser won\'t keep notes for this page: export them before you close it.';
+  if (notesErr) showErr(notesErr);
+  notesChanged();
+}
+async function refreshNotes() {
+  if (!notesOnServer) return;
+  try { await serverNotes('GET'); notesChanged(); } catch (e) {}
+}
+window.addEventListener('focus', refreshNotes);
+function notesChanged() {
+  $('nNotes').textContent = notes.length ? ' · ' + notes.length : '';
+  if (cur >= 0) render(cur);
+  if ($('notesDlg').open) renderNotes();
+}
+function noteNear(v) {
+  let best = null;
+  for (const n of notes) if (Math.abs(n.frame - v) <= 2 * FPS && (!best || Math.abs(n.frame - v) < Math.abs(best.frame - v))) best = n;
+  return best;
+}
+const labelText = l => !l || l === 'X' ? null : LABEL(l)[0];
+const allTags = () => [...new Set([...PRESETS, ...notes.map(n => n.tag)])];
+function openNote(existing) {
+  video.pause();
+  const v = existing ? existing.frame : cur < 0 ? startFrame : cur;
+  editing = existing || null;
+  const t = D.truth ? D.truth[v] : 'X', p = D.pred ? D.pred[v] : 'X';
+  $('noteAt').textContent = videoTime(v) + (NOVIDEO ? '' : ' · game ' + gameClock(v));
+  $('noteCtx').textContent = [labelText(t) ? 'Truth: ' + labelText(t) : 'No ground truth here',
+    D.pred ? (D.pred_name || 'Estimate') + ': ' + (labelText(p) || 'no answer') : null].filter(Boolean).join(' · ') +
+    (existing && existing.model && existing.model !== D.pred_name ? ' · noted against ' + existing.model : '');
+  $('noteTag').value = existing ? existing.tag : suggestTag(t, p);
+  $('noteText').value = existing ? existing.text : '';
+  const chips = $('tagChips'), list = $('tagList');
+  chips.textContent = ''; list.textContent = '';
+  const mark = () => { for (const c of chips.children) c.classList.toggle('on', c.textContent === $('noteTag').value.trim()); };
+  for (const tag of allTags()) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = tag;
+    b.onclick = () => { $('noteTag').value = tag; mark(); $('noteText').focus(); };
+    chips.append(b);
+    const o = document.createElement('option'); o.value = tag; list.append(o);
+  }
+  $('noteTag').oninput = mark; mark();
+  $('noteDlg').dataset.frame = v;
+  $('noteSave').textContent = existing ? 'Save changes' : 'Save note';
+  $('noteDlg').showModal();
+  $('noteText').focus();
+}
+function saveNote() {
+  const tag = $('noteTag').value.trim() || 'Other', text = $('noteText').value.trim(), v = +$('noteDlg').dataset.frame;
+  const note = editing ? { ...editing, tag, text, edited: new Date().toISOString() }
+    : { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), frame: v,
+      video_time: videoTime(v), game_clock: NOVIDEO ? null : gameClock(v), model: D.pred_name || null,
+      truth: D.truth ? D.truth[v] : 'X', pred: D.pred ? D.pred[v] : 'X', tag, text, created: new Date().toISOString() };
+  editing = null;
+  $('noteDlg').close();
+  changeNote(note);
+}
+function renderNotes() {
+  const off = location.protocol === 'file:' ? 'Opened from disk' : 'No notes server here';
+  $('notesWhere').textContent = notesOnServer
+    ? 'Saved to data/viz/notes/' + NOTE_MATCH + '.json, shared by every page of this match. ' + notesErr
+    : off + ', so notes stay in this browser. Serve with python3 viz/combined/serve.py to save them to a file. ' + notesErr;
+  const count = new Map();
+  for (const n of notes) count.set(n.tag, (count.get(n.tag) || 0) + 1);
+  if (tagFilter && !count.has(tagFilter)) tagFilter = null;
+  const tally = $('tally'); tally.textContent = '';
+  const max = Math.max(1, ...count.values());
+  const row = (label, n, tag) => {
+    const b = document.createElement('button'); b.textContent = label; b.classList.toggle('on', tagFilter === tag);
+    b.onclick = () => { tagFilter = tag; renderNotes(); };
+    const bar = document.createElement('div'); bar.className = 'bar'; bar.style.width = (tag === null ? 0 : n / max * 100) + '%';
+    const c = document.createElement('span'); c.className = 'n'; c.textContent = n;
+    tally.append(b, bar, c);
+  };
+  if (notes.length) {
+    row('All kinds', notes.length, null);
+    for (const [tag, n] of [...count].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) row(tag, n, tag);
+  }
+  const list = $('nlist'); list.textContent = '';
+  const shown = notes.filter(n => tagFilter === null || n.tag === tagFilter);
+  if (!shown.length) {
+    const e = document.createElement('div'); e.className = 'empty';
+    e.textContent = 'No notes yet. Press N or + Note to annotate the current frame.';
+    list.append(e);
+  }
+  for (const n of shown) {
+    const r = document.createElement('div'); r.className = 'nrow'; r.title = 'Jump to ' + n.video_time;
+    const t = document.createElement('div');
+    t.innerHTML = '<div class="t"></div><div class="meta"></div>';
+    t.children[0].textContent = n.video_time; t.children[1].textContent = n.game_clock || '';
+    const body = document.createElement('div');
+    body.innerHTML = '<div><span class="tag"></span> <span class="meta"></span></div><div class="txt"></div>';
+    body.querySelector('.tag').textContent = n.tag;
+    body.querySelector('.meta').textContent = [n.model, labelText(n.truth) && 'truth ' + labelText(n.truth),
+      labelText(n.pred) && 'said ' + labelText(n.pred)].filter(Boolean).join(' · ');
+    body.querySelector('.txt').textContent = n.text;
+    const acts = document.createElement('div'); acts.className = 'acts';
+    const edit = document.createElement('button'); edit.textContent = 'Edit';
+    edit.onclick = e => { e.stopPropagation(); $('notesDlg').close(); seekFrame(n.frame); openNote(n); };
+    const del = document.createElement('button'); del.textContent = 'Delete';
+    del.onclick = e => {
+      e.stopPropagation();
+      if (!confirm('Delete the note at ' + n.video_time + ' (' + n.tag + ')?')) return;
+      changeNote(n, true);
+    };
+    acts.append(edit, del);
+    r.append(t, body, acts);
+    r.onclick = () => { $('notesDlg').close(); video.pause(); seekFrame(n.frame); };
+    list.append(r);
+  }
+}
+$('addNote').onclick = () => openNote();
+$('noteSave').onclick = saveNote;
+$('noteCancel').onclick = () => { editing = null; $('noteDlg').close(); };
+$('noteDlg').addEventListener('close', () => { editing = null; });
+$('noteDlg').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveNote(); } });
+$('showNotes').onclick = () => { renderNotes(); $('notesDlg').showModal(); refreshNotes(); };
+$('notesClose').onclick = () => $('notesDlg').close();
+$('notesExport').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({ match: NOTE_MATCH, notes }, null, 1)], { type: 'application/json' }));
+  a.download = 'notes_' + NOTE_MATCH + '.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
 // ---- read-outs --------------------------------------------------------------------------
 function hudRow(id, label, none) {
   const [text, colour] = label === 'X' ? [none, '--none'] : LABEL(label);
@@ -803,6 +1041,9 @@ function readouts(v, f) {
   $('lvtime').textContent = (NOVIDEO ? 'Match time' : 'Video time') + ' · frame ' + v;
   $('gtime').textContent = gameClock(v);
   $('hudBall').querySelector('b').textContent = !f ? 'loading…' : f.ball ? 'tracked' : 'missing from tracking';
+  const nn = noteNear(v);
+  $('hudNote').hidden = !nn;
+  if (nn) $('hudNote').querySelector('b').textContent = nn.tag + (nn.text ? ': ' + (nn.text.length > 60 ? nn.text.slice(0, 58) + '…' : nn.text) : '');
   const t = D.truth ? D.truth[v] : 'X';
   const tl = LABEL(t);
   $('truth').textContent = t === 'X' ? 'No ground truth here' : tl[0];
@@ -865,12 +1106,14 @@ try { $('showDead').checked = localStorage.getItem('showDead') === '1'; } catch 
 $('showDead').onchange = () => { try { localStorage.setItem('showDead', $('showDead').checked ? '1' : '0'); } catch (e) {} render(cur); };
 $('showSpread').onchange = () => { try { localStorage.setItem('showSpread', $('showSpread').checked ? '1' : '0'); } catch (e) {} render(cur); };
 document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.code === 'Space') { e.preventDefault(); $('play').click(); }
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || document.querySelector('dialog[open]')) return;
+  if (e.code === 'KeyN' && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); openNote(); }
+  else if (e.code === 'Space') { e.preventDefault(); $('play').click(); }
   else if (e.code === 'ArrowLeft') { e.preventDefault(); step(e.shiftKey ? -25 : -1); }
   else if (e.code === 'ArrowRight') { e.preventDefault(); step(e.shiftKey ? 25 : 1); }
 });
 update(timeOf(startFrame), true);
+loadNotes();
 </script>
 </body>
 </html>
