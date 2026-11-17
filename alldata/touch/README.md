@@ -76,12 +76,21 @@ Home touches it sees the 0.8 s one (score 0.97) and not the 1.3 s one.
   table; reading (mine): which brief touches a provider calls possessions is its own convention,
   as the turnover detector found for players-only.
 
+## Touches at ball gaps (review of PR 55)
+
+The detector is never taught on frames without a ball, and a gap that ends makes a kink in the
+interpolated path. Of the 1,929 touches it finds on BAR-ATH, 0.5% sit on an unseen frame and
+4.2% within 10 frames after a gap ends; on the simulated held-out matches 1.6% and 2.6%. Leaving
+those touches out held out scores 0.624 / 0.703 against 0.626 / 0.704 (worse on 25 and 26 of 30
+matches), so they are kept.
+
 ## Files and commands
 
     python alldata/touch/tfeats.py            # 25 fps rows and targets (about 2 min)
     python alldata/touch/tfit.py --fold idsse --tag t1   # and metrica, skillcorner; --fold none for BAR-ATH
     python alldata/touch/oracle.py            # ceiling: recorded-ball touches as evidence
     python alldata/touch/tuse.py --tag pw1e [--kind val] [--v 4]
+    python alldata/touch/tuse.py --tag pw1e --kind val --thr 0.3 --w 1 2 3 --hold 2 3 --keep 0   # the sweep that picked w 1, hold 3 s
     python alldata/touch/tinsert.py; python alldata/touch/tgate.py
     python alldata/touch/textra.py --touch t1 && sh alldata/learned/folds.sh xpw1 --drop-cols tim --share skillcorner=0.25 --extra data/cache/alldata/touch/extra/t1 --pseudo w1e
     python alldata/learned/run.py             # BAR-ATH: submission nets (tpsN, tpsNs1) + touch evidence (run.py here)

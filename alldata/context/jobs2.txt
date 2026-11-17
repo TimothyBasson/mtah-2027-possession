@@ -1,0 +1,9 @@
+cx2 idsse --team-only --steps 500
+cx2 metrica --team-only --steps 500
+cx2 skillcorner --team-only --steps 500
+nc2 idsse --team-only --no-ctx --steps 500
+cx2s1 idsse --team-only --steps 500 --seed 1
+cx2s1 metrica --team-only --steps 500 --seed 1
+cx2s1 skillcorner --team-only --steps 500 --seed 1
+nc2 metrica --team-only --no-ctx --steps 500
+nc2 skillcorner --team-only --no-ctx --steps 500
