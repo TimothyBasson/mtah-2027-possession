@@ -75,7 +75,7 @@ def main():
     print(f"chance: stop start within -2..+3 s {ch_s:.2f}, restart within -3..+1 s {ch_r:.2f}")
     for peak in [20, 24, 28, 32]:
         fr = events(prom, hz, sharp, peak)
-        fr = np.where(fr < 100_000 - a.offset0, fr + a.offset0, fr + a.offset1)  # halftime gap split
+        fr = np.where(fr < 85_500, fr + a.offset0, fr + a.offset1)  # broadcast half split (audio frames)
         fr = fr[(fr < len(lab))]
         fr = fr[graded[fr]]
         if not len(fr):

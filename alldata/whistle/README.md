@@ -80,10 +80,10 @@ band, 3.0-4.2 kHz, not fitted to this match:
 |---|---|---|---|---|
 | tactical | 20 dB | 193 | 0.12 | 0.19 |
 | tactical | 28 dB | 138 | 0.11 | 0.12 |
-| broadcast | 20 dB | 94 | 0.17 | 0.13 |
-| broadcast | 28 dB | 42 | 0.24 | 0.08 |
+| broadcast | 20 dB | 99 | 0.18 | 0.15 |
+| broadcast | 28 dB | 47 | 0.26 | 0.09 |
 
-At best this is 2-2.6x chance at a tenth of the stoppages, and only on the broadcast mix. That
+At best this is 2-2.8x chance at a tenth of the stoppages, and only on the broadcast mix. That
 matches what the rivals report: a hint that needs the tracking to confirm it, and none of them
 shows a held-out gain from it. Not adopted.
 
