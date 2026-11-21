@@ -1,0 +1,565 @@
+<title>Possession Story</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: an analyst's match desk. Header with the score of possession, a full-match timeline you
+   click, then replay pitch beside the phase card, then the turnover autopsy below. */
+:root {
+  --bg: #f3f5f2; --panel: #ffffff; --ink: #18211c; --muted: #5d6a62; --line: #d9dfda;
+  --turf: #2f6b47; --turf2: #2a6141; --chalk: rgba(255,255,255,.78);
+  --home: #2456c9; --away: #d3283c; --ball: #f2c230; --warn: #b4690e; --good: #1d7a4a;
+  --display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1512; --panel: #161e1a; --ink: #e5ece7; --muted: #95a39a; --line: #2a3530;
+  --turf: #1f4a32; --turf2: #1c442e; --chalk: rgba(255,255,255,.55);
+  --home: #5d8bff; --away: #ff5a6a; --ball: #f5cd4a; --warn: #e3a04a; --good: #4cc488; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1512; --panel: #161e1a; --ink: #e5ece7; --muted: #95a39a; --line: #2a3530;
+  --turf: #1f4a32; --turf2: #1c442e; --chalk: rgba(255,255,255,.55);
+  --home: #5d8bff; --away: #ff5a6a; --ball: #f5cd4a; --warn: #e3a04a; --good: #4cc488; color-scheme: dark }
+[hidden] { display: none !important; }
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--body); font-size: 14px; line-height: 1.5; margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 48px; }
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 18px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: .01em; margin: 0; text-wrap: balance; }
+h1 { font-size: 2.3rem; line-height: 1; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.1rem; }
+.eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+.num { font-variant-numeric: tabular-nums; font-family: var(--mono); }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 14px; }
+.teams { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.home { color: var(--home); } .away { color: var(--away); }
+.share { display: flex; gap: 18px; flex-wrap: wrap; }
+.share div { display: grid; }
+.share b { font-family: var(--display); font-size: 1.7rem; font-weight: 600; line-height: 1; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+#timeline { width: 100%; height: 92px; display: block; cursor: pointer; touch-action: none; }
+.tl-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+.main { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 18px; }
+@media (max-width: 900px) { .main { grid-template-columns: 1fr; } }
+.pitchbox { position: relative; }
+#pitch { width: 100%; aspect-ratio: 105.3 / 68; max-width: 100%; display: block; border-radius: 6px; background: var(--turf); }
+#video { width: 100%; display: block; border-radius: 6px; margin-bottom: 8px; background: #000; }
+.ctrls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+button, .chip { font: 500 13px var(--body); color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button:focus-visible, input:focus-visible, .row:focus-visible { outline: 2px solid var(--home); outline-offset: 2px; }
+button.on { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+#scrub { flex: 1 1 160px; min-width: 120px; accent-color: var(--ink); }
+.clock { font-family: var(--mono); font-size: 13px; min-width: 9ch; }
+label.tog { display: inline-flex; gap: 5px; align-items: center; font-size: 13px; color: var(--muted); cursor: pointer; }
+.card { display: grid; gap: 12px; align-content: start; }
+.card .summary { font-size: 15px; line-height: 1.55; }
+.kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.kv div { background: var(--bg); border-radius: 6px; padding: 7px 9px; display: grid; }
+.kv b { font-family: var(--mono); font-weight: 500; font-variant-numeric: tabular-nums; }
+.kv span { font-size: 11px; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { cursor: default; font-size: 12px; padding: 2px 8px; }
+.pill { display: inline-block; font: 600 11px var(--mono); letter-spacing: .04em; text-transform: uppercase; border-radius: 99px; padding: 2px 8px; }
+.pill.bad { background: color-mix(in srgb, var(--away) 16%, transparent); color: var(--away); }
+.pill.ok { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+.pill.mid { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.autopsy { border-top: 1px dashed var(--line); padding-top: 12px; display: grid; gap: 8px; }
+.flag { display: flex; gap: 8px; align-items: baseline; }
+.flag i { font-style: normal; font-family: var(--mono); font-size: 12px; color: var(--warn); min-width: 7ch; white-space: nowrap; }
+.nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+@media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.pats { display: grid; gap: 4px; max-height: 430px; overflow-y: auto; }
+.row { display: grid; grid-template-columns: 3ch minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 8px;
+  border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+.row:hover { background: var(--bg); }
+.row.sel { border-color: var(--ink); background: var(--bg); }
+.bar { height: 5px; border-radius: 3px; background: var(--muted); opacity: .45; margin-top: 3px; }
+.tos { display: grid; gap: 2px; max-height: 360px; overflow-y: auto; }
+.trow { display: grid; grid-template-columns: 5ch 1.2ch minmax(0, 1fr) auto; gap: 10px; padding: 5px 8px; border-radius: 6px; cursor: pointer; align-items: baseline; }
+.trow:hover, .trow.sel { background: var(--bg); }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+#tomap { width: 100%; aspect-ratio: 105.3 / 68; display: block; border-radius: 6px; background: var(--turf); }
+.stats4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 600px) { .stats4, .kv { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stats4 div { display: grid; background: var(--bg); border-radius: 6px; padding: 8px 10px; }
+.stats4 b { font-family: var(--display); font-size: 1.45rem; font-weight: 600; line-height: 1.1; }
+.stats4 span { font-size: 11px; color: var(--muted); }
+.note { font-size: 12px; color: var(--muted); max-width: 90ch; }
+#loading { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div style="display:grid;gap:6px">
+      <div class="eyebrow">Possession story · La Liga 24/25, matchday 2</div>
+      <h1 class="teams"><span class="home">Barcelona</span><span class="muted" style="font-size:1.4rem">v</span><span class="away">Athletic Club</span></h1>
+    </div>
+    <div class="share" id="share"></div>
+  </header>
+
+  <section class="panel">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+      <h2>Every possession</h2>
+      <span class="eyebrow" id="tlhint">Click a spell to replay it</span>
+    </div>
+    <canvas id="timeline" aria-label="Whole-match possession timeline"></canvas>
+    <div class="tl-legend">
+      <span><i class="sw" style="background:var(--home)"></i>Barcelona has the ball (upper row)</span>
+      <span><i class="sw" style="background:var(--away)"></i>Athletic Club (lower row)</span>
+      <span><i class="sw" style="background:var(--warn)"></i>open-play turnover</span>
+      <span>gaps are dead ball</span>
+    </div>
+  </section>
+
+  <section class="main">
+    <div class="panel pitchbox">
+      <video id="video" muted playsinline preload="metadata" hidden></video>
+      <canvas id="pitch" aria-label="Replay of the selected spell on a top-down pitch"></canvas>
+      <div class="ctrls">
+        <button id="play" aria-label="Play or pause">▶ Play</button>
+        <button id="speed" title="Playback speed">1×</button>
+        <input type="range" id="scrub" min="0" max="1000" value="0" aria-label="Position in the spell">
+        <span class="clock" id="clock">–</span>
+      </div>
+      <div class="ctrls">
+        <label class="tog"><input type="checkbox" id="ghost" checked> usual shape (ghosts) at the autopsy moment</label>
+        <label class="tog"><input type="checkbox" id="trail" checked> ball trail</label>
+        <span id="loading">Loading tracking…</span>
+      </div>
+    </div>
+    <div class="panel card" id="card"></div>
+  </section>
+
+  <section class="panel" style="display:grid;gap:14px">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+      <h2>Turnover autopsy</h2>
+      <div class="tabs" id="teamtabs"></div>
+    </div>
+    <div class="stats4" id="stats4"></div>
+    <div class="grid2">
+      <div style="display:grid;gap:8px;align-content:start;min-width:0">
+        <h3>Recurring patterns</h3>
+        <div class="note">How each team keeps losing the ball, most frequent first. Click one to list its turnovers. The bar after each is the share where the opponent then reached the final third.</div>
+        <div class="pats" id="pats"></div>
+      </div>
+      <div style="display:grid;gap:8px;align-content:start;min-width:0">
+        <h3 id="maptitle">Where the ball was lost</h3>
+        <canvas id="tomap" aria-label="Map of turnover locations, attacking to the right"></canvas>
+        <div class="note">Drawn in the losing team's direction of attack (attacking →). Filled dots: the opponent reached the final third afterwards.</div>
+        <div class="tos" id="tos"></div>
+      </div>
+    </div>
+  </section>
+
+  <p class="note" id="foot"></p>
+</div>
+
+<script>
+const D = /*__DATA__*/null;
+const TRACK_B64 = "__TRACK__";
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const FPS = D.fps, L = D.L, W = D.W, STEP = D.step;
+const TEAMCOL = () => [css('--home'), css('--away')];
+
+// ---------- frames and clock ----------
+const H = D.halves, n0 = Math.floor((H[0][1] - H[0][0]) / STEP) + 1;
+function halfOf(f) { return f >= H[1][0] ? 1 : 0; }
+function clock(f) {
+  const h = halfOf(f), s = Math.max(0, (f - H[h][0]) / FPS) + (h ? 2700 : 0);
+  return `${Math.floor(s / 60)}'${String(Math.floor(s % 60)).padStart(2, '0')}`;
+}
+function signOf(f, k) { return D.sign[halfOf(f)][k]; }
+
+// ---------- tracking ----------
+let TR = null; const NS = D.nslots;
+async function loadTracking() {
+  const bin = Uint8Array.from(atob(TRACK_B64), c => c.charCodeAt(0));
+  try {
+    const ds = new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'));
+    TR = new Uint8Array(await new Response(ds).arrayBuffer());
+    $('loading').textContent = '';
+  } catch (e) { $('loading').textContent = 'This browser cannot unpack the tracking (needs DecompressionStream).'; }
+  draw();
+}
+function sampleIdx(f) {
+  const h = halfOf(f);
+  const a = H[h][0], b = H[h][1];
+  if (f < a || f > b) return null;
+  const r = (f - a) / STEP;
+  return { i: (h ? n0 : 0) + Math.floor(r), t: r - Math.floor(r), last: (h ? n0 + Math.floor((b - a) / STEP) : n0 - 1) };
+}
+function posAt(f) {   // array of [x, y] or null per slot (ball last)
+  if (!TR) return null;
+  const s = sampleIdx(f); if (!s) return null;
+  const j = Math.min(s.i + 1, s.last), out = [];
+  for (let k = 0; k < NS; k++) {
+    const o1 = (s.i * NS + k) * 2, o2 = (j * NS + k) * 2;
+    const x1 = TR[o1], y1 = TR[o1 + 1], x2 = TR[o2], y2 = TR[o2 + 1];
+    if (x1 === 255) { out.push(null); continue; }
+    let x = x1, y = y1;
+    if (x2 !== 255) { x += (x2 - x1) * s.t; y += (y2 - y1) * s.t; }
+    out.push([x / 250 * L, y / 250 * W]);
+  }
+  return out;
+}
+const KEEP = new Set(D.keepers);
+
+// attacking frame of team k at f: x from own goal, left positive (left is low y facing +x)
+function toAtt(p, k, f) {
+  const s = signOf(f, k), x = s > 0 ? p[0] : L - p[0], yc = p[1] - W / 2;
+  const left = ((s > 0) === D.left_is_low_y) ? -yc : yc;
+  return [x, left];
+}
+function fromAtt(q, k, f) {
+  const s = signOf(f, k), x = s > 0 ? q[0] : L - q[0];
+  const yc = ((s > 0) === D.left_is_low_y) ? -q[1] : q[1];
+  return [x, yc + W / 2];
+}
+
+// ---------- header ----------
+const P = D.phases, T = D.turnovers;
+(function header() {
+  const dur = [0, 0];
+  P.forEach(p => dur[p.team] += p.dur);
+  const tot = dur[0] + dur[1];
+  const lost = [0, 1].map(k => T.filter(t => t.team === k).length);
+  $('share').innerHTML = [0, 1].map(k => `<div><span class="eyebrow">${D.teams[k]}</span><b class="${k ? 'away' : 'home'}">${Math.round(100 * dur[k] / tot)}%</b><span class="muted" style="font-size:12px">${P.filter(p => p.team === k).length} spells · ${lost[k]} lost in play</span></div>`).join('');
+  $('foot').textContent = `Possession comes from our model's labels (${D.labels_file}), not from an event feed, so a few spells, mostly under 3 s, will be wrong. Tracker slots are not named players, so players are described by the role they were playing: each team's usual shape with and without the ball is learned from this match, and a player counts as out of position when they are further from their role's usual spot than 9 times in 10. Tags (build-up, chance created, restart types) come from the provider's Smart Tagging.`;
+})();
+
+// ---------- timeline ----------
+const tl = $('timeline');
+let sel = 0, frame = P[0].a, playing = false, speed = 1, win = [0, 1];
+function tlLayout() {
+  const w = tl.clientWidth, gap = 14;
+  const len0 = H[0][1] - H[0][0], len1 = H[1][1] - H[1][0];
+  const usable = w - gap;
+  return { w, gap, s: usable / (len0 + len1), len0 };
+}
+function tlX(f, lay) {
+  const h = halfOf(f);
+  return h ? lay.len0 * lay.s + lay.gap + (f - H[1][0]) * lay.s : (f - H[0][0]) * lay.s;
+}
+function drawTimeline() {
+  const dpr = window.devicePixelRatio || 1, lay = tlLayout(), hgt = 92;
+  tl.width = lay.w * dpr; tl.height = hgt * dpr;
+  const c = tl.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, lay.w, hgt);
+  const col = TEAMCOL(), rowY = [14, 46], rh = 26;
+  c.fillStyle = css('--line');
+  c.fillRect(0, rowY[0] + rh + 2, lay.w, 2);
+  P.forEach((p, i) => {
+    const x0 = tlX(p.a, lay), x1 = Math.max(tlX(p.b, lay), x0 + 1.2);
+    c.globalAlpha = i === sel ? 1 : 0.78;
+    c.fillStyle = col[p.team];
+    c.fillRect(x0, rowY[p.team], x1 - x0, rh);
+  });
+  c.globalAlpha = 1;
+  c.fillStyle = css('--warn');
+  T.forEach(t => { const x = tlX(t.f, lay); c.fillRect(x - 0.75, t.team ? rowY[1] + rh : rowY[0] - 6, 1.5, 6); });
+  // selection and playhead
+  const p = P[sel];
+  c.strokeStyle = css('--ink'); c.lineWidth = 1.5;
+  c.strokeRect(tlX(p.a, lay) - 2, rowY[p.team] - 3, Math.max(tlX(p.b, lay) - tlX(p.a, lay), 1) + 4, rh + 6);
+  c.fillStyle = css('--ink');
+  c.fillRect(tlX(frame, lay) - 0.5, 4, 1, hgt - 8);
+  c.font = `11px ${css('--mono')}`; c.fillStyle = css('--muted');
+  c.fillText("1st half", 0, 88); c.fillText("2nd half", lay.len0 * lay.s + lay.gap, 88);
+  if (lay.w > 560) [15, 30, 60, 75].forEach(m => {
+    const f = m < 45 ? H[0][0] + m * 60 * FPS : H[1][0] + (m - 45) * 60 * FPS;
+    if (f > H[halfOf(f)][1]) return;
+    c.fillText(m + "'", tlX(f, lay) - 6, 88);
+  });
+}
+tl.addEventListener('click', e => {
+  const r = tl.getBoundingClientRect(), x = e.clientX - r.left, lay = tlLayout();
+  const y = e.clientY - r.top, team = y < 43 ? 0 : 1;
+  let best = null, bd = 1e9;
+  P.forEach((p, i) => {
+    const x0 = tlX(p.a, lay), x1 = tlX(p.b, lay);
+    const d = (x < x0 ? x0 - x : x > x1 ? x - x1 : 0) + (p.team === team ? 0 : 6);
+    if (d < bd) { bd = d; best = i; }
+  });
+  if (best !== null) select(best);
+});
+
+// ---------- pitch ----------
+const pc = $('pitch');
+function pitchGeom(cv) {
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = w * W / L;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const pad = 10, sx = (w - 2 * pad) / L, sy = (h - 2 * pad) / W;
+  return { c, w, h, X: x => pad + x * sx, Y: y => pad + y * sy, s: sx };
+}
+function drawLines(g) {
+  const { c, X, Y, s } = g;
+  c.fillStyle = css('--turf'); c.fillRect(0, 0, g.w, g.h);
+  c.fillStyle = css('--turf2');
+  for (let i = 0; i < 10; i += 2) c.fillRect(X(i * L / 10), Y(0), L / 10 * s, W * s);
+  c.strokeStyle = css('--chalk'); c.lineWidth = 1.3;
+  c.strokeRect(X(0), Y(0), L * s, W * s);
+  c.beginPath(); c.moveTo(X(L / 2), Y(0)); c.lineTo(X(L / 2), Y(W)); c.stroke();
+  c.beginPath(); c.arc(X(L / 2), Y(W / 2), 9.15 * s, 0, 7); c.stroke();
+  [0, 1].forEach(e => {
+    const x = e ? L - 16.5 : 0, x6 = e ? L - 5.5 : 0;
+    c.strokeRect(X(x), Y(W / 2 - 20.16), 16.5 * s, 40.32 * s);
+    c.strokeRect(X(x6), Y(W / 2 - 9.16), 5.5 * s, 18.32 * s);
+  });
+}
+function teamCentroidAtt(pos, k, f) {
+  let sx = 0, sy = 0, n = 0;
+  pos.forEach((p, i) => { if (p && i < NS - 1 && D.team[i] === k && !KEEP.has(i)) { const q = toAtt(p, k, f); sx += q[0]; sy += q[1]; n++; } });
+  return n >= 7 ? [sx / n, sy / n] : null;
+}
+function draw() {
+  drawTimeline();
+  const g = pitchGeom(pc), { c, X, Y, s } = g;
+  drawLines(g);
+  const p = P[sel], col = TEAMCOL();
+  // attack arrows
+  c.font = `600 12px ${css('--display')}`;
+  [0, 1].forEach(k => {
+    const sg = signOf(frame, k), y = k ? g.h - 4 : 13;
+    c.textAlign = sg > 0 ? 'left' : 'right';
+    const txt = (sg > 0 ? '' : '← ') + D.teams[k] + ' attack' + (sg > 0 ? ' →' : ''), tw = c.measureText(txt).width;
+    const x0 = sg > 0 ? 14 : g.w - 14 - tw;
+    c.fillStyle = 'rgba(0,0,0,.35)'; c.fillRect(x0 - 4, y - 11, tw + 8, 15);
+    c.fillStyle = col[k]; c.fillRect(x0 - 4, y - 11, 3, 15);
+    c.fillStyle = '#fff'; c.fillText(txt, sg > 0 ? 14 : g.w - 14, y);
+  });
+  c.textAlign = 'left';
+  const pos = posAt(frame);
+  if (!pos) { $('clock').textContent = clock(frame); return; }
+  // ball trail
+  if ($('trail').checked) {
+    c.strokeStyle = css('--ball'); c.lineWidth = 1.5; c.globalAlpha = .55; c.beginPath();
+    let started = false;
+    for (let f = frame - 3 * FPS; f <= frame; f += STEP) {
+      const q = posAt(f); const b = q && q[NS - 1];
+      if (b) { started ? c.lineTo(X(b[0]), Y(b[1])) : c.moveTo(X(b[0]), Y(b[1])); started = true; } else started = false;
+    }
+    c.stroke(); c.globalAlpha = 1;
+  }
+  // autopsy ghosts: near the moment 5 s before the loss, show where each role usually stands
+  const to = T.find(t => t.phase === sel);
+  if (to && $('ghost').checked && Math.abs(frame - to.before) <= FPS * 1.5) {
+    const k = to.team, tpl = D.templates[`${k}_${to.pre_state}`], cen = teamCentroidAtt(pos, k, frame);
+    if (cen) {
+      const flagged = new Set(to.flagged.map(f => f.slot));
+      to.roles_before.forEach(([slot, j]) => {
+        const home = fromAtt([cen[0] + tpl.T[j][0], cen[1] + tpl.T[j][1]], k, frame);
+        const cur = pos[slot];
+        c.setLineDash([3, 3]); c.strokeStyle = flagged.has(slot) ? css('--ball') : css('--chalk'); c.lineWidth = flagged.has(slot) ? 2 : 1;
+        c.beginPath(); c.arc(X(home[0]), Y(home[1]), 7, 0, 7); c.stroke();
+        if (cur) { c.beginPath(); c.moveTo(X(home[0]), Y(home[1])); c.lineTo(X(cur[0]), Y(cur[1])); c.stroke(); }
+        c.setLineDash([]);
+        if (flagged.has(slot)) {
+          c.fillStyle = css('--ball'); c.font = `500 11px ${css('--body')}`;
+          c.fillText(tpl.names[j], X(home[0]) + 9, Y(home[1]) - 6);
+        }
+      });
+    }
+  }
+  // players
+  pos.forEach((q, i) => {
+    if (!q || i === NS - 1) return;
+    const k = D.team[i];
+    c.beginPath(); c.arc(X(q[0]), Y(q[1]), 5.5, 0, 7);
+    c.fillStyle = col[k]; c.fill();
+    c.lineWidth = KEEP.has(i) ? 2.5 : 1; c.strokeStyle = KEEP.has(i) ? css('--ball') : 'rgba(255,255,255,.9)'; c.stroke();
+  });
+  const b = pos[NS - 1];
+  if (b) { c.beginPath(); c.arc(X(b[0]), Y(b[1]), 4, 0, 7); c.fillStyle = css('--ball'); c.fill(); c.strokeStyle = '#111'; c.lineWidth = 1; c.stroke(); }
+  // label
+  let lab = frame < p.a ? 'before the spell' : frame > p.b ? (p.lost === 'open' ? 'after the turnover' : 'after the spell') : `${D.teams[p.team]} in possession`;
+  if (to && Math.abs(frame - to.before) <= FPS * 1.5) lab = `autopsy moment: ${to.before_s} s before the loss`;
+  if (to && frame > to.f && frame <= to.f + 6 * FPS) lab = `+${((frame - to.f) / FPS).toFixed(1)} s after the loss`;
+  c.font = `500 12px ${css('--mono')}`; c.fillStyle = 'rgba(255,255,255,.92)';
+  c.fillText(lab, 14, g.h - 22);
+  $('clock').textContent = clock(frame);
+  $('scrub').value = Math.round(1000 * (frame - win[0]) / (win[1] - win[0]));
+  syncVideo();
+}
+
+// ---------- phase card ----------
+function zoneText(p) { if (!p) return 'unknown'; const t = p[0] < L / 3 ? 'own third' : p[0] < 2 * L / 3 ? 'middle third' : 'final third'; const l = p[1] > W / 6 ? 'left' : p[1] < -W / 6 ? 'right' : 'centre'; return `${t}, ${l}`; }
+function card() {
+  const p = P[sel], to = T.find(t => t.phase === sel), k = p.team;
+  const won = p.won === 'open' ? 'Won in open play' : p.won === 'restart' ? (p.restart || 'Restart') : 'Kick-off';
+  const lost = p.lost === 'open' ? '<span class="pill bad">turnover</span>' : p.lost === 'stoppage' ? '<span class="pill mid">ball dead</span>' : '<span class="pill">end</span>';
+  let h = `<div class="nav"><button id="prev" aria-label="Previous spell">◀</button><button id="next" aria-label="Next spell">▶</button>
+    <span class="eyebrow">Spell ${sel + 1} of ${P.length} · ${p.clock}</span></div>
+    <h2 class="${k ? 'away' : 'home'}">${D.teams[k]}, ${p.dur} s ${lost}</h2>
+    <div class="summary">${p.summary}</div>
+    <div class="kv">
+      <div><span>How it started</span><b>${won}</b></div>
+      <div><span>Ground gained</span><b>${p.maxx != null && p.start ? Math.round(p.maxx - p.start[0]) + ' m' : '–'}</b></div>
+      <div><span>Ball tracked</span><b>${Math.round(p.ball_seen * 100)}%</b></div>
+    </div>`;
+  if (p.moments.length) h += `<div class="chips">${p.moments.map(m => `<span class="chip">${m}</span>`).join('')}</div>`;
+  if (to) {
+    const fl = to.flagged.length ? to.flagged.map(f => `<div class="flag"><i>${f.dist} m</i><span><b>${f.role}</b> was ${f.how} than usual</span></div>`).join('')
+      : '<div class="muted">Nobody was unusually far from their usual spot.</div>';
+    h += `<div class="autopsy">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline"><h3>Autopsy of the loss</h3>
+      <div class="nav"><button id="jbefore">${to.before_s} s before</button><button id="jloss">The loss</button><button id="jafter">+4 s</button></div></div>
+      <div>Lost in the <b>${to.third}</b>, ${to.lane} side, after a <b>${to.action}</b>${to.quick_loss ? ', within 5 s of winning it' : ''}.
+      ${to.shape_notes.length ? `${to.before_s} s before, the team was <b>${to.shape_notes.join(', ')}</b> compared with its usual shape on the ball.` : ''}</div>
+      ${fl}
+      <div class="kv">
+        <div><span>Behind the ball at the loss</span><b>${to.behind ?? '–'} v ${to.attackers_ahead ?? '–'}</b></div>
+        <div><span>Pressing within 10 m at +2 s</span><b>${to.press10 ?? '–'}</b></div>
+        <div><span>Started running back</span><b>${to.retreat_s != null ? to.retreat_s + ' s' : '> 10 s'}</b></div>
+      </div>
+      <div class="chips">${to.won_back5 ? '<span class="pill ok">won back within 5 s</span>' : to.won_back10 ? '<span class="pill ok">won back within 10 s</span>' : ''}
+        ${to.danger ? `<span class="pill bad">${D.teams[1 - k]} reached the final third</span>` : '<span class="pill ok">no danger after</span>'}</div>
+    </div>`;
+  }
+  $('card').innerHTML = h;
+  $('prev').onclick = () => select(Math.max(0, sel - 1));
+  $('next').onclick = () => select(Math.min(P.length - 1, sel + 1));
+  if (to) {
+    $('jbefore').onclick = () => { pause(); frame = to.before; draw(); };
+    $('jloss').onclick = () => { pause(); frame = to.f; draw(); };
+    $('jafter').onclick = () => { pause(); frame = Math.min(win[1], to.f + 4 * FPS); draw(); };
+  }
+}
+
+function select(i, at) {
+  sel = i; const p = P[i];
+  win = [Math.max(H[halfOf(p.a)][0], p.a - 3 * FPS), Math.min(H[halfOf(p.a)][1], p.b + 6 * FPS)];
+  frame = at ?? p.a;
+  try { history.replaceState(null, '', '#spell-' + (i + 1)); } catch (e) {}
+  card(); draw(); markLists();
+}
+
+// ---------- playback ----------
+let last = 0;
+function tick(ts) {
+  if (!playing) return;
+  const dt = last ? (ts - last) / 1000 : 0; last = ts;
+  frame += dt * FPS * speed;
+  if (frame >= win[1]) { frame = win[1]; pause(); }
+  draw();
+  if (playing) requestAnimationFrame(tick);
+}
+function play() { if (frame >= win[1] - 1) frame = win[0]; playing = true; last = 0; $('play').textContent = '❚❚ Pause'; requestAnimationFrame(tick); }
+function pause() { playing = false; $('play').textContent = '▶ Play'; }
+$('play').onclick = () => playing ? pause() : play();
+$('speed').onclick = () => { speed = speed === 1 ? 2 : speed === 2 ? 4 : speed === 4 ? 0.5 : 1; $('speed').textContent = speed + '×'; };
+$('scrub').oninput = e => { pause(); frame = win[0] + (win[1] - win[0]) * e.target.value / 1000; draw(); };
+$('ghost').onchange = draw; $('trail').onchange = draw;
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') return;
+  if (e.code === 'Space') { e.preventDefault(); playing ? pause() : play(); }
+  else if (e.key === 'ArrowRight') { pause(); frame = Math.min(win[1], frame + (e.shiftKey ? FPS : STEP)); draw(); }
+  else if (e.key === 'ArrowLeft') { pause(); frame = Math.max(win[0], frame - (e.shiftKey ? FPS : STEP)); draw(); }
+  else if (e.key === ']' || e.key === 'n') select(Math.min(P.length - 1, sel + 1));
+  else if (e.key === '[' || e.key === 'p') select(Math.max(0, sel - 1));
+});
+
+// optional video: works when the page sits in data/viz/ beside ../tactical/BAR-ATH_tactical.mp4
+const video = $('video');
+let haveVideo = false;
+video.addEventListener('loadedmetadata', () => { haveVideo = true; video.hidden = false; syncVideo(true); });
+video.addEventListener('error', () => { video.hidden = true; });
+try { if (location.protocol === 'file:' || location.hostname === 'localhost') video.src = '../tactical/BAR-ATH_tactical.mp4'; } catch (e) {}
+function syncVideo(force) {
+  if (!haveVideo) return;
+  const t = (frame + 0.5) / FPS;
+  if (force || Math.abs(video.currentTime - t) > 0.25) video.currentTime = t;
+}
+
+// ---------- autopsy section ----------
+let team = 0, pattern = null;
+function stats() {
+  const ts = T.filter(t => t.team === team);
+  const med = a => { const b = a.filter(v => v != null).sort((x, y) => x - y); return b.length ? b[Math.floor(b.length / 2)] : null; };
+  const pct = f => Math.round(100 * ts.filter(f).length / ts.length) + '%';
+  const press = ts.filter(t => t.press10 != null);
+  $('stats4').innerHTML = `
+    <div><b>${ts.length}</b><span>balls lost in open play</span></div>
+    <div><b>${med(ts.map(t => t.retreat_s))?.toFixed(1)} s</b><span>median time before the team starts running back</span></div>
+    <div><b>${(press.reduce((a, t) => a + t.press10, 0) / press.length).toFixed(1)}</b><span>players within 10 m of the ball 2 s after losing it</span></div>
+    <div><b>${pct(t => t.won_back5)} · ${pct(t => t.danger)}</b><span>won back within 5 s · opponent reached the final third</span></div>`;
+}
+function patterns() {
+  const ps = D.patterns.filter(p => p.team === team);
+  $('pats').innerHTML = ps.map((p, i) => `<div class="row${pattern === i ? ' sel' : ''}" tabindex="0" data-i="${i}">
+      <span class="num muted">${p.n}</span>
+      <span><div>Lost ${p.text}</div><div class="bar" style="width:${Math.round(p.danger * 100)}%;background:var(--away)"></div></span>
+      <span class="num muted" title="opponent reached the final third">${Math.round(p.danger * 100)}%</span></div>`).join('');
+  $('pats').querySelectorAll('.row').forEach(r => {
+    const go = () => { const i = +r.dataset.i; pattern = pattern === i ? null : i; patterns(); tos(); };
+    r.onclick = go; r.onkeydown = e => { if (e.key === 'Enter') go(); };
+  });
+}
+function currentTos() {
+  const ps = D.patterns.filter(p => p.team === team);
+  const ids = pattern != null ? new Set(ps[pattern].ids) : null;
+  return T.filter(t => t.team === team && (!ids || ids.has(t.i)));
+}
+function tos() {
+  const ts = currentTos(), col = TEAMCOL();
+  $('maptitle').textContent = pattern != null ? `Lost ${D.patterns.filter(p => p.team === team)[pattern].text}` : `Where ${D.teams[team]} lost the ball`;
+  $('tos').innerHTML = ts.map(t => `<div class="trow${t.phase === sel ? ' sel' : ''}" data-p="${t.phase}">
+     <span class="num muted">${t.clock}</span><span class="dot" style="background:${t.danger ? 'var(--away)' : 'transparent'};border:1.5px solid var(--away)"></span>
+     <span>${t.third}, ${t.lane} · ${t.action}${t.flagged.length ? ` · <span style="color:var(--warn)">${t.flagged[0].role} off</span>` : ''}</span>
+     <span class="num muted">${t.retreat_s != null ? t.retreat_s + ' s' : ''}</span></div>`).join('');
+  $('tos').querySelectorAll('.trow').forEach(r => r.onclick = () => {
+    const ph = +r.dataset.p, t = T.find(x => x.phase === ph);
+    select(ph, t.before); $('pitch').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  // map
+  const g = pitchGeom($('tomap')), { c, X, Y } = g;
+  drawLines(g);
+  c.fillStyle = 'rgba(255,255,255,.85)'; c.font = `600 12px ${css('--display')}`;
+  c.fillText(`${D.teams[team]} attacking →`, 14, 13);
+  ts.forEach(t => {
+    const x = t.at[0], y = W / 2 - t.at[1];
+    c.beginPath(); c.arc(X(x), Y(y), t.phase === sel ? 7 : 5, 0, 7);
+    c.lineWidth = 2; c.strokeStyle = css('--away'); c.stroke();
+    if (t.danger) { c.fillStyle = css('--away'); c.fill(); }
+    if (t.phase === sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.arc(X(x), Y(y), 10, 0, 7); c.stroke(); }
+  });
+}
+function markLists() {
+  const t = T.find(x => x.phase === sel);
+  if (t && t.team !== team) { team = t.team; pattern = null; tabs(); stats(); patterns(); }
+  tos();
+}
+function tabs() {
+  $('teamtabs').innerHTML = [0, 1].map(k => `<button class="${k === team ? 'on' : ''}" data-k="${k}">${D.teams[k]}</button>`).join('');
+  $('teamtabs').querySelectorAll('button').forEach(b => b.onclick = () => { team = +b.dataset.k; pattern = null; tabs(); stats(); patterns(); tos(); });
+}
+const tomap = $('tomap');
+tomap.addEventListener('click', e => {
+  const r = tomap.getBoundingClientRect(), g = { w: r.width }, pad = 10, sx = (r.width - 20) / L, sy = (r.width * W / L - 20) / W;
+  const x = (e.clientX - r.left - pad) / sx, y = (e.clientY - r.top - pad) / sy;
+  let best = null, bd = 6;
+  currentTos().forEach(t => { const d = Math.hypot(t.at[0] - x, (W / 2 - t.at[1]) - y); if (d < bd) { bd = d; best = t; } });
+  if (best) select(best.phase, best.before);
+});
+
+// ---------- start ----------
+tabs(); stats(); patterns();
+const m = /^#spell-(\d+)$/.exec(location.hash);
+const firstLoss = T.find(t => t.flagged.length && t.danger) || T[0];
+if (m && +m[1] >= 1 && +m[1] <= P.length) select(+m[1] - 1); else select(firstLoss.phase, firstLoss.before);
+window.addEventListener('resize', () => { draw(); tos(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { draw(); tos(); });
+loadTracking();
+</script>
