@@ -185,6 +185,7 @@ function signOf(f, k) { return D.sign[halfOf(f)][k]; }
 // ---------- tracking ----------
 let TR = null; const NS = D.nslots;
 async function loadTracking() {
+  if (!TRACK_B64) { ['play', 'speed', 'scrub'].forEach(id => $(id).hidden = true); $('ghost').parentElement.hidden = true; $('trail').parentElement.hidden = true; $('loading').textContent = 'Shared version: no replay, because the tracking stays local (see story/README.md). The pitch shows where the spell started (ring) and ended (cross).'; draw(); return; }
   const bin = Uint8Array.from(atob(TRACK_B64), c => c.charCodeAt(0));
   try {
     const ds = new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'));
@@ -236,7 +237,7 @@ const P = D.phases, T = D.turnovers;
   const tot = dur[0] + dur[1];
   const lost = [0, 1].map(k => T.filter(t => t.team === k).length);
   $('share').innerHTML = [0, 1].map(k => `<div><span class="eyebrow">${D.teams[k]}</span><b class="${k ? 'away' : 'home'}">${Math.round(100 * dur[k] / tot)}%</b><span class="muted" style="font-size:12px">${P.filter(p => p.team === k).length} spells · ${lost[k]} lost in play</span></div>`).join('');
-  $('foot').textContent = `Possession comes from our model's labels (${D.labels_file}), not from an event feed, so a few spells, mostly under 3 s, will be wrong. Tracker slots are not named players, so players are described by the role they were playing: each team's usual shape with and without the ball is learned from this match, and a player counts as out of position when they are further from their role's usual spot than 9 times in 10. Tags (build-up, chance created, restart types) come from the provider's Smart Tagging.`;
+  $('foot').textContent = `Possession comes from our model's labels (${D.labels_file}), not from an event feed, so a few spells, mostly under 3 s, will be wrong. Tracker slots are not named players, so players are described by the role they were playing: each team's usual shape with and without the ball is learned from this match, and a player counts as out of position when they are further from their role's usual spot than 9 times in 10. Tags (build-up, chance created, restart types) come from the provider's Smart Tagging. Short spells are the model's weak spot: in the public 5 minutes the file draws 4 spells under 5 s where the truth has 6, so it does not overcount them there, but which ones it draws is less certain.`;
 })();
 
 // ---------- timeline ----------
@@ -342,7 +343,23 @@ function draw() {
   });
   c.textAlign = 'left';
   const pos = posAt(frame);
-  if (!pos) { $('clock').textContent = clock(frame); return; }
+  if (!pos) {
+    const k = p.team;
+    const mark = (q, f, cross) => {
+      if (!q) return;
+      const xy = fromAtt([q[0], q[1]], k, f), x = X(xy[0]), y = Y(xy[1]);
+      c.strokeStyle = col[k]; c.lineWidth = 3;
+      if (cross) { c.beginPath(); c.moveTo(x - 6, y - 6); c.lineTo(x + 6, y + 6); c.moveTo(x + 6, y - 6); c.lineTo(x - 6, y + 6); c.stroke(); }
+      else { c.beginPath(); c.arc(x, y, 7, 0, 7); c.stroke(); }
+    };
+    if (p.start && p.end) {
+      const s0 = fromAtt(p.start, k, p.a), e0 = fromAtt(p.end, k, p.b);
+      c.setLineDash([4, 4]); c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(X(s0[0]), Y(s0[1])); c.lineTo(X(e0[0]), Y(e0[1])); c.stroke(); c.setLineDash([]);
+    }
+    mark(p.start, p.a, false); mark(p.end, p.b, true);
+    $('clock').textContent = clock(frame); return;
+  }
   // ball trail
   if ($('trail').checked) {
     c.strokeStyle = css('--ball'); c.lineWidth = 1.5; c.globalAlpha = .55; c.beginPath();

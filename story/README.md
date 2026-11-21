@@ -4,8 +4,9 @@ A first sketch for the Part 2 Innovation Challenge: one page that tells BAR-ATH 
 possession spells and takes apart every ball lost in open play.
 
 ```bash
-python story/build.py                 # -> data/viz/story.html (about 2 MB, self-contained)
-python story/build.py --labels other.csv --json /tmp/story.json
+python story/make_story.py                 # -> data/viz/story.html (about 2 MB, LOCAL ONLY: has the tracking)
+python story/make_story.py --no-tracking --out story_shared.html   # 0.3 MB, no replay: the one to share
+python story/make_story.py --labels other.csv --json /tmp/story.json
 ```
 
 Needs numpy, scipy and kloppy (for `possession/load.py`), plus the BAR-ATH files in `data/tactical/`.
@@ -17,7 +18,13 @@ Runs in about 10 s. Default labels: the file we submitted (`final/Gambtt_submitt
   Athletic below, open-play turnovers ticked. Click a spell to replay it.
 - **Replay.** A top-down pitch at 5 Hz (interpolated) from 3 s before the spell to 6 s after it, with
   a ball trail. Opened from `data/viz/` on the laptop it also finds `../tactical/BAR-ATH_tactical.mp4`
-  and shows the video in sync; published as an artifact it shows the pitch only.
+  and shows the video in sync.
+
+**Keep the full page local.** It embeds every slot and the ball at 5 Hz, and RULES.md forbids
+publishing derived data that would reconstruct the tracking ("frame-level tracking exports"). Anything
+shared, with judges or as a link, is built with `--no-tracking`: same timeline, summaries, autopsy,
+patterns and loss map, and the pitch shows only where each spell started and ended. Ask the
+organisers before sharing anything with the tracking in it.
 - **Spell card.** A generated summary (how it was won: open play or which restart from Smart
   Tagging; how far the ball got; how it ended; tagged moments), plus the autopsy when it ended in a
   turnover.
@@ -43,6 +50,15 @@ Runs in about 10 s. Default labels: the file we submitted (`final/Gambtt_submitt
 Left and right are checked against Smart Tagging's "Side" on final-third entries (32 of 33 agree).
 
 ## Caveats
+
+Short `X` gaps (up to 60 s) carry the previous label forward before spells are cut, as the scorer
+does (`submission/make_submission.fill_short_abstentions`); the submitted file has none inside the
+halves, so its counts do not change.
+
+Spell lengths are model output. "Lost within 5 s of winning it" and "won back within 5 s" rest on
+short spells, the model's weak spot. In the public 5 minutes the file draws 4 spells under 5 s
+where the truth has 6, so it does not overcount them there, but 5 minutes is a small sample and
+which short spells it draws is less certain. Quote those numbers as model output.
 
 Possession comes from our model, not events, so some short spells are wrong (the model's weak
 spot). The 4 s team reaction found earlier (alldata/react/) is measured differently: there, the

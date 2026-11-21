@@ -1,7 +1,7 @@
 """Possession story timeline and turnover autopsy for BAR-ATH, as one self-contained HTML page.
 
-    python story/build.py                                  # -> data/viz/story.html
-    python story/build.py --labels my_labels.csv --out /tmp/story.html
+    python story/make_story.py                                  # -> data/viz/story.html
+    python story/make_story.py --labels my_labels.csv --out /tmp/story.html
 
 Reads the tracking (possession/load.py, keepers corrected), a frame,label possession file (default:
 the file we submitted, /mnt/project-files/final/Gambtt_submitted.csv, or data/final/ on a laptop)
@@ -36,6 +36,8 @@ sys.path.insert(0, os.path.join(ROOT, "possession"))
 import load  # noqa: E402
 import keepers as KP  # noqa: E402
 from games import require  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, "submission"))
+from make_submission import fill_short_abstentions  # noqa: E402
 
 FPS = 25
 STEP = 5                       # tracking sent to the page every 5 frames (5 Hz)
@@ -83,7 +85,9 @@ class Match:
         n = len(self.xy)
         lab = np.loadtxt(labels_path, dtype=str, delimiter=",", skiprows=1)[:, 1]
         assert len(lab) == n, (len(lab), n)
-        self.lab = lab
+        # short X gaps carry the previous label forward, as the scorer does; long ones (before
+        # kick-off, half-time, after the whistle) stay breaks
+        self.lab = np.array(fill_short_abstentions(list(lab), 60 * FPS))
         self.outfield = np.array([k not in self.keepers for k in range(len(self.team))])
         # attack sign per team per frame: +1 if the team attacks towards x = L
         self.half_of = np.full(n, -1)
@@ -310,7 +314,7 @@ def build_phases(m, tags):
     runs = runs_of(m.lab)
     phases = []
     for i, (lb, a, b) in enumerate(runs):
-        if lb not in "HA":
+        if lb not in "HA" or m.half_of[a] < 0:
             continue
         k = 0 if lb == "H" else 1
         prev = runs[i - 1] if i > 0 else None
@@ -590,7 +594,13 @@ def main():
     ap.add_argument("--labels", default=default_labels())
     ap.add_argument("--out", default=os.path.join(ROOT, "data", "viz", "story.html"))
     ap.add_argument("--json", default=None, help="also write the analysis as JSON here")
+    ap.add_argument("--no-tracking", action="store_true",
+                    help="leave the tracking out (no replay): the version that may be shared, since RULES.md "
+                         "forbids publishing frame-level tracking exports")
     args = ap.parse_args()
+    if not args.labels or not os.path.exists(args.labels):
+        sys.exit("no labels file: pass --labels <frame,label csv> (the default is final/Gambtt_submitted.csv "
+                 "in /mnt/project-files or data/final/)")
     m = Match(args.labels)
     tags = read_tags(require(["smart_tagging"])[0])
     agree, disagree = orientation_check(m, tags)
@@ -603,6 +613,8 @@ def main():
     tos, avg_shape = build_turnovers(m, phases, tpl, tags)
     pats = rank_patterns(tos)
     blob, frames, nslots = tracking_blob(m)
+    if args.no_tracking:
+        blob = ""
     halves_steps = [[int(a), int(b)] for a, b in m.halves]
     tags_out = [dict(code=t["code"], a=t["a"], b=t["b"], team=TAG_TEAM.get(t.get("Team"), -1),
                      type=t.get("Type")) for t in tags]
