@@ -5,7 +5,7 @@ possession spells and takes apart every ball lost in open play.
 
 ```bash
 python story/make_story.py                 # -> data/viz/story.html (about 2 MB, LOCAL ONLY: has the tracking)
-python story/make_story.py --no-tracking --out story_shared.html   # 0.3 MB, no replay: the one to share
+python story/make_story.py --no-tracking --out data/viz/story_shared.html   # 0.3 MB, no replay: the one to share
 python story/make_story.py --labels other.csv --json /tmp/story.json
 ```
 
